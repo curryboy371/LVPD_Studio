@@ -1,0 +1,32 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# --- IDEs ---
+
+.idea/
+
+# --- Project Specific (LVPD Studio) ---
+# 데이터 원본 및 임시 엑셀 파일
+*.xlsx
+!video_data.xlsx  # 템플릿으로 쓸 데이터라면 제외(!)를 통해 포함 가능
+
+# 녹화 결과물
+release/
+output/
+
+#리소스
+resource
+
+# 로그 및 환경 설정
+*.log
+.env
+config.ini
+
+# --- OS ---
+.DS_Store
+Thumbs.db
