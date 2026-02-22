@@ -10,6 +10,21 @@ try:
 except ImportError:
     G2pM = None  # type: ignore[misc, assignment]
 
+# 발음 변화 타입 테이블: UI에서 성조 아이콘 위에 노란색으로 표시할 라벨
+# bu/yi는 뒤 음절 성조에 따라 2성·4성으로 세분화
+SANDHI_TYPE_LABELS: dict[str, str] = {
+    # 不: 4성 앞 → 2성 / 그 외 → 4성
+    "bu_to_2": "* 不 (4성 앞 → 2성)",
+    "bu_to_4": "* 不 (그 외 → 4성)",
+    # 一: 4성 앞 → 2성 / 1·2·3성 앞 → 4성
+    "yi_to_2": "* 一 (4성 앞 → 2성)",
+    "yi_to_4": "* 一 (1·2·3성 앞 → 4성)",
+    "tone3_2": "* 3성+3성 -> 2성+3성",
+    "tone3_half": "* 반3성",
+    "reduplication": "* 중첩(경성)",
+    "neutral_char": "* 경성(어기)",
+}
+
 
 class PinyinProcessor:
     """중국어 문장을 표기/발음 병음 및 성조 기호 문자열로 변환하는 프로세서."""
@@ -92,10 +107,10 @@ class PinyinProcessor:
         raw = [p for p in self.g2p(text) if p.strip()]
         return self._merge_orphan_tone_digits(raw)
 
-    def get_phonetic_pinyin(self, text: str) -> list[str]:
-        """발음상 병음 (변조 및 반3성 3.5 적용)."""
+    def _get_phonetic_pinyin_and_types(self, text: str) -> tuple[list[str], list[Optional[str]]]:
+        """발음상 병음 리스트와 음절별 성조변화 타입 리스트를 함께 반환. (내부 공용)"""
         if not self.g2p:
-            return []
+            return [], []
         raw_pys = self._merge_orphan_tone_digits([p for p in self.g2p(text) if p.strip()])
         seq: list[dict] = []
         char_idx = 0
@@ -106,23 +121,37 @@ class PinyinProcessor:
             base, tone = self._split_tone(p)
             if tone is None:
                 tone = 0
-            seq.append({"char": char, "base": base, "tone": tone})
+            seq.append({"char": char, "base": base, "tone": tone, "sandhi_type": None})
             char_idx += 1
 
         for item in seq:
             if item["char"] in self.neutral_chars:
                 item["tone"] = 5
+                item["sandhi_type"] = "neutral_char"
 
         for i in range(len(seq) - 1):
             if seq[i]["char"] == "不":
-                seq[i]["tone"] = 2 if seq[i + 1]["tone"] == 4 else 4
+                if seq[i + 1]["tone"] == 4:
+                    seq[i]["tone"] = 2
+                    seq[i]["sandhi_type"] = "bu_to_2"
+                else:
+                    seq[i]["tone"] = 4
+                    seq[i]["sandhi_type"] = "bu_to_4"
 
         for i in range(len(seq) - 1):
             if seq[i]["char"] == "一":
                 if seq[i + 1]["tone"] == 4:
                     seq[i]["tone"] = 2
+                    seq[i]["sandhi_type"] = "yi_to_2"
                 elif seq[i + 1]["tone"] in [1, 2, 3, 3.5]:
                     seq[i]["tone"] = 4
+                    seq[i]["sandhi_type"] = "yi_to_4"
+
+        # 중첩동사/중첩형: 같은 글자 연속이면 뒤 음절 발음을 경성(5)으로
+        for i in range(len(seq) - 1):
+            if seq[i]["char"] == seq[i + 1]["char"]:
+                seq[i + 1]["tone"] = 5
+                seq[i + 1]["sandhi_type"] = "reduplication"
 
         # 3성 변조: 3+3 → 앞을 2성으로 / 3+(1,2,4,5) → 앞을 반3성(3.5)으로
         for i in range(len(seq) - 2, -1, -1):
@@ -130,26 +159,39 @@ class PinyinProcessor:
                 next_t = seq[i + 1]["tone"]
                 if next_t == 3:
                     seq[i]["tone"] = 2  # 3+3: 앞 음절만 2성으로
+                    seq[i]["sandhi_type"] = "tone3_2"
                 elif next_t in [1, 2, 4, 5]:
                     seq[i]["tone"] = 3.5  # 3+그 외: 반3성 (少+钱 → shao3.5)
+                    seq[i]["sandhi_type"] = "tone3_half"
 
         final_seq: list[str] = []
+        sandhi_types: list[Optional[str]] = []
         for i, item in enumerate(seq):
             base = item["base"]
             if item["char"] == "儿" and i > 0 and item["tone"] == 5:
                 last = final_seq[-1]
                 final_seq[-1] = last[:-1] + "r" + last[-1]
             elif not self._is_pinyin_syllable(base):
-                # 비병음(물음표 등): 성조 숫자 붙이지 않음, 끝 숫자 제거
                 final_seq.append(re.sub(r"[0-5]$", "", base))
+                sandhi_types.append(item.get("sandhi_type"))
             else:
                 t = item["tone"]
                 if t is None:
                     t = 0
                 tone_val = str(t) if t == 3.5 else str(int(t))
                 final_seq.append(f"{base}{tone_val}")
+                sandhi_types.append(item.get("sandhi_type"))
+        return final_seq, sandhi_types
 
-        return final_seq
+    def get_phonetic_pinyin(self, text: str) -> list[str]:
+        """발음상 병음 (변조 및 반3성 3.5 적용)."""
+        syllables, _ = self._get_phonetic_pinyin_and_types(text)
+        return syllables
+
+    def get_sandhi_types(self, text: str) -> list[Optional[str]]:
+        """음절별 성조 변화 타입 (get_phonetic_pinyin과 동일 순서/길이). 표시용 키: bu, yi, tone3_2, tone3_half, reduplication, neutral_char."""
+        _, types = self._get_phonetic_pinyin_and_types(text)
+        return types
 
     def full_convert(self, text: str) -> str:
         """표기상 병음을 성조 기호로 변환 (pinyin_marks용). 발음 변조 없음."""
@@ -226,6 +268,7 @@ __all__ = [
     "parse_tone_from_syllable",
     "diff_lexical_phonetic",
     "diff_lexical_phonetic_per_syllable",
+    "SANDHI_TYPE_LABELS",
 ]
 
 

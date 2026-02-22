@@ -16,7 +16,12 @@ import pygame
 
 from core.paths import STUDIO_HEIGHT, STUDIO_VIDEO_FALLBACK_FPS, STUDIO_WIDTH
 from utils.fonts import load_font_chinese, load_font_chinese_freetype, load_font_korean
-from utils.pinyin_processor import diff_lexical_phonetic_per_syllable, parse_tone_from_syllable
+from utils.pinyin_processor import (
+    SANDHI_TYPE_LABELS,
+    diff_lexical_phonetic_per_syllable,
+    get_pinyin_processor,
+    parse_tone_from_syllable,
+)
 
 from studio.recording_events import (
     VideoSegmentStart,
@@ -38,12 +43,21 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
         return []
     segments = content.video_segments
     overlays = content.overlay_items
+    audio_tracks = getattr(content, "audio_tracks", []) or []
     n = min(len(segments), len(overlays))
+    processor = get_pinyin_processor()
     out = []
     for i in range(n):
         seg = segments[i]
         ov = overlays[i]
-        # seg.file_path는 이미 get_loaded_content()에서 resource/... 를 repo 기준으로 해석한 경로
+        sen_raw = ov.sentence or ov.text
+        if isinstance(sen_raw, list):
+            sen_str = str(sen_raw[0]) if sen_raw else ""
+        else:
+            sen_str = str(sen_raw or "")
+        pinyin_sandhi_types = processor.get_sandhi_types(sen_str) if sen_str and processor.available else []
+        sound_l1 = audio_tracks[2 * i].sound_path if len(audio_tracks) > 2 * i else ""
+        sound_l2 = audio_tracks[2 * i + 1].sound_path if len(audio_tracks) > 2 * i + 1 else ""
         out.append({
             "video_path": seg.file_path or "",
             "start_time": seg.start_time,
@@ -53,6 +67,9 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
             "pinyin": (ov.pinyin or "").strip(),  # 성조표기병음 (성조 기호)
             "pinyin_phonetic": (ov.pinyin_phonetic or "").strip(),  # 발음 병음
             "pinyin_lexical": (ov.pinyin_lexical or "").strip(),  # 표기 병음
+            "pinyin_sandhi_types": pinyin_sandhi_types,  # 음절별 성조변화 타입 (표시용)
+            "sound_l1": sound_l1,
+            "sound_l2": sound_l2,
             "id": str(i),
             "topic": "",
             "index": i,
@@ -533,6 +550,21 @@ class ConversationStudio:
         self._last_sync_pts: float = -10.0
         self._recording_initial_logged: bool = False
         self._shadowing_step: int = 1  # 셰도잉 훈련 단계 (1=원어민 속도로 듣기)
+        self._tone_surfaces: dict[str, Any] = {}  # tone 파일명 -> Surface (resource/image/icon)
+        self._listen_panda_surface: Any = None  # 듣기 이미지 영역용 (스케일 캐시)
+        self._listen_panda_cached_size: tuple[int, int] = (0, 0)
+        # Step 1: UI 일괄 on/off. 영상 재생 중엔 off, 멈추면 서서히 어둡게 한 뒤 on
+        self._ui_visible: bool = False
+        self._fade_alpha: float = 0.0  # 0~75%, 멈춤 시 증가 후 UI on
+        self._fade_overlay_surface: Any = None
+        self._fade_overlay_size: tuple[int, int] = (0, 0)
+        # Step 1 테이블 사운드: 이번 일시정지에서 L1→L2 한 번만 재생
+        self._step1_sound_schedule: Optional[str] = None  # None | "playing_l1"(L1 재생 중, 끝나면 L2)
+        self._step1_l1_channel: Any = None  # L1 재생 채널 (get_busy()로 종료 감지)
+        self._step1_sounds_played_this_pause: bool = False  # 이번 pause에서 이미 L1/L2 재생했으면 True
+        # 녹화 모드: 이전 프레임 상태 (세그먼트·일시정지 전환 시 이벤트 로그용)
+        self._last_recording_seg_idx: int = -1
+        self._last_recording_paused: bool = False
         if self._data_list:
             item = self._data_list[0]
             path = self._resolve_video_path(item.get("video_path") or "")
@@ -550,6 +582,12 @@ class ConversationStudio:
             return path
         resolved = _REPO_ROOT / path.replace("\\", "/")
         return str(resolved)
+
+    def set_ui_visible(self, visible: bool) -> None:
+        """Step 1 UI(타이틀·병음·한자·해석·듣기 이미지 등)를 한꺼번에 on/off."""
+        self._ui_visible = visible
+        if not visible:
+            self._fade_alpha = 0.0
 
     def _current_segment_times(self) -> tuple[float, float]:
         """현재 항목의 start_time, end_time. 없으면 (0.0, -1.0)."""
@@ -705,9 +743,16 @@ class ConversationStudio:
             dt = 1.0 / 30.0
             if config is not None and getattr(config, "dt_sec", None):
                 dt = config.dt_sec
-            self._video_player.tick(dt)
-            if not self._video_player.is_paused():
-                self._sync_audio_to_video()
+            # 녹화(배치) 모드: recording_time_sec으로 세그먼트·일시정지·fade·UI 동기화 → 디버그 출력과 동일한 프레임 생성
+            if config is not None and is_recording(config) and self._data_list:
+                self._sync_recording_timeline(config)
+            else:
+                self._video_player.tick(dt)
+                if not self._video_player.is_paused():
+                    self._sync_audio_to_video()
+            # Step 1: 전용 제어 (fade, UI on/off, 테이블 사운드 L1 → L2). 녹화 모드에선 _sync_recording_timeline에서 이미 반영
+            if self._shadowing_step == 1 and not (config and is_recording(config)):
+                self._update_step1(config)
             # 세그먼트 end_time 도달 시 오디오도 일시정지 (비디오는 tick()에서 이미 정지됨)
             _, end_sec = self._current_segment_times()
             if end_sec >= 0 and self._video_player.get_pts() >= end_sec:
@@ -743,6 +788,138 @@ class ConversationStudio:
         if abs(drift) > 0.15:
             self._video_audio.seek_to(video_pts)
         self._last_sync_pts = video_pts
+
+    def _sync_recording_timeline(self, config: Any) -> None:
+        """녹화(배치) 모드: recording_time_sec으로 세그먼트·일시정지·fade·UI를 동기화해 디버그와 동일한 프레임을 만든다."""
+        t = getattr(config, "recording_time_sec", 0.0)
+        data = self._data_list
+        n = len(data)
+        if n == 0:
+            return
+        # 세그먼트별 재생 구간 길이 (녹화 타임라인 상)
+        seg_durations: list[float] = []
+        for i in range(n):
+            st = data[i].get("start_time", 0.0) or 0.0
+            et = data[i].get("end_time", -1.0)
+            if et is None or et < 0:
+                et = st + 10.0
+            seg_durations.append(max(0.1, et - st))
+        # 현재 시각 t에 해당하는 세그먼트 인덱스와 구간 내 로컬 시간
+        cum = 0.0
+        seg_idx = 0
+        local_t = t
+        for i in range(n):
+            d = seg_durations[i]
+            if t < cum + d:
+                seg_idx = i
+                local_t = t - cum
+                break
+            cum += d
+        else:
+            seg_idx = n - 1
+            local_t = t - (cum - seg_durations[-1])
+        log_ev = getattr(config, "recording_log_event", None)
+        path_cur = self._resolve_video_path(data[self._current_index].get("video_path") or "")
+
+        if seg_idx != self._current_index:
+            if log_ev and path_cur:
+                recording_log_event(log_ev, VideoSegmentEnd(t))
+            self._current_index = seg_idx
+            item = data[seg_idx]
+            path = self._resolve_video_path(item.get("video_path") or "")
+            st = item.get("start_time", 0.0) or 0.0
+            et = item.get("end_time", -1.0)
+            self._video_player.set_source(path, st, et)
+            self._video_audio.set_source(path, st)
+            self._last_sync_pts = -10.0
+            self._last_recording_seg_idx = seg_idx
+            self._last_recording_paused = False
+            if log_ev and path:
+                recording_log_event(log_ev, VideoSegmentStart(t, path, st))
+        item = data[self._current_index]
+        seg_start = item.get("start_time", 0.0) or 0.0
+        path_cur = self._resolve_video_path(item.get("video_path") or "")
+        # 세그먼트 내 "일시정지" 구간: 0.5초~2.5초 (fade 후 UI 표시) → 디버그에서 멈춘 것과 동일한 화면
+        pause_start, pause_end = 0.5, 2.5
+        in_pause = pause_start <= local_t < pause_end
+        if in_pause != self._last_recording_paused:
+            if in_pause and log_ev and path_cur:
+                recording_log_event(log_ev, VideoSegmentEnd(t))
+            elif not in_pause and log_ev and path_cur:
+                recording_log_event(log_ev, VideoSegmentStart(t, path_cur, seg_start + local_t))
+            self._last_recording_paused = in_pause
+        if seg_idx != self._last_recording_seg_idx:
+            self._last_recording_seg_idx = seg_idx
+
+        if in_pause:
+            self._video_player.seek_to(seg_start + pause_start)
+            if not self._video_player.is_paused():
+                self._video_player.toggle_pause()
+            self._video_audio.pause()
+            fade_elapsed = local_t - pause_start
+            self._fade_alpha = min(191.25, fade_elapsed * 180.0)  # 180/초 ≈ 6/프레임@30fps
+            self._ui_visible = self._fade_alpha >= 191.25
+            self._step1_sound_schedule = None
+            self._step1_l1_channel = None
+        else:
+            self._video_player.seek_to(seg_start + local_t)
+            if self._video_player.is_paused():
+                self._video_player.toggle_pause()
+            self._video_audio.seek_to(seg_start + local_t)
+            self._video_audio.unpause()
+            self._fade_alpha = 0.0
+            self._ui_visible = False
+            self._step1_sound_schedule = None
+            self._step1_l1_channel = None
+            self._step1_sounds_played_this_pause = False  # 다음 멈춤에서 다시 L1→L2 재생 가능
+
+    def _update_step1(self, config: Any) -> None:
+        """Step 1 제어: 영상 멈춤 시 fade 후 UI on, 테이블 사운드 레벨1 한 번 재생 → 끝나면 레벨2 재생."""
+        if self._video_player.is_paused():
+            self._fade_alpha = min(191.25, self._fade_alpha + 6.0)
+            if self._fade_alpha >= 191.25:
+                self._ui_visible = True
+                # UI on 직후 이번 pause에서 아직 안 재생했을 때만 레벨1 한 번 재생
+                if not self._step1_sounds_played_this_pause and self._step1_sound_schedule is None and self._data_list:
+                    self._step1_sounds_played_this_pause = True
+                    item = self._data_list[self._current_index]
+                    path = (item.get("sound_l1") or "").strip()
+                    if path and os.path.exists(path):
+                        try:
+                            snd = pygame.mixer.Sound(path)
+                            ch = pygame.mixer.find_channel(True)
+                            self._step1_sound_schedule = "playing_l1"
+                            if ch is not None:
+                                ch.play(snd)
+                                self._step1_l1_channel = ch
+                            else:
+                                self._step1_l1_channel = None
+                        except Exception:
+                            self._step1_l1_channel = None
+                            self._step1_sound_schedule = "playing_l1"
+                    else:
+                        self._step1_sound_schedule = "playing_l1"
+                        self._step1_l1_channel = None
+            # L1 재생 중 → 채널이 끝나면 레벨2 한 번만 재생 후 스케줄 종료
+            if self._step1_sound_schedule == "playing_l1" and self._data_list:
+                if self._step1_l1_channel is None or not self._step1_l1_channel.get_busy():
+                    self._step1_l1_channel = None
+                    self._step1_sound_schedule = None
+                    item = self._data_list[self._current_index]
+                    path = (item.get("sound_l2") or "").strip()
+                    if path and os.path.exists(path):
+                        try:
+                            snd = pygame.mixer.Sound(path)
+                            ch = pygame.mixer.find_channel(True)
+                            if ch is not None:
+                                ch.play(snd)
+                        except Exception:
+                            pass
+        else:
+            self._fade_alpha = 0.0
+            self._ui_visible = False
+            self._step1_sound_schedule = None
+            self._step1_l1_channel = None
 
     def init(self, config: Any = None) -> None:
         """pygame.init() 이후 러너가 한 번 호출. 폰트 등 리소스 로드."""
@@ -789,9 +966,20 @@ class ConversationStudio:
         w, h = config.width, config.height
         screen.fill(config.bg_color)
 
-        # 셰도잉 Step 1: 원어민 속도로 듣기 — 좌측 이미지 영역(플레이스홀더), 중앙 병음/한자/해석, 하단 안내
+        # 셰도잉 Step 1: 백그라운드 영상 → (멈춤 시 서서히 어두운 오버레이) → UI on 시에만 병음/한자/해석
         if self._shadowing_step == 1:
-            self._draw_step1(screen, config)
+            vid_surf = self._video_player.get_frame(w, h)
+            if vid_surf is not None:
+                screen.blit(vid_surf, (0, 0))
+            if self._fade_alpha > 0:
+                if self._fade_overlay_surface is None or self._fade_overlay_size != (w, h):
+                    self._fade_overlay_surface = pygame.Surface((w, h))
+                    self._fade_overlay_surface.fill((0, 0, 0))
+                    self._fade_overlay_size = (w, h)
+                self._fade_overlay_surface.set_alpha(int(min(192, self._fade_alpha)))  # 최대 75%
+                screen.blit(self._fade_overlay_surface, (0, 0))
+            if self._ui_visible:
+                self._draw_step1(screen, config)
             self._draw_paused_and_debug(screen, config)
             return
 
@@ -873,14 +1061,43 @@ class ConversationStudio:
         sen_text = " ".join(str(x) for x in sentences) if sentences else "(문장 없음)"
         trans_text = " ".join(str(x) for x in translations) if translations else ""
 
-        # 좌측: 듣기 이미지 영역 (플레이스홀더) — 작게
+        # 상단 타이틀: 쉐도잉 훈련 Step 1: (흰색) + 원어민 속도 듣기 (주황) — bold/extrabold, 크게
+        title_font = getattr(self, "_font_step1_title", None) or load_font_korean(52, weight="bold") or load_font_korean(52, weight="extrabold") or load_font_korean(52)
+        self._font_step1_title = title_font
+        if title_font is not None:
+            cx = w // 2
+            title_y = int(h * 0.06)
+            part1 = title_font.render("쉐도잉 훈련 Step 1:", True, (255, 255, 255))
+            part2 = title_font.render(" 원어민 속도 듣기", True, (255, 140, 0))
+            r1, r2 = part1.get_rect(), part2.get_rect()
+            total_w = r1.width + r2.width
+            x1 = cx - total_w // 2
+            screen.blit(part1, (x1, title_y))
+            screen.blit(part2, (x1 + r1.width, title_y))
+
+        # 좌측: 듣기 이미지 — resource/image/icon/listen_panda.png (영역/테두리 없이 이미지만)
         left_x, left_y = config.get_pos(0.02, 0.20)
         left_w, left_h = config.get_size(0.20, 0.36)
-        pygame.draw.rect(screen, (35, 35, 45), (left_x, left_y, left_w, left_h))
-        pygame.draw.rect(screen, (80, 80, 90), (left_x, left_y, left_w, left_h), 2)
-        placeholder = font_kr.render("듣기 이미지 (추가 예정)", True, (140, 140, 150))
-        pr = placeholder.get_rect(center=(left_x + left_w // 2, left_y + left_h // 2))
-        screen.blit(placeholder, pr)
+        icon_dir = _REPO_ROOT / "resource" / "image" / "icon"
+        listen_path = icon_dir / "listen_panda.png"
+        if (self._listen_panda_cached_size != (left_w, left_h) or self._listen_panda_surface is None) and listen_path.exists():
+            try:
+                surf = pygame.image.load(str(listen_path))
+                if surf.get_alpha() is None:
+                    surf = surf.convert()
+                else:
+                    surf = surf.convert_alpha()
+                self._listen_panda_surface = pygame.transform.smoothscale(surf, (left_w, left_h))
+                self._listen_panda_cached_size = (left_w, left_h)
+            except Exception:
+                self._listen_panda_surface = None
+                self._listen_panda_cached_size = (0, 0)
+        if self._listen_panda_surface is not None:
+            screen.blit(self._listen_panda_surface, (left_x, left_y))
+        else:
+            placeholder = font_kr.render("듣기 이미지 (추가 예정)", True, (140, 140, 150))
+            pr = placeholder.get_rect(center=(left_x + left_w // 2, left_y + left_h // 2))
+            screen.blit(placeholder, pr)
 
         # 병음·한자·해석 모두 화면 가운데 정렬
         cx = w // 2
@@ -932,7 +1149,6 @@ class ConversationStudio:
             while len(diff_per) < len(syllables):
                 diff_per.append(None)
             diff_per = diff_per[: len(syllables)]
-
             def _render_syllable(font_ft: Any, font_pg: Any, text: str, color: tuple) -> tuple[Any, Any]:
                 if font_ft is not None:
                     try:
@@ -1042,12 +1258,55 @@ class ConversationStudio:
                 else:
                     pygame.draw.line(surf, line_color, (left, mid_y), (right, mid_y), line_thickness)
 
-            # 발음 라인 위치: 성조 표기 규칙으로 정확한 위치 추정 → 그 위치에만 동그라미 표시 (라인 대신)
+            # 발음 라인 위치: 성조 표기 규칙으로 정확한 위치 추정 → 그 위치에 성조 이미지 표시
             ref_phonetic_height = 28
             y_phonetic_top = y_red_top - 8 - ref_phonetic_height
             contour_bottom_y = y_phonetic_top - contour_gap
             contour_center_y = contour_bottom_y - contour_height // 2
-            circle_radius = 6
+            circle_radius = 6  # 성조 이미지 없을 때 폴백용
+            icon_dir = _REPO_ROOT / "resource" / "image" / "icon"
+
+            def _tone_to_filename(t: float) -> str:
+                """성조 값 → 아이콘 파일명 (tone1~5, tone3_5)."""
+                if t <= 0.5 or t >= 4.5:
+                    return "경성.png"   # 경성
+                if 1 <= t < 1.5:
+                    return "1성.png"
+                if 2 <= t < 2.5:
+                    return "2성.png"
+                if 3.4 <= t <= 3.6:
+                    return "3_5성.png"
+                if 2.9 <= t <= 3.1:
+                    return "3성.png"
+                if 4 <= t < 4.5:
+                    return "4성.png"
+                return "경성.png"
+
+            tone_icon_max_h = 96  # 성조 아이콘 표시 높이 (비율 유지, 작은 이미지는 확대)
+
+            def _get_tone_surface(filename: str) -> Optional[Any]:
+                """성조 아이콘 Surface 캐시 로드. 높이를 tone_icon_max_h로 맞춤."""
+                if filename in self._tone_surfaces:
+                    return self._tone_surfaces[filename]
+                path = icon_dir / filename
+                if path.exists():
+                    try:
+                        surf = pygame.image.load(str(path))
+                        if surf.get_alpha() is None:
+                            surf = surf.convert()
+                        else:
+                            surf = surf.convert_alpha()
+                        h = surf.get_height()
+                        if h != tone_icon_max_h:
+                            scale = tone_icon_max_h / h
+                            w = max(1, int(surf.get_width() * scale))
+                            surf = pygame.transform.smoothscale(surf, (w, tone_icon_max_h))
+                        self._tone_surfaces[filename] = surf
+                        return surf
+                    except Exception:
+                        pass
+                return None
+
             for i, (syl, diff_val) in enumerate(display_syllables):
                 slot_left = x_start + int(prefix_w[i])
                 if pinyin_aligned:
@@ -1060,10 +1319,14 @@ class ConversationStudio:
                 if _tone_contour_enabled:
                     tone = parse_tone_from_syllable(diff_val) if diff_val else parse_tone_from_syllable(syl)
                     if tone is not None:
-                        # 붉은 표기 병음의 병음표시 위치(성조 모음) 바로 위에 발음표시 동그라미
                         circle_x = _tonic_center_x(slot_left, syl)
-                        pygame.draw.circle(screen, line_color, (circle_x, contour_center_y), circle_radius, 2)
-                # 발음 병음 글자는 그리지 않음 (성조선만 표시). 표기 병음은 위에서 이미 그림.
+                        tone_fname = _tone_to_filename(tone)
+                        tone_surf = _get_tone_surface(tone_fname)
+                        if tone_surf is not None:
+                            tw, th = tone_surf.get_size()
+                            screen.blit(tone_surf, (circle_x - tw // 2, contour_center_y - th // 2))
+                        else:
+                            pygame.draw.circle(screen, line_color, (circle_x, contour_center_y), circle_radius, 2)
                 if diff_val and _phonetic_diff_enabled:
                     pass  # 주황 발음 텍스트 비표시
 
@@ -1094,6 +1357,21 @@ class ConversationStudio:
             trans_surf = font_kr_step1.render(trans_text[:80], True, (200, 200, 200))
             tr = trans_surf.get_rect(center=(cx, center_top))
             screen.blit(trans_surf, tr)
+
+        # 좌측 하단: 발음상 성조 변화 (이 문장에서 쓰인 타입만, 반3성 제외)
+        sandhi_types_raw = item.get("pinyin_sandhi_types") or []
+        _sandhi_skip = {"tone3_half", "bu_to_4", "neutral_char"}  # 반3성, 不(표기동일→4성), 일반경성 제외
+        unique_sandhi = list(dict.fromkeys(t for t in sandhi_types_raw if t and t not in _sandhi_skip))
+        if unique_sandhi:
+            left_margin = 20
+            line_height = 28  # 줄 간격 (겹침 방지)
+            box_y = h - 40 - (len(unique_sandhi) + 1) * line_height
+            title_surf = font_kr.render("발음상 성조 변화", True, (200, 200, 180))
+            screen.blit(title_surf, (left_margin, box_y))
+            for j, st in enumerate(unique_sandhi):
+                label = SANDHI_TYPE_LABELS.get(st, st)
+                line_surf = font_kr.render(label, True, (255, 220, 100))
+                screen.blit(line_surf, (left_margin, box_y + line_height + j * line_height))
 
         # 맨 아래: 안내 문구
         hint = "눈으로 보면서 원어민 리듬을 익히세요"
