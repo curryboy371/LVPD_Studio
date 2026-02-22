@@ -247,6 +247,8 @@ def generate_final_table(
             "video_path": _r("video_path"),
             "sound_l1": _r("sound_level1_path"),
             "sound_l2": _r("sound_level2_path"),
+            "syllable_times_l1_ms": _r("syllable_times_l1_ms"),
+            "syllable_times_l2_ms": _r("syllable_times_l2_ms"),
             "life_tips": "|".join(tips_list),
         })
 

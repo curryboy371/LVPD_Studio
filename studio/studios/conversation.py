@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,6 +23,7 @@ from utils.pinyin_processor import (
     get_pinyin_processor,
     parse_tone_from_syllable,
 )
+from utils.syllable_timing import parse_syllable_times_ms
 
 from studio.recording_events import (
     VideoSegmentStart,
@@ -46,6 +48,12 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
     audio_tracks = getattr(content, "audio_tracks", []) or []
     n = min(len(segments), len(overlays))
     processor = get_pinyin_processor()
+    table_rows = []
+    try:
+        from data.table_manager import get_table
+        table_rows = get_table() or []
+    except Exception:
+        pass
     out = []
     for i in range(n):
         seg = segments[i]
@@ -58,6 +66,9 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
         pinyin_sandhi_types = processor.get_sandhi_types(sen_str) if sen_str and processor.available else []
         sound_l1 = audio_tracks[2 * i].sound_path if len(audio_tracks) > 2 * i else ""
         sound_l2 = audio_tracks[2 * i + 1].sound_path if len(audio_tracks) > 2 * i + 1 else ""
+        row = table_rows[i] if i < len(table_rows) else {}
+        syllable_times_l1 = parse_syllable_times_ms(str(row.get("syllable_times_l1_ms") or "").strip())
+        syllable_times_l2 = parse_syllable_times_ms(str(row.get("syllable_times_l2_ms") or "").strip())
         out.append({
             "video_path": seg.file_path or "",
             "start_time": seg.start_time,
@@ -70,6 +81,8 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
             "pinyin_sandhi_types": pinyin_sandhi_types,  # 음절별 성조변화 타입 (표시용)
             "sound_l1": sound_l1,
             "sound_l2": sound_l2,
+            "syllable_times_l1": syllable_times_l1,
+            "syllable_times_l2": syllable_times_l2,
             "id": str(i),
             "topic": "",
             "index": i,
@@ -559,8 +572,13 @@ class ConversationStudio:
         self._fade_overlay_surface: Any = None
         self._fade_overlay_size: tuple[int, int] = (0, 0)
         # Step 1 테이블 사운드: 이번 일시정지에서 L1→L2 한 번만 재생
-        self._step1_sound_schedule: Optional[str] = None  # None | "playing_l1"(L1 재생 중, 끝나면 L2)
+        self._step1_sound_schedule: Optional[str] = None  # None | "playing_l1" | "playing_l2"
         self._step1_l1_channel: Any = None  # L1 재생 채널 (get_busy()로 종료 감지)
+        self._step1_l2_channel: Any = None  # L2 재생 채널 (위치·종료 감지)
+        self._step1_l1_play_start_time: Optional[float] = None  # L1 재생 시작 시각 (time.time()), pygame.Channel에 get_position 없음
+        self._step1_l2_play_start_time: Optional[float] = None  # L2 재생 시작 시각
+        self._step1_graph_display_ratio: float = 0.0  # 0~1, 시간 보간된 곡선 진행도 (구간 시간 반영)
+        self._step1_graph_item_id: Any = None  # 그래프 리셋용 (문장 바뀌면 0으로)
         self._step1_sounds_played_this_pause: bool = False  # 이번 pause에서 이미 L1/L2 재생했으면 True
         # 녹화 모드: 이전 프레임 상태 (세그먼트·일시정지 전환 시 이벤트 로그용)
         self._last_recording_seg_idx: int = -1
@@ -861,6 +879,7 @@ class ConversationStudio:
             self._ui_visible = self._fade_alpha >= 191.25
             self._step1_sound_schedule = None
             self._step1_l1_channel = None
+            self._step1_l2_channel = None
         else:
             self._video_player.seek_to(seg_start + local_t)
             if self._video_player.is_paused():
@@ -871,6 +890,7 @@ class ConversationStudio:
             self._ui_visible = False
             self._step1_sound_schedule = None
             self._step1_l1_channel = None
+            self._step1_l2_channel = None
             self._step1_sounds_played_this_pause = False  # 다음 멈춤에서 다시 L1→L2 재생 가능
 
     def _update_step1(self, config: Any) -> None:
@@ -892,18 +912,23 @@ class ConversationStudio:
                             if ch is not None:
                                 ch.play(snd)
                                 self._step1_l1_channel = ch
+                                self._step1_l1_play_start_time = time.time()
                             else:
                                 self._step1_l1_channel = None
+                                self._step1_l1_play_start_time = None
                         except Exception:
                             self._step1_l1_channel = None
+                            self._step1_l1_play_start_time = None
                             self._step1_sound_schedule = "playing_l1"
                     else:
                         self._step1_sound_schedule = "playing_l1"
                         self._step1_l1_channel = None
+                        self._step1_l1_play_start_time = None
             # L1 재생 중 → 채널이 끝나면 레벨2 한 번만 재생 후 스케줄 종료
             if self._step1_sound_schedule == "playing_l1" and self._data_list:
                 if self._step1_l1_channel is None or not self._step1_l1_channel.get_busy():
                     self._step1_l1_channel = None
+                    self._step1_l1_play_start_time = None
                     self._step1_sound_schedule = None
                     item = self._data_list[self._current_index]
                     path = (item.get("sound_l2") or "").strip()
@@ -913,13 +938,25 @@ class ConversationStudio:
                             ch = pygame.mixer.find_channel(True)
                             if ch is not None:
                                 ch.play(snd)
+                                self._step1_l2_channel = ch
+                                self._step1_l2_play_start_time = time.time()
+                                self._step1_sound_schedule = "playing_l2"
                         except Exception:
                             pass
+            # L2 재생 중 → 채널이 끝나면 스케줄만 정리
+            if self._step1_sound_schedule == "playing_l2":
+                if self._step1_l2_channel is None or not self._step1_l2_channel.get_busy():
+                    self._step1_l2_channel = None
+                    self._step1_l2_play_start_time = None
+                    self._step1_sound_schedule = None
         else:
             self._fade_alpha = 0.0
             self._ui_visible = False
             self._step1_sound_schedule = None
             self._step1_l1_channel = None
+            self._step1_l2_channel = None
+            self._step1_l1_play_start_time = None
+            self._step1_l2_play_start_time = None
 
     def init(self, config: Any = None) -> None:
         """pygame.init() 이후 러너가 한 번 호출. 폰트 등 리소스 로드."""
@@ -956,11 +993,21 @@ class ConversationStudio:
     def draw(self, screen: Any, config: Any) -> None:
         try:
             self._draw_impl(screen, config)
-        except Exception:
+        except Exception as e:
             screen.fill((40, 40, 50))
             font = self._font_kr or pygame.font.Font(None, 28)
             err = font.render("그리기 오류", True, (200, 100, 100))
             screen.blit(err, (20, 20))
+            try:
+                import traceback
+                msg = f"{type(e).__name__}: {e}"
+                if font.get_height() and len(msg) > 80:
+                    msg = msg[:77] + "..."
+                line2 = font.render(msg, True, (220, 180, 180))
+                screen.blit(line2, (20, 52))
+                traceback.print_exc()
+            except Exception:
+                pass
 
     def _draw_impl(self, screen: Any, config: Any) -> None:
         w, h = config.width, config.height
@@ -1167,6 +1214,16 @@ class ConversationStudio:
                 for i in range(len(syllables))
                 if not _is_punct_only(syllables[i])
             ]
+            # 본래 성조: diff에 성조가 없을 때 pinyin_lexical 음절 참고
+            lexical_syllables = (pinyin_lexical or "").strip().split()
+            while len(lexical_syllables) < len(syllables):
+                lexical_syllables.append("")
+            lexical_syllables = lexical_syllables[: len(syllables)]
+            lexical_for_display: list[str] = [
+                lexical_syllables[i]
+                for i in range(len(syllables))
+                if not _is_punct_only(syllables[i])
+            ]
 
             space_surf, space_rect = _render_syllable(pinyin_ft, font_cn, " ", (220, 70, 70))
             space_w = space_rect.width if space_rect else 8
@@ -1258,6 +1315,32 @@ class ConversationStudio:
                 else:
                     pygame.draw.line(surf, line_color, (left, mid_y), (right, mid_y), line_thickness)
 
+            def _tone_contour_point(left: float, bottom: float, width: float, height: float, tone: float, t: float) -> tuple[float, float]:
+                """성조 곡선 위 파라미터 t(0~1)에 해당하는 (x, y) 반환. _draw_tone_contour와 동일 좌표계."""
+                top = bottom - height
+                right = left + width
+                mid_x = left + width / 2
+                mid_y = (top + bottom) / 2
+                t = max(0.0, min(1.0, t))
+                is_half_third = 3.4 <= tone <= 3.6
+                if tone <= 0.5 or tone >= 4.5:
+                    return (left + t * width, mid_y)
+                if 1 <= tone < 1.5:
+                    return (left + t * width, top)
+                if 2 <= tone < 2.5:
+                    return (left + t * width, bottom + t * (top - bottom))
+                if is_half_third:
+                    return (left + t * (mid_x - left), mid_y + t * (bottom - mid_y))
+                if 2.9 <= tone <= 3.1:
+                    if t <= 0.5:
+                        u = t * 2
+                        return (left + u * (mid_x - left), mid_y + u * (bottom - mid_y))
+                    u = (t - 0.5) * 2
+                    return (mid_x + u * (right - mid_x), bottom + u * (mid_y - bottom))
+                if 4 <= tone < 4.5:
+                    return (left + t * width, top + t * (bottom - top))
+                return (left + t * width, mid_y)
+
             # 발음 라인 위치: 성조 표기 규칙으로 정확한 위치 추정 → 그 위치에 성조 이미지 표시
             ref_phonetic_height = 28
             y_phonetic_top = y_red_top - 8 - ref_phonetic_height
@@ -1317,7 +1400,7 @@ class ConversationStudio:
                     slot_width = 1
                 slot_rect = (slot_left, y_phonetic_top, slot_width, ref_phonetic_height)
                 if _tone_contour_enabled:
-                    tone = parse_tone_from_syllable(diff_val) if diff_val else parse_tone_from_syllable(syl)
+                    tone = parse_tone_from_syllable(diff_val) if (diff_val and parse_tone_from_syllable(diff_val) is not None) else (parse_tone_from_syllable(lexical_for_display[i]) if i < len(lexical_for_display) else parse_tone_from_syllable(syl))
                     if tone is not None:
                         circle_x = _tonic_center_x(slot_left, syl)
                         tone_fname = _tone_to_filename(tone)
@@ -1329,6 +1412,190 @@ class ConversationStudio:
                             pygame.draw.circle(screen, line_color, (circle_x, contour_center_y), circle_radius, 2)
                 if diff_val and _phonetic_diff_enabled:
                     pass  # 주황 발음 텍스트 비표시
+
+
+            # 가운데 네모 박스: syllable_times_l1 / l2에 따라 재생 시 움직이는 성조 그래프
+            syllable_times_l1 = item.get("syllable_times_l1") or []
+            syllable_times_l2 = item.get("syllable_times_l2") or []
+            has_l1 = len(syllable_times_l1) == n_syl + 1  # 경계 시각 n_syl+1개 (시작~끝)
+            has_l2 = len(syllable_times_l2) == n_syl + 1
+            # 재생 중인 채널에 맞는 타이밍 선택, 아니면 있는 쪽 사용
+            if n_syl > 0 and (has_l1 or has_l2):
+                if self._step1_l1_channel is not None and self._step1_l1_channel.get_busy() and has_l1:
+                    t_list = syllable_times_l1
+                    if self._step1_l1_play_start_time is not None:
+                        current_sec = time.time() - self._step1_l1_play_start_time
+                    else:
+                        current_sec = None
+                elif self._step1_l2_channel is not None and self._step1_l2_channel.get_busy() and has_l2:
+                    t_list = syllable_times_l2
+                    if self._step1_l2_play_start_time is not None:
+                        current_sec = time.time() - self._step1_l2_play_start_time
+                    else:
+                        current_sec = None
+                else:
+                    t_list = syllable_times_l2 if has_l2 else syllable_times_l1
+                    current_sec = None
+                t0, t1 = t_list[0], t_list[-1]
+                total_dur = t1 - t0
+                if total_dur <= 0:
+                    total_dur = 1.0
+                if current_sec is not None:
+                    current_sec = max(t0, min(current_sec, t1))
+                else:
+                    current_sec = t1
+                box_w, box_h = 500, 120
+                box_x = cx - box_w // 2
+                # 제목 바로 아래: title_y(0.06*h) + 제목 높이(~56) + 간격
+                box_y = int(h * 0.06) + 56 + 30
+                box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+                pygame.draw.rect(screen, (60, 60, 70), box_rect)
+                pygame.draw.rect(screen, (0, 0, 0), box_rect, 2)
+                # 성조: diff에 성조가 있으면 발음, 없으면 pinyin_lexical(본래) 성조
+                # 구간 시간 비율로 샘플 수 결정 → 부드러운 곡선
+                points: list[tuple[float, float]] = []
+                seg_end_idx: list[int] = []
+                for i in range(n_syl):
+                    syl, diff_val = display_syllables[i]
+                    lex_syl = lexical_for_display[i] if i < len(lexical_for_display) else syl
+                    tone = parse_tone_from_syllable(diff_val) if (diff_val and parse_tone_from_syllable(diff_val) is not None) else parse_tone_from_syllable(lex_syl)
+                    if tone is None:
+                        tone = 0.0
+                    t_start, t_end = t_list[i], t_list[i + 1]
+                    seg_dur = t_end - t_start
+                    if seg_dur <= 0:
+                        seg_dur = 1e-6
+                    seg_left = box_x + (t_start - t0) / total_dur * box_w
+                    seg_width = seg_dur / total_dur * box_w
+                    bottom = box_y + box_h
+                    # 구간 길이에 비례해 샘플 수 (짧으면 10, 길면 최대 24)
+                    n_samples = max(10, min(24, int(seg_dur * 60)))
+                    for j in range(n_samples):
+                        t = j / (n_samples - 1) if n_samples > 1 else 1.0
+                        x_pt, y_pt = _tone_contour_point(
+                            seg_left, float(bottom), seg_width, float(box_h), tone, t
+                        )
+                        points.append((x_pt, y_pt))
+                    seg_end_idx.append(len(points))
+                # 구간 경계에서 보간해 뾰족한 꺾임 완화
+                if len(points) > 2 and n_syl > 1:
+                    smoothed: list[tuple[float, float]] = []
+                    for b in range(n_syl):
+                        start = 0 if b == 0 else seg_end_idx[b - 1]
+                        end = seg_end_idx[b]
+                        if b > 0 and start > 0 and start < len(points):
+                            pa, pb = points[start - 1], points[start]
+                            smoothed.append((0.67 * pa[0] + 0.33 * pb[0], 0.67 * pa[1] + 0.33 * pb[1]))
+                            smoothed.append((0.33 * pa[0] + 0.67 * pb[0], 0.33 * pa[1] + 0.67 * pb[1]))
+                        for j in range(start, end):
+                            smoothed.append(points[j])
+                    points = smoothed
+                if points:
+                    # 현재=가운데 + 짧은 히스토리(잔상): 과거는 최근만, 길어지면 밀려남
+                    history_dur = 0.9  # 초 단위, 이만큼만 과거 표시
+                    target_ratio = (current_sec - t0) / total_dur if current_sec is not None else 1.0
+                    target_ratio = max(0.0, min(1.0, target_ratio))
+                    item_id = (id(item), tuple(t_list) if t_list else ())
+                    if self._step1_graph_item_id != item_id:
+                        self._step1_graph_item_id = item_id
+                        self._step1_graph_display_ratio = 0.0 if current_sec is not None else 1.0
+                    if current_sec is not None:
+                        cur_i = 0
+                        for k in range(n_syl):
+                            if t_list[k] <= current_sec < t_list[k + 1]:
+                                cur_i = k
+                                break
+                            if current_sec >= t_list[-1]:
+                                cur_i = n_syl - 1
+                        seg_dur = t_list[cur_i + 1] - t_list[cur_i] if cur_i < n_syl else total_dur
+                        if seg_dur <= 0:
+                            seg_dur = total_dur / max(1, n_syl)
+                        blend = 0.12 + 0.38 * min(1.0, 0.04 / seg_dur)
+                        if target_ratio < 0.03:
+                            self._step1_graph_display_ratio = target_ratio
+                        else:
+                            self._step1_graph_display_ratio += (target_ratio - self._step1_graph_display_ratio) * blend
+                    else:
+                        self._step1_graph_display_ratio = 1.0
+                    # 창: [window_start, window_end] → 박스 왼쪽 절반에 매핑, 끝(현재)이 가운데
+                    window_end_sec = t0 + self._step1_graph_display_ratio * total_dur
+                    window_start_sec = max(t0, window_end_sec - history_dur)
+                    window_dur = window_end_sec - window_start_sec
+                    if window_dur <= 0:
+                        window_dur = 1e-6
+                    color_future = (100, 100, 105)
+                    color_past = (45, 100, 55)
+                    color_now = (100, 255, 120)
+                    # 문장이 길면 스트리밍: 재생 위치를 가운데로 두고 고정 길이 창만 표시
+                    streaming_threshold = 2.8  # 초 이상이면 스트리밍
+                    visible_half_dur = 1.25    # 가운데 기준 앞뒤로 보여줄 길이(초)
+                    use_streaming = total_dur > streaming_threshold
+                    if use_streaming:
+                        view_center = window_end_sec
+                        view_start = max(t0, view_center - visible_half_dur)
+                        view_end = min(t1, view_center + visible_half_dur)
+                        view_dur = view_end - view_start
+                        if view_dur <= 0:
+                            view_dur = 1e-6
+                        # [view_start, view_end] 구간만 박스 전체에 매핑 → 재생 위치 = 박스 가운데
+                        streamed: list[tuple[float, float]] = []
+                        for k in range(len(points)):
+                            x_pt, y_pt = points[k]
+                            t_pt = t0 + (x_pt - box_x) / box_w * total_dur
+                            if t_pt < view_start - 1e-6:
+                                continue
+                            if t_pt > view_end + 1e-6:
+                                if k > 0:
+                                    x_prev, y_prev = points[k - 1]
+                                    t_prev = t0 + (x_prev - box_x) / box_w * total_dur
+                                    if t_prev < view_end:
+                                        r = (view_end - t_prev) / (t_pt - t_prev) if t_pt != t_prev else 1.0
+                                        y_end = y_prev + r * (y_pt - y_prev)
+                                        streamed.append((box_x + box_w, y_end))
+                                break
+                            if not streamed and t_pt > view_start + 1e-6 and k > 0:
+                                x_prev, y_prev = points[k - 1]
+                                t_prev = t0 + (x_prev - box_x) / box_w * total_dur
+                                r = (view_start - t_prev) / (t_pt - t_prev) if (t_pt != t_prev) else 0.0
+                                y_start = y_prev + r * (y_pt - y_prev)
+                                streamed.append((box_x, y_start))
+                            x_new = box_x + (t_pt - view_start) / view_dur * box_w
+                            streamed.append((x_new, y_pt))
+                        draw_pts = streamed
+                        center_x = box_x + (view_center - view_start) / view_dur * box_w
+                        past_end_x = center_x
+                        past_start_x = center_x - (view_center - view_start) / view_dur * box_w
+                    else:
+                        draw_pts = [(p[0], p[1]) for p in points]
+                        center_x = box_x + (window_end_sec - t0) / total_dur * box_w
+                        past_end_x = center_x
+                        past_start_x = box_x + (window_start_sec - t0) / total_dur * box_w
+                    # 선분별 색: 과거(연함)→현재(밝은 녹색)→미래(회색)
+                    for k in range(len(draw_pts) - 1):
+                        x0, y0 = draw_pts[k]
+                        x1, y1 = draw_pts[k + 1]
+                        mid_x = (x0 + x1) * 0.5
+                        if mid_x > past_end_x:
+                            color = color_future
+                        else:
+                            if mid_x < past_start_x:
+                                color = color_past
+                            else:
+                                span = past_end_x - past_start_x
+                                ratio = (mid_x - past_start_x) / span if span > 0 else 1.0
+                                ratio = max(0.0, min(1.0, ratio))
+                                r = int(color_past[0] + (color_now[0] - color_past[0]) * ratio)
+                                g = int(color_past[1] + (color_now[1] - color_past[1]) * ratio)
+                                b = int(color_past[2] + (color_now[2] - color_past[2]) * ratio)
+                                color = (r, g, b)
+                        pygame.draw.line(
+                            screen, color,
+                            (int(x0), int(y0)), (int(x1), int(y1)), 3
+                        )
+                    pygame.draw.line(
+                        screen, (100, 240, 120),
+                        (int(center_x), box_y), (int(center_x), box_y + box_h), 1
+                    )
 
             # 한자 위치: 실제 병음 줄 높이만큼 띄워서 겹침 방지 (ref_height 고정값 대신 line_rect.height 사용)
             center_top = y_red_top + line_rect.height + pinyin_hanzi_gap
