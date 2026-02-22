@@ -214,14 +214,17 @@ def generate_final_table(
         tips_list = [t.strip() for t in raw_tip.split("|") if t.strip()] if raw_tip else []
 
         # 병음 3종 (g2pM 없으면 빈 문자열)
-        pinyin_marks = ""
-        pinyin_phonetic = ""
-        pinyin_lexical = ""
+        # 1) 표기병음: 숫자 없이 성조만 기호로 표시 (예: nǐ hǎo)
+        # 2) 표기병음숫자용: 성조 기호 없이, 뒤에 표기 성조 숫자 (예: ni3 hao3)
+        # 3) 발음용병음: 성조 기호 없이, 뒤에 실제 발음(변조 반영) 성조 숫자 (예: 반3성 등)
+        pinyin_marks = ""      # 1) 표기병음 (성조 기호)
+        pinyin_lexical = ""    # 2) 표기병음숫자용
+        pinyin_phonetic = ""   # 3) 발음용병음
         if clean_sentence and processor.available:
             try:
                 pinyin_marks = processor.full_convert(clean_sentence) or ""
-                pinyin_phonetic = " ".join(processor.get_phonetic_pinyin(clean_sentence))
                 pinyin_lexical = " ".join(processor.get_lexical_pinyin(clean_sentence))
+                pinyin_phonetic = " ".join(processor.get_phonetic_pinyin(clean_sentence))
             except Exception as e:
                 logging.error("Pinyin conversion skipped for row: %s", e)
 

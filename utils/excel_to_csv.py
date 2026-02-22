@@ -40,14 +40,15 @@ def excel_to_csv(excel_path: str | Path, csv_path: str | Path, encoding: str = "
         raw_tip = str(row.get("life_tip", "")) if pd.notna(row.get("life_tip")) else ""
         tips_list = [t.strip() for t in raw_tip.split("|") if t.strip()] if raw_tip else []
 
+        # 병음 3종: 1) 표기병음(성조 기호) 2) 표기병음숫자용 3) 발음용병음
         pinyin_marks = ""
-        pinyin_phonetic = ""
         pinyin_lexical = ""
+        pinyin_phonetic = ""
         if clean_sentence and processor.available:
             try:
                 pinyin_marks = processor.full_convert(clean_sentence) or ""
-                pinyin_phonetic = " ".join(processor.get_phonetic_pinyin(clean_sentence))
                 pinyin_lexical = " ".join(processor.get_lexical_pinyin(clean_sentence))
+                pinyin_phonetic = " ".join(processor.get_phonetic_pinyin(clean_sentence))
             except Exception as e:
                 logger.warning("Pinyin conversion skipped for row: %s", e)
 

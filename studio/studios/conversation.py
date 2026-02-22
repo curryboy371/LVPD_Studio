@@ -16,6 +16,7 @@ import pygame
 
 from core.paths import STUDIO_HEIGHT, STUDIO_VIDEO_FALLBACK_FPS, STUDIO_WIDTH
 from utils.fonts import load_font_chinese, load_font_chinese_freetype, load_font_korean
+from utils.pinyin_processor import diff_lexical_phonetic_per_syllable, parse_tone_from_syllable
 
 from studio.recording_events import (
     VideoSegmentStart,
@@ -49,7 +50,9 @@ def _data_list_from_loaded_content(content: Any) -> list[dict]:
             "end_time": seg.end_time,
             "sentence": [ov.sentence or ov.text] if (ov.sentence or ov.text) else [],
             "translation": [ov.translation] if ov.translation else [],
-            "pinyin": (ov.pinyin or "").strip(),
+            "pinyin": (ov.pinyin or "").strip(),  # 성조표기병음 (성조 기호)
+            "pinyin_phonetic": (ov.pinyin_phonetic or "").strip(),  # 발음 병음
+            "pinyin_lexical": (ov.pinyin_lexical or "").strip(),  # 표기 병음
             "id": str(i),
             "topic": "",
             "index": i,
@@ -521,11 +524,15 @@ class ConversationStudio:
         self._font_cn: Optional[pygame.font.Font] = None
         self._font_cn_big_ft: Any = None  # pygame.freetype.Font (중국어 문장용)
         self._font_cn_ft: Any = None      # pygame.freetype.Font (병음용)
+        self._font_cn_step1_ft: Any = None  # Step 1 중앙 한자용 (큰 글자)
+        self._font_cn_step1_pinyin_ft: Any = None  # Step 1 병음용 (더 큰 글자)
         self._font_kr: Optional[pygame.font.Font] = None
+        self._font_kr_step1: Optional[pygame.font.Font] = None  # Step 1 해석용 (더 큰 글자)
         self._font: Optional[pygame.font.Font] = None
         self._paused_label: Optional[pygame.Surface] = None
         self._last_sync_pts: float = -10.0
         self._recording_initial_logged: bool = False
+        self._shadowing_step: int = 1  # 셰도잉 훈련 단계 (1=원어민 속도로 듣기)
         if self._data_list:
             item = self._data_list[0]
             path = self._resolve_video_path(item.get("video_path") or "")
@@ -550,6 +557,10 @@ class ConversationStudio:
             return 0.0, -1.0
         item = self._data_list[self._current_index]
         return item.get("start_time", 0.0), item.get("end_time", -1.0)
+
+    def _current_shadowing_step(self) -> int:
+        """현재 셰도잉 훈련 단계. Step 2 이상에서 비디오 오버레이 등 분기용."""
+        return self._shadowing_step
 
     def get_title(self) -> str:
         return "LVPD Studio - 회화"
@@ -742,7 +753,16 @@ class ConversationStudio:
         self._font_cn = load_font_chinese(28)
         self._font_cn_big_ft = load_font_chinese_freetype(36)
         self._font_cn_ft = load_font_chinese_freetype(28)
+        self._font_cn_step1_ft = load_font_chinese_freetype(124)  # Step 1 중앙 한자용 (더 크게)
+        if self._font_cn_step1_ft is None:
+            self._font_cn_step1_ft = self._font_cn_big_ft  # 폴백
+        self._font_cn_step1_pinyin_ft = load_font_chinese_freetype(66)  # Step 1 병음용
+        if self._font_cn_step1_pinyin_ft is None:
+            self._font_cn_step1_pinyin_ft = self._font_cn_ft
         self._font_kr = load_font_korean(28)
+        self._font_kr_step1 = load_font_korean(56)  # Step 1 해석용 (더 크게)
+        if self._font_kr_step1 is None:
+            self._font_kr_step1 = self._font_kr
         if self._font_cn_big is None:
             self._font_cn_big = pygame.font.Font(None, 36)
             import logging
@@ -768,6 +788,12 @@ class ConversationStudio:
     def _draw_impl(self, screen: Any, config: Any) -> None:
         w, h = config.width, config.height
         screen.fill(config.bg_color)
+
+        # 셰도잉 Step 1: 원어민 속도로 듣기 — 좌측 이미지 영역(플레이스홀더), 중앙 병음/한자/해석, 하단 안내
+        if self._shadowing_step == 1:
+            self._draw_step1(screen, config)
+            self._draw_paused_and_debug(screen, config)
+            return
 
         if self._data_list:
             item = self._data_list[self._current_index]
@@ -801,17 +827,17 @@ class ConversationStudio:
             else:
                 sen_surf = font_cn_big.render(sen_text[:80], True, (255, 255, 255))
                 screen.blit(sen_surf, (20, y_pos))
-            # 병음 (성조 기호) — freetype 사용 시 CJK 네모 방지
+            # 병음 (성조 기호) — 붉은색
             if pinyin_text:
                 if self._font_cn_ft is not None:
                     try:
-                        pinyin_surf, _ = self._font_cn_ft.render(pinyin_text[:120], (220, 220, 180))
+                        pinyin_surf, _ = self._font_cn_ft.render(pinyin_text[:120], (220, 70, 70))
                         screen.blit(pinyin_surf, (20, y_pos + 36))
                     except Exception:
-                        pinyin_surf = font_cn.render(pinyin_text[:120], True, (220, 220, 180))
+                        pinyin_surf = font_cn.render(pinyin_text[:120], True, (220, 70, 70))
                         screen.blit(pinyin_surf, (20, y_pos + 36))
                 else:
-                    pinyin_surf = font_cn.render(pinyin_text[:120], True, (220, 220, 180))
+                    pinyin_surf = font_cn.render(pinyin_text[:120], True, (220, 70, 70))
                     screen.blit(pinyin_surf, (20, y_pos + 36))
             # 번역 (한국어) — 한국어 폰트
             if trans_text:
@@ -822,6 +848,261 @@ class ConversationStudio:
             msg = font_kr.render("데이터 없음 (CSV 로드 실패 또는 비어 있음)", True, (180, 180, 180))
             screen.blit(msg, (20, h // 2 - 14))
 
+        self._draw_paused_and_debug(screen, config)
+
+    def _draw_step1(self, screen: Any, config: Any) -> None:
+        """셰도잉 Step 1: 좌측 듣기 이미지(플레이스홀더), 중앙 병음/한자/해석, 하단 안내 문구."""
+        w, h = config.width, config.height
+        font_kr = self._font_kr or pygame.font.Font(None, 28)
+        font_cn = self._font_cn or pygame.font.Font(None, 28)
+        font_cn_big = self._font_cn_big or pygame.font.Font(None, 36)
+        font_kr_step1 = self._font_kr_step1 or font_kr
+
+        if not self._data_list:
+            msg = font_kr.render("데이터 없음 (CSV 로드 실패 또는 비어 있음)", True, (180, 180, 180))
+            r = msg.get_rect(center=(w // 2, h // 2))
+            screen.blit(msg, r)
+            return
+
+        item = self._data_list[self._current_index]
+        sentences = item.get("sentence") or []
+        translations = item.get("translation") or []
+        pinyin_text = (item.get("pinyin") or "").strip()
+        pinyin_lexical = (item.get("pinyin_lexical") or "").strip()
+        pinyin_phonetic = (item.get("pinyin_phonetic") or "").strip()
+        sen_text = " ".join(str(x) for x in sentences) if sentences else "(문장 없음)"
+        trans_text = " ".join(str(x) for x in translations) if translations else ""
+
+        # 좌측: 듣기 이미지 영역 (플레이스홀더) — 작게
+        left_x, left_y = config.get_pos(0.02, 0.20)
+        left_w, left_h = config.get_size(0.20, 0.36)
+        pygame.draw.rect(screen, (35, 35, 45), (left_x, left_y, left_w, left_h))
+        pygame.draw.rect(screen, (80, 80, 90), (left_x, left_y, left_w, left_h), 2)
+        placeholder = font_kr.render("듣기 이미지 (추가 예정)", True, (140, 140, 150))
+        pr = placeholder.get_rect(center=(left_x + left_w // 2, left_y + left_h // 2))
+        screen.blit(placeholder, pr)
+
+        # 병음·한자·해석 모두 화면 가운데 정렬
+        cx = w // 2
+        center_top = int(h * 0.38)
+        line_gap = 96
+
+        pinyin_ft = self._font_cn_step1_pinyin_ft or self._font_cn_ft
+        # 발음 병음도 같은 폰트(pinyin_ft)로 그려야 표기 병음과 위아래 정렬이 맞음 (폰트 차이로 틀어짐 방지)
+        diff_ft = pinyin_ft
+        _tone_contour_enabled = True   # 병음 위 성조선 표시
+        _phonetic_diff_enabled = True  # 발음 병음(주황 텍스트) 표시
+        _punct_set = frozenset("?.,，．？!！、。；;：:")
+
+        def _is_punct_only(s: str) -> bool:
+            t = s.strip()
+            return len(t) <= 2 and all(c in _punct_set for c in t)
+
+        def _align_pinyin_with_hanzi(sen_chars: str, syllables: list[str]) -> tuple[str, list[str], bool]:
+            """한자 문장(구두점 포함)과 병음 음절을 1:1로 맞춰, 병음 줄에 구두점을 끼워 넣은 문자열과 음절별 prefix 반환.
+            반환: (display_pinyin, prefix_before_syllable, aligned). aligned=False면 prefix는 사용하지 않고 호출처에서 기존 방식으로 계산.
+            """
+            parts: list[str] = []
+            syl_idx = 0
+            for c in sen_chars:
+                if c in _punct_set or c.isspace():
+                    parts.append(c)
+                else:
+                    if syl_idx < len(syllables):
+                        parts.append(syllables[syl_idx])
+                        syl_idx += 1
+            if syl_idx != len(syllables):
+                return (" ".join(syllables), [], False)
+
+            # 음절 사이에만 공백, 구두점은 붙여서
+            display = ""
+            prefix_before_syllable: list[str] = []
+            for i, p in enumerate(parts):
+                if p not in _punct_set and not p.isspace():
+                    prefix_before_syllable.append(display)
+                display += p
+                if i + 1 < len(parts) and p not in _punct_set and not p.isspace() and parts[i + 1] not in _punct_set and not parts[i + 1].isspace():
+                    display += " "
+            prefix_before_syllable.append(display)
+            return (display, prefix_before_syllable, True)
+
+        if pinyin_text:
+            syllables = pinyin_text.strip().split()
+            diff_per = diff_lexical_phonetic_per_syllable(pinyin_lexical, pinyin_phonetic)
+            while len(diff_per) < len(syllables):
+                diff_per.append(None)
+            diff_per = diff_per[: len(syllables)]
+
+            def _render_syllable(font_ft: Any, font_pg: Any, text: str, color: tuple) -> tuple[Any, Any]:
+                if font_ft is not None:
+                    try:
+                        surf, rect = font_ft.render(text, color)
+                        return surf, rect
+                    except Exception:
+                        pass
+                surf = font_pg.render(text, True, color)
+                return surf, surf.get_rect()
+
+            # 한자와 칸 맞춤: 병음 줄에 구두점(! , ? 등)을 같은 위치에 끼워 넣기
+            sen_chars = "".join(str(x) for x in sentences)
+            display_pinyin, prefix_before_syllable, pinyin_aligned = _align_pinyin_with_hanzi(sen_chars, syllables)
+            display_syllables: list[tuple[str, Optional[str]]] = [
+                (syllables[i], diff_per[i] if i < len(diff_per) else None)
+                for i in range(len(syllables))
+                if not _is_punct_only(syllables[i])
+            ]
+
+            space_surf, space_rect = _render_syllable(pinyin_ft, font_cn, " ", (220, 70, 70))
+            space_w = space_rect.width if space_rect else 8
+            y_red_top = center_top
+            pinyin_hanzi_gap = 180  # 병음 아래 ~ 한자 위 여유
+            contour_gap = 4
+            contour_height = 16
+            line_color = (255, 180, 80)
+            line_thickness = 5  # 성조선 진하게
+
+            # 표기 병음: 한 줄 렌더 (구두점 포함) → 한자와 칸 맞춤
+            line_surf, line_rect = _render_syllable(pinyin_ft, font_cn, display_pinyin, (220, 70, 70))
+            x_start = cx - line_rect.width // 2
+            screen.blit(line_surf, (x_start, y_red_top))
+            # 칸 위치: 실제로 그리는 display_pinyin의 앞부분을 잘라서 측정 → 뒷부분 커닝/위치 일치
+            n_syl = len(display_syllables)
+            prefix_w: list[float] = []
+            if pinyin_aligned and len(prefix_before_syllable) >= n_syl + 1:
+                for i in range(n_syl + 1):
+                    # prefix_before_syllable[i]와 같은 길이의 display_pinyin 앞부분으로 측정 (한 번에 그린 줄과 동일 커닝)
+                    prefix_len = len(prefix_before_syllable[i])
+                    chunk = display_pinyin[:prefix_len] if prefix_len <= len(display_pinyin) else prefix_before_syllable[i]
+                    _, r = _render_syllable(pinyin_ft, font_cn, chunk, (220, 70, 70))
+                    prefix_w.append(r.width)
+            else:
+                # 정렬 실패 시에도 실제 그린 줄에서 음절 시작 위치를 찾아 동그라미 위치 맞춤
+                fallback_pinyin = " ".join(syllables)
+                pos = 0
+                syllable_starts: list[int] = []
+                for syl, _ in display_syllables:
+                    idx = fallback_pinyin.find(syl, pos)
+                    if idx >= 0:
+                        syllable_starts.append(idx)
+                        pos = idx + len(syl)
+                    else:
+                        syllable_starts.append(pos)
+                for i in range(n_syl + 1):
+                    if i == 0:
+                        prefix_w.append(0.0)
+                    elif i < len(syllable_starts):
+                        chunk = fallback_pinyin[: syllable_starts[i]]
+                        _, r = _render_syllable(pinyin_ft, font_cn, chunk, (220, 70, 70))
+                        prefix_w.append(r.width)
+                    else:
+                        prefix_w.append(line_rect.width)
+
+            # 성조 표기 규칙: 표기 병음에서 성조가 붙는 모음(āéǐ 등) 위치 = 병음이 표기되는 정확한 위치
+            _TONED_VOWELS = frozenset("āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ")
+
+            def _tonic_vowel_index(s: str) -> Optional[int]:
+                """표기 병음 문자열에서 성조가 붙은 모음의 인덱스. 없으면 None(경성 등)."""
+                for i, c in enumerate(s):
+                    if c in _TONED_VOWELS:
+                        return i
+                return None
+
+            def _tonic_center_x(slot_left: int, syl: str) -> int:
+                """붉은 표기 병음에서 성조가 붙는 모음(병음표시 위치) 바로 위에 동그라미 → 해당 모음 중심 x."""
+                idx = _tonic_vowel_index(syl)
+                if idx is None:
+                    _, r = _render_syllable(pinyin_ft, font_cn, syl, (220, 70, 70))
+                    return slot_left + r.width // 2
+                _, r_prefix = _render_syllable(pinyin_ft, font_cn, syl[:idx], (220, 70, 70))
+                _, r_char = _render_syllable(pinyin_ft, font_cn, syl[idx], (220, 70, 70))
+                return slot_left + r_prefix.width + r_char.width // 2
+
+            def _draw_tone_contour(surf: Any, left: int, bottom: int, width: int, tone: float) -> None:
+                """성조 시각화: 1=고평, 2=상승, 3=V자, 3.5=반3성 내려가서 끊김, 4=하강, 5/0=중평."""
+                top = bottom - contour_height
+                mid_y = (top + bottom) // 2
+                right = left + width
+                mid_x = (left + right) // 2
+                left, right, top, bottom = int(left), int(right), int(top), int(bottom)
+                mid_x, mid_y = int(mid_x), int(mid_y)
+                is_half_third = 3.4 <= tone <= 3.6
+                if tone <= 0.5 or tone >= 4.5:
+                    pygame.draw.line(surf, line_color, (left, mid_y), (right, mid_y), line_thickness)
+                elif 1 <= tone < 1.5:
+                    pygame.draw.line(surf, line_color, (left, top), (right, top), line_thickness)
+                elif 2 <= tone < 2.5:
+                    pygame.draw.line(surf, line_color, (left, bottom), (right, top), line_thickness)
+                elif is_half_third:
+                    pygame.draw.line(surf, line_color, (left, mid_y), (mid_x, bottom), line_thickness)
+                elif 2.9 <= tone <= 3.1:
+                    pygame.draw.line(surf, line_color, (left, mid_y), (mid_x, bottom), line_thickness)
+                    pygame.draw.line(surf, line_color, (mid_x, bottom), (right, mid_y), line_thickness)
+                elif 4 <= tone < 4.5:
+                    pygame.draw.line(surf, line_color, (left, top), (right, bottom), line_thickness)
+                else:
+                    pygame.draw.line(surf, line_color, (left, mid_y), (right, mid_y), line_thickness)
+
+            # 발음 라인 위치: 성조 표기 규칙으로 정확한 위치 추정 → 그 위치에만 동그라미 표시 (라인 대신)
+            ref_phonetic_height = 28
+            y_phonetic_top = y_red_top - 8 - ref_phonetic_height
+            contour_bottom_y = y_phonetic_top - contour_gap
+            contour_center_y = contour_bottom_y - contour_height // 2
+            circle_radius = 6
+            for i, (syl, diff_val) in enumerate(display_syllables):
+                slot_left = x_start + int(prefix_w[i])
+                if pinyin_aligned:
+                    slot_width = int(prefix_w[i + 1] - prefix_w[i])
+                else:
+                    slot_width = int(prefix_w[i + 1] - prefix_w[i] - (space_w if i < n_syl - 1 else 0))
+                if slot_width < 1:
+                    slot_width = 1
+                slot_rect = (slot_left, y_phonetic_top, slot_width, ref_phonetic_height)
+                if _tone_contour_enabled:
+                    tone = parse_tone_from_syllable(diff_val) if diff_val else parse_tone_from_syllable(syl)
+                    if tone is not None:
+                        # 붉은 표기 병음의 병음표시 위치(성조 모음) 바로 위에 발음표시 동그라미
+                        circle_x = _tonic_center_x(slot_left, syl)
+                        pygame.draw.circle(screen, line_color, (circle_x, contour_center_y), circle_radius, 2)
+                # 발음 병음 글자는 그리지 않음 (성조선만 표시). 표기 병음은 위에서 이미 그림.
+                if diff_val and _phonetic_diff_enabled:
+                    pass  # 주황 발음 텍스트 비표시
+
+            # 한자 위치: 실제 병음 줄 높이만큼 띄워서 겹침 방지 (ref_height 고정값 대신 line_rect.height 사용)
+            center_top = y_red_top + line_rect.height + pinyin_hanzi_gap
+
+        # 한자 (큰 글자): 렌더 rect 기준으로 화면 가운데 정확히 배치
+        hanzi_font_ft = self._font_cn_step1_ft or self._font_cn_big_ft
+        if hanzi_font_ft is not None:
+            try:
+                sen_surf, sen_rect = hanzi_font_ft.render(sen_text[:80], (255, 255, 255))
+                # 실제 글자 영역(rect) 중심이 (cx, center_top)에 오도록 blit
+                blit_x = cx - sen_rect.width // 2 - sen_rect.x
+                blit_y = center_top - sen_rect.height // 2 - sen_rect.y
+                screen.blit(sen_surf, (blit_x, blit_y))
+            except Exception:
+                sen_surf = font_cn_big.render(sen_text[:80], True, (255, 255, 255))
+                sr = sen_surf.get_rect(center=(cx, center_top))
+                screen.blit(sen_surf, sr)
+        else:
+            sen_surf = font_cn_big.render(sen_text[:80], True, (255, 255, 255))
+            sr = sen_surf.get_rect(center=(cx, center_top))
+            screen.blit(sen_surf, sr)
+        center_top += line_gap + 56  # 한자–뜻(해석) 간격 넓게
+
+        # 해석 (한국어): 화면 가운데 정확히 배치
+        if trans_text:
+            trans_surf = font_kr_step1.render(trans_text[:80], True, (200, 200, 200))
+            tr = trans_surf.get_rect(center=(cx, center_top))
+            screen.blit(trans_surf, tr)
+
+        # 맨 아래: 안내 문구
+        hint = "눈으로 보면서 원어민 리듬을 익히세요"
+        hint_surf = font_kr.render(hint, True, (180, 190, 200))
+        hint_r = hint_surf.get_rect(center=(w // 2, h - 40))
+        screen.blit(hint_surf, hint_r)
+
+    def _draw_paused_and_debug(self, screen: Any, config: Any) -> None:
+        """일시정지 라벨 및 디버그(FPS/PTS/오디오) 오버레이."""
         if self._video_player.is_paused():
             if self._paused_label is None:
                 font_kr = self._font_kr or pygame.font.Font(None, 36)
@@ -830,7 +1111,6 @@ class ConversationStudio:
                 px, py = config.get_pos(0.08, 0.05)
                 screen.blit(self._paused_label, (px, py))
 
-        # 디버그 렌더: FPS, 비디오 FPS, PTS, 오디오(현재 미재생) — 한국어 폰트
         actual_fps = getattr(config, "actual_fps", 0.0)
         if actual_fps >= 0:
             font_kr = self._font_kr or pygame.font.Font(None, 28)
