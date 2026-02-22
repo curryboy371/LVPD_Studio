@@ -1,6 +1,326 @@
-from src.studio_core import LVPDStudio
+"""
+단일 진입점. 명령별 실행:
+
+  python main.py studio  → 스튜디오 화면만 (디버그)
+  python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
+
+테이블 CSV 생성·비디오 오디오 분리는 배치 파일에서만 실행 (create_csv.bat, extract_audio.bat → run_create_csv.py, run_extract_audio.py).
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from core.paths import (
+    DEFAULT_CSV_PATH,
+    DEFAULT_EXCEL_PATH,
+    DEFAULT_OUTPUT_DIR,
+    FFMPEG_CMD,
+    RENDER_FPS,
+    RENDER_HEIGHT,
+    RENDER_WIDTH,
+)
+
+if TYPE_CHECKING:
+    from core.interfaces import IAudioMixer, IVideoRenderer
+    from data.models import LoadedContent, VideoSegment
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# 배치 파이프라인: 영상 길이·렌더·mux
+# =============================================================================
+
+def _get_video_duration_sec(file_path: str | Path) -> float:
+    """영상 파일 재생 길이(초). 실패 시 0.0. end_time=-1(끝까지)일 때 사용."""
+    path = Path(file_path)
+    if not path.exists():
+        return 0.0
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+            ],
+            capture_output=True,
+            timeout=10,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        )
+        if result.returncode == 0 and result.stdout:
+            return max(0.0, float(result.stdout.strip()))
+    except Exception:
+        pass
+    return 0.0
+
+
+def _effective_end_time(seg: "VideoSegment") -> float:
+    """세그먼트의 실제 종료 시각(초). end_time이 -1이면 영상 길이까지."""
+    from data.models import VideoSegment
+    seg = seg if isinstance(seg, VideoSegment) else seg
+    if seg.end_time < 0:
+        duration = _get_video_duration_sec(seg.file_path)
+        return seg.start_time + duration if duration > 0 else seg.start_time
+    return seg.end_time
+
+
+def _render_content_to_video(
+    renderer: "IVideoRenderer",
+    content: "LoadedContent",
+    output_path: str | Path,
+    width: int = RENDER_WIDTH,
+    height: int = RENDER_HEIGHT,
+    fps: int = RENDER_FPS,
+) -> str:
+    """LoadedContent의 segment/overlay 쌍으로 프레임을 생성해 FFmpeg으로 인코딩한 비디오 파일을 만든다."""
+    from data.models import LoadedContent
+    segments = content.video_segments
+    overlays = content.overlay_items
+    n = min(len(segments), len(overlays))
+
+    ffmpeg_cmd = FFMPEG_CMD
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if n == 0:
+        # 세그먼트 없으면 1초 검정 영상 생성
+        cmd = [
+            ffmpeg_cmd, "-y",
+            "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=1",
+            "-r", str(fps),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(out_path),
+        ]
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        subprocess.run(cmd, capture_output=True, timeout=60, creationflags=creationflags, check=True)
+        return str(out_path.resolve())
+
+    # 한 번에 모든 프레임을 pipe로 FFmpeg에 전달
+    cmd = [
+        ffmpeg_cmd, "-y",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-s", f"{width}x{height}", "-r", str(fps), "-i", "pipe:0",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        str(out_path),
+    ]
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    assert proc.stdin is not None
+    try:
+        frame_dt = 1.0 / fps
+        for i in range(n):
+            seg = segments[i]
+            ov = overlays[i]
+            start = seg.start_time
+            end = _effective_end_time(seg)
+            if end <= start:
+                continue
+            duration_sec = end - start
+            num_frames = max(0, int(round(duration_sec * fps)))
+            for k in range(num_frames):
+                t = start + k * frame_dt
+                frame = renderer.render_frame(
+                    timestamp_sec=t,
+                    width=width,
+                    height=height,
+                    segment=seg,
+                    overlay=ov,
+                )
+                proc.stdin.write(frame.tobytes())
+    finally:
+        proc.stdin.close()
+    _, stderr = proc.communicate(timeout=600)
+    if proc.returncode != 0:
+        err = (stderr or b"").decode("utf-8", errors="replace")[:800]
+        raise RuntimeError(f"비디오 인코딩 실패 (코드 {proc.returncode}): {err}")
+    return str(out_path.resolve())
+
+
+def run_pipeline(
+    renderer: "IVideoRenderer",
+    mixer: "IAudioMixer",
+    content: "LoadedContent",
+    output_dir: str | Path,
+    width: int = RENDER_WIDTH,
+    height: int = RENDER_HEIGHT,
+    fps: int = RENDER_FPS,
+) -> str:
+    """배치 전용: CSV 로드 콘텐츠를 렌더 → 오디오 믹싱 → mux 후 output_dir에 저장.
+
+    비디오는 세그먼트별로만 렌더한다. 전체 재생시간을 따로 계산하지 않음.
+    오디오/무음 길이는 비디오 세그먼트 합산으로만 결정(FFmpeg용).
+
+    Returns:
+        최종 저장된 MP4 파일 경로.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    segments = content.video_segments
+    overlays = content.overlay_items
+    n = min(len(segments), len(overlays))
+    # 오디오/무음 출력 길이용 (FFmpeg anullsrc 등은 양수만 허용)
+    if n > 0:
+        audio_duration_sec = sum(
+            max(0.0, _effective_end_time(segments[i]) - segments[i].start_time) for i in range(n)
+        )
+    else:
+        audio_duration_sec = 0.0
+    if audio_duration_sec <= 0:
+        audio_duration_sec = 1.0
+
+    with tempfile.TemporaryDirectory(prefix="lvpd_") as tmp:
+        tmp_path = Path(tmp)
+        temp_video = tmp_path / "video.mp4"
+        temp_audio = tmp_path / "audio.wav"
+
+        logger.info("비디오 렌더링 중...")
+        video_path = _render_content_to_video(
+            renderer, content, temp_video, width=width, height=height, fps=fps
+        )
+
+        logger.info("오디오 믹싱 중...")
+        mixer.mix_from_tracks(
+            content.audio_tracks,
+            output_path=str(temp_audio),
+            duration_sec=audio_duration_sec,
+        )
+
+        if not temp_audio.exists():
+            # 오디오 파일이 없으면 무음 생성 (mux 필수, d는 양수만 허용)
+            silence_duration = max(0.01, audio_duration_sec)
+            logger.info("오디오 없음, 무음 생성 중... (%.2fs)", silence_duration)
+            cmd = [
+                FFMPEG_CMD, "-y",
+                "-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo:d={silence_duration}",
+                str(temp_audio),
+            ]
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+            subprocess.run(cmd, capture_output=True, timeout=30, creationflags=creationflags, check=True)
+
+        final_path = output_dir / "rendered.mp4"
+        logger.info("비디오·오디오 합성 중: %s", final_path)
+        from utils.ffmpeg_wrapper import mux_video_audio
+        mux_video_audio(video_path, str(temp_audio), final_path)
+    return str(final_path.resolve())
+
+
+# =============================================================================
+# 콘텐츠 테이블 생성 (studio / batch 공통)
+# =============================================================================
+
+
+def generate_content_table(csv_path: str | Path) -> "LoadedContent":
+    """시작 전 콘텐츠 테이블 생성. table_manager에 저장된 최종 테이블이 있으면 그걸로 LoadedContent 생성, 없으면 CSV에서 로드."""
+    from data.csv_processor import load_content_from_csv
+    from data.table_manager import get_loaded_content, get_table
+
+    if get_table() is not None:
+        content = get_loaded_content()
+    else:
+        content = load_content_from_csv(csv_path)
+    n_seg = len(content.video_segments)
+    n_ov = len(content.overlay_items)
+    n_aud = len(content.audio_tracks)
+    logger.info("테이블 생성: %s → 세그먼트 %d, 오버레이 %d, 오디오 %d", csv_path, n_seg, n_ov, n_aud)
+    return content
+
+
+# =============================================================================
+# 명령 핸들러: studio / extract-audio / batch
+# =============================================================================
+
+
+def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """스튜디오(디버깅) 모드: 테이블 생성 후 화면만 출력 (녹화 없음)."""
+    from data.csv_processor import ensure_video_data_csv
+    from studio.runner import run, _create_studio
+
+    csv_path = ensure_video_data_csv(DEFAULT_CSV_PATH, DEFAULT_EXCEL_PATH)
+    if not csv_path:
+        logger.error(
+            "엑셀 파일을 넣어주세요: %s",
+            DEFAULT_EXCEL_PATH,
+        )
+        sys.exit(1)
+    content = generate_content_table(csv_path)
+    studio = _create_studio("conversation", csv_path, content=content)
+    run(studio, mode="debug")
+
+
+def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """배치 모드: 테이블 생성 → 렌더 → mux → output/ 저장."""
+    from core.interfaces import IAudioMixer, IVideoRenderer
+    from data.csv_processor import ensure_video_data_csv
+
+    if args.csv and args.csv.strip():
+        csv_path = args.csv.strip()
+    else:
+        csv_path = ensure_video_data_csv(DEFAULT_CSV_PATH, DEFAULT_EXCEL_PATH) or str(DEFAULT_CSV_PATH)
+    if not Path(csv_path).exists():
+        logger.error(
+            "엑셀 파일을 넣어주세요: %s",
+            DEFAULT_EXCEL_PATH,
+        )
+        sys.exit(1)
+
+    content = generate_content_table(csv_path)
+    if not content.video_segments and not content.overlay_items:
+        logger.warning("CSV에서 비디오 세그먼트/오버레이가 없습니다.")
+        return
+    from video.renderer import FFmpegSegmentOverlayRenderer
+    from audio.mixer import FFmpegAudioMixer
+    renderer: IVideoRenderer = FFmpegSegmentOverlayRenderer()
+    mixer: IAudioMixer = FFmpegAudioMixer()
+    output_dir = (args.output_dir or str(DEFAULT_OUTPUT_DIR)).strip() or "output"
+    final_path = run_pipeline(
+        renderer=renderer,
+        mixer=mixer,
+        content=content,
+        output_dir=output_dir,
+    )
+    print("파이프라인 완료. 출력 파일:", final_path)
+
+
+# =============================================================================
+# main: subparser 등록 → parse → 선택된 cmd에 따라 args.func(parser, args) 호출
+# =============================================================================
+
+
+def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("studio", help="스튜디오 화면만 보기 (녹화 없음)")
+    p.set_defaults(func=_cmd_studio)
+
+
+def _add_batch_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("batch", help="CSV 기반 배치 영상 제작 → output/")
+    p.add_argument("--csv", type=str, default="", help=f"CSV 경로. 비우면 기본 ({DEFAULT_CSV_PATH})")
+    p.add_argument("--output-dir", type=str, default="", help="출력 디렉터리. 비우면 output.")
+    p.set_defaults(func=_cmd_batch)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="LVPD: studio / batch")
+    subparsers = parser.add_subparsers(dest="cmd", required=True, help="실행 모드")
+
+    _add_studio_parser(subparsers)
+    _add_batch_parser(subparsers)
+
+    args = parser.parse_args()
+    args.func(parser, args)
+
 
 if __name__ == "__main__":
-    # 스튜디오 인스턴스 생성 및 실행
-    app = LVPDStudio()
-    app.run()
+    main()
