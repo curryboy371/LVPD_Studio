@@ -3,7 +3,7 @@
 core.IStudio 계약을 따르며, 창·루프·녹화는 러너가 담당.
 """
 from studio.runner import run, main
-from studio.studios.conversation import ConversationStudio
+from studio.conversation import ConversationStudio
 from studio.studios.vocabulary import VocabularyStudio
 
 __all__ = [

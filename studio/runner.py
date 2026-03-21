@@ -22,14 +22,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 from core.interfaces import IStudio
 from core.paths import (
-    DEFAULT_CSV_PATH,
-    DEFAULT_EXCEL_PATH,
+    DEFAULT_BASE_SENTENCES_CSV,
+    DEFAULT_SENTENCE_WORD_MAP_CSV,
+    DEFAULT_SUB_SENTENCES_CSV,
+    DEFAULT_WORDS_TABLE_CSV,
     STUDIO_FPS,
     STUDIO_HEIGHT,
     STUDIO_WIDTH,
 )
-from data.csv_processor import ensure_video_data_csv, load_content_from_csv
-from data.table_manager import get_loaded_content, get_table
+from data.table_manager import (
+    get_loaded_content,
+    get_table,
+    set_table,
+    load_base_sentences_from_csv,
+    load_sentence_word_map_from_csv,
+    load_sub_sentences_from_csv,
+    load_words_table_from_csv,
+    get_table_rows,
+)
 
 
 # ----- 공통 인프라 -----
@@ -274,7 +284,7 @@ def _create_studio(
     **kwargs,
 ) -> IStudio:
     if name == "conversation":
-        from studio.studios.conversation import ConversationStudio
+        from studio.conversation import ConversationStudio
         return ConversationStudio(
             csv_path=csv_path or "",
             content=content,
@@ -323,24 +333,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    csv_path: str | None = (args.csv or str(DEFAULT_CSV_PATH)).strip() or None
+    csv_path: str | None = (args.csv or "").strip() or None
     if args.studio == "conversation":
-        if not csv_path:
-            csv_path = str(DEFAULT_CSV_PATH)
-        resolved = ensure_video_data_csv(Path(csv_path), DEFAULT_EXCEL_PATH)
-        if resolved:
-            csv_path = resolved
-        if not Path(csv_path).exists():
-            print("엑셀 파일을 넣어주세요:", DEFAULT_EXCEL_PATH, file=sys.stderr)
+        load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
+        load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+        load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+        load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
+        set_table(get_table_rows())
+        content = get_loaded_content() if get_table() else None
+        if not content or (not content.video_segments and not content.overlay_items):
+            print("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 를 확인하세요.", file=sys.stderr)
             sys.exit(1)
-    content = None
-    if args.studio == "conversation":
-        if get_table() is not None:
-            content = get_loaded_content()
-        else:
-            content = load_content_from_csv(csv_path)
+    else:
+        content = None
 
-    studio = _create_studio(args.studio, csv_path, content=content)
+    studio = _create_studio(args.studio, csv_path or "", content=content)
     run(
         studio,
         mode=args.mode,

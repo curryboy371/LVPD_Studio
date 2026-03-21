@@ -124,7 +124,6 @@ def _load_font_at(path: Path, size: int) -> "Optional[pygame.font.Font]":
     for p in to_try:
         try:
             font = pygame.font.Font(str(p), size)
-            logger.info("폰트 로드 성공: %s (size=%d)", p, size)
             return font
         except Exception as e:
             logger.debug("폰트 로드 실패 %s: %s", p, e)

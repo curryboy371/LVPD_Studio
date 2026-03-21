@@ -72,7 +72,7 @@ class AudioTrack(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# CSV 행 (기존 ContentRow)
+# CSV 행 (ContentRow)
 # ---------------------------------------------------------------------------
 
 
@@ -104,3 +104,95 @@ class LoadedContent(BaseModel):
     video_segments: list[VideoSegment] = Field(default_factory=list, description="영상 구간 목록")
     overlay_items: list[OverlayItem] = Field(default_factory=list, description="오버레이 요소 목록")
     audio_tracks: list[AudioTrack] = Field(default_factory=list, description="오디오 트랙 목록")
+
+
+# ---------------------------------------------------------------------------
+# 테이블 구조 (base_sentence / word / sub_sentence / sentence_word_map)
+# ---------------------------------------------------------------------------
+
+
+class VideoRange(BaseModel):
+    """영상 구간: ms 단위."""
+
+    start_ms: int = Field(default=0, ge=0, description="시작 시각(ms)")
+    end_ms: int = Field(default=0, ge=-1, description="종료 시각(ms). -1이면 끝까지")
+
+
+class BaseSentenceSound(BaseModel):
+    """문장 음성: L1/L2 경로 및 음절 시각(ms)."""
+
+    lv1_path: str = Field(default="", description="L1 음성 경로")
+    lv2_path: str = Field(default="", description="L2 음성 경로")
+    syllable_times_l1: list[int] = Field(default_factory=list, description="L1 음절별 시각(ms)")
+
+
+class BaseSentenceMedia(BaseModel):
+    """문장 미디어: 영상 경로·구간, 음성."""
+
+    video_path: str = Field(default="", description="영상 파일 경로")
+    video_range: VideoRange = Field(default_factory=VideoRange, description="재생 구간(ms)")
+    sound: BaseSentenceSound = Field(default_factory=BaseSentenceSound, description="음성 정보")
+
+
+class SentenceWordMap(BaseModel):
+    """문장의 slot_order 위치에 올 단어 및 클릭/슬롯 여부."""
+
+    sentence_id: int = Field(..., description="base_sentence.id")
+    word_id: int = Field(..., description="word.id")
+    slot_order: int = Field(default=0, ge=0, description="슬롯 순서")
+    is_clickable: bool = Field(default=True, description="클릭 가능 여부")
+    is_slot_target: bool = Field(default=False, description="슬롯 교체 대상 여부")
+
+    @field_validator("is_clickable", "is_slot_target", mode="before")
+    @classmethod
+    def to_bool(cls, v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("true", "1", "yes", "y"):
+                return True
+            if s in ("false", "0", "no", "n", ""):
+                return False
+        return False
+
+
+class BaseSentence(BaseModel):
+    """학습 원본 문장 + 미디어 리소스."""
+
+    id: int = Field(..., description="기본키")
+    topic: str = Field(default="", description="주제 (예: 쇼핑)")
+    level: int = Field(default=1, ge=1, description="난이도")
+    raw_sentence: str = Field(default="", description="원문 (예: {苹果}{多少}{钱})")
+    translation: str = Field(default="", description="번역")
+    life_tip: str = Field(default="", description="생활 팁")
+    media: BaseSentenceMedia = Field(default_factory=BaseSentenceMedia, description="미디어 정보")
+    word_maps: list[SentenceWordMap] = Field(
+        default_factory=list,
+        description="이 문장(id)에 대한 단어 배치 목록. 로드 후 매니저에서 채움.",
+    )
+
+
+class Word(BaseModel):
+    """문장 공통 단어 마스터."""
+
+    id: int = Field(..., description="기본키")
+    word: str = Field(default="", description="한자 단어")
+    pinyin: str = Field(default="", description="성조 병음 (예: píngguǒ)")
+    pos: str = Field(default="", description="품사 (예: 명사, 동사). 복수 시 | 구분")
+    meaning: str = Field(default="", description="뜻")
+    img_path: str = Field(default="", description="이미지 경로")
+    sound_path: str = Field(default="", description="단어 단독 발음 음원 (선택)")
+
+
+class SubSentence(BaseModel):
+    """슬롯 교체 시 사용할 대체 단어·번역·음성."""
+
+    id: int = Field(..., description="기본키")
+    base_id: int = Field(..., description="base_sentence.id")
+    target_slot_order: int = Field(default=0, ge=0, description="대상 슬롯 순서")
+    alt_word_id: int = Field(..., description="대체 단어 word.id")
+    alt_translation: str = Field(default="", description="대체 번역")
+    alt_sound_path: str = Field(default="", description="대체 음성 경로")

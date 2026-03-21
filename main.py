@@ -4,7 +4,7 @@
   python main.py studio  → 스튜디오 화면만 (디버그)
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
 
-테이블 CSV 생성·비디오 오디오 분리는 배치 파일에서만 실행 (create_csv.bat, extract_audio.bat → run_create_csv.py, run_extract_audio.py).
+테이블 CSV 생성은 배치 파일에서만 실행 (create_all_csv.bat → run_create_new_tables_csv.py).
 """
 from __future__ import annotations
 
@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.paths import (
-    DEFAULT_CSV_PATH,
-    DEFAULT_EXCEL_PATH,
     DEFAULT_OUTPUT_DIR,
     FFMPEG_CMD,
     RENDER_FPS,
@@ -222,19 +220,18 @@ def run_pipeline(
 # =============================================================================
 
 
-def generate_content_table(csv_path: str | Path) -> "LoadedContent":
-    """시작 전 콘텐츠 테이블 생성. table_manager에 저장된 최종 테이블이 있으면 그걸로 LoadedContent 생성, 없으면 CSV에서 로드."""
-    from data.csv_processor import load_content_from_csv
+def generate_content_table(content_label: str = "new tables") -> "LoadedContent":
+    """콘텐츠 테이블 생성. table_manager에 저장된 테이블로 LoadedContent 생성 (테이블 로드 후 set_table 호출 필요)."""
     from data.table_manager import get_loaded_content, get_table
 
-    if get_table() is not None:
-        content = get_loaded_content()
-    else:
-        content = load_content_from_csv(csv_path)
+    rows = get_table()
+    if not rows:
+        return LoadedContent()
+    content = get_loaded_content()
     n_seg = len(content.video_segments)
     n_ov = len(content.overlay_items)
     n_aud = len(content.audio_tracks)
-    logger.info("테이블 생성: %s → 세그먼트 %d, 오버레이 %d, 오디오 %d", csv_path, n_seg, n_ov, n_aud)
+    logger.info("테이블 생성: %s → 세그먼트 %d, 오버레이 %d, 오디오 %d", content_label, n_seg, n_ov, n_aud)
     return content
 
 
@@ -244,41 +241,64 @@ def generate_content_table(csv_path: str | Path) -> "LoadedContent":
 
 
 def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """스튜디오(디버깅) 모드: 테이블 생성 후 화면만 출력 (녹화 없음)."""
-    from data.csv_processor import ensure_video_data_csv
+    """스튜디오(디버깅) 모드: 신규 테이블 CSV 로드 후 화면만 출력 (녹화 없음)."""
+    from core.paths import (
+        DEFAULT_BASE_SENTENCES_CSV,
+        DEFAULT_SENTENCE_WORD_MAP_CSV,
+        DEFAULT_SUB_SENTENCES_CSV,
+        DEFAULT_WORDS_TABLE_CSV,
+    )
+    from data.table_manager import (
+        load_base_sentences_from_csv,
+        load_sentence_word_map_from_csv,
+        load_sub_sentences_from_csv,
+        load_words_table_from_csv,
+        get_table_rows,
+    )
+    from data.table_manager import set_table
     from studio.runner import run, _create_studio
 
-    csv_path = ensure_video_data_csv(DEFAULT_CSV_PATH, DEFAULT_EXCEL_PATH)
-    if not csv_path:
-        logger.error(
-            "엑셀 파일을 넣어주세요: %s",
-            DEFAULT_EXCEL_PATH,
-        )
+    load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
+    load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+    load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+    load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
+    set_table(get_table_rows())
+
+    content = generate_content_table("new tables")
+    if not content.video_segments and not content.overlay_items:
+        logger.error("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 에 base_sentences.csv 등이 있는지 확인하세요.")
         sys.exit(1)
-    content = generate_content_table(csv_path)
-    studio = _create_studio("conversation", csv_path, content=content)
+    studio = _create_studio("conversation", "", content=content)
     run(studio, mode="debug")
 
 
 def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """배치 모드: 테이블 생성 → 렌더 → mux → output/ 저장."""
+    """배치 모드: 신규 테이블 로드 → 렌더 → mux → output/ 저장."""
+    from core.paths import (
+        DEFAULT_BASE_SENTENCES_CSV,
+        DEFAULT_SENTENCE_WORD_MAP_CSV,
+        DEFAULT_SUB_SENTENCES_CSV,
+        DEFAULT_WORDS_TABLE_CSV,
+    )
+    from data.table_manager import (
+        load_base_sentences_from_csv,
+        load_sentence_word_map_from_csv,
+        load_sub_sentences_from_csv,
+        load_words_table_from_csv,
+        get_table_rows,
+    )
+    from data.table_manager import set_table
     from core.interfaces import IAudioMixer, IVideoRenderer
-    from data.csv_processor import ensure_video_data_csv
 
-    if args.csv and args.csv.strip():
-        csv_path = args.csv.strip()
-    else:
-        csv_path = ensure_video_data_csv(DEFAULT_CSV_PATH, DEFAULT_EXCEL_PATH) or str(DEFAULT_CSV_PATH)
-    if not Path(csv_path).exists():
-        logger.error(
-            "엑셀 파일을 넣어주세요: %s",
-            DEFAULT_EXCEL_PATH,
-        )
-        sys.exit(1)
+    load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
+    load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+    load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+    load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
+    set_table(get_table_rows())
 
-    content = generate_content_table(csv_path)
+    content = generate_content_table("new tables")
     if not content.video_segments and not content.overlay_items:
-        logger.warning("CSV에서 비디오 세그먼트/오버레이가 없습니다.")
+        logger.warning("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성하세요.")
         return
     from video.renderer import FFmpegSegmentOverlayRenderer
     from audio.mixer import FFmpegAudioMixer
@@ -305,8 +325,8 @@ def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_batch_parser(subparsers: argparse._SubParsersAction) -> None:
-    p = subparsers.add_parser("batch", help="CSV 기반 배치 영상 제작 → output/")
-    p.add_argument("--csv", type=str, default="", help=f"CSV 경로. 비우면 기본 ({DEFAULT_CSV_PATH})")
+    p = subparsers.add_parser("batch", help="신규 테이블 CSV 기반 배치 영상 제작 → output/")
+    p.add_argument("--csv", type=str, default="", help="(미사용, 호환용)")
     p.add_argument("--output-dir", type=str, default="", help="출력 디렉터리. 비우면 output.")
     p.set_defaults(func=_cmd_batch)
 

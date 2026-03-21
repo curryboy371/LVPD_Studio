@@ -2,16 +2,30 @@
 
 from data.models import (
     AudioTrack,
+    BaseSentence,
+    BaseSentenceMedia,
+    BaseSentenceSound,
     ContentRow,
     LoadedContent,
     OverlayItem,
+    SubSentence,
+    SentenceWordMap,
+    VideoRange,
     VideoSegment,
+    Word,
 )
 
 __all__ = [
     "AudioTrack",
+    "BaseSentence",
+    "BaseSentenceMedia",
+    "BaseSentenceSound",
     "ContentRow",
     "LoadedContent",
     "OverlayItem",
+    "SubSentence",
+    "SentenceWordMap",
+    "VideoRange",
     "VideoSegment",
+    "Word",
 ]

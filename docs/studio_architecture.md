@@ -135,7 +135,7 @@ flowchart LR
 
 즉 배치는 **세그먼트·오버레이 단위로 “한 레이어 스택”**이 FFmpeg 한 번에 처리됩니다.
 
-### 스튜디오 (studios/conversation.py draw())
+### 스튜디오 (studio/conversation/ draw())
 
 - **데이터**: 회화 전용 CSV (video_path, sentence, translation 등).  
   `data.models`의 `VideoSegment`/`OverlayItem`과는 **다른 스키마**.
@@ -184,7 +184,7 @@ flowchart LR
 
 ### 6.1 ConversationStudio (회화)
 
-**파일**: `studio/studios/conversation.py`
+**패키지**: `studio/conversation/` (메인 클래스: `studio.py`)
 
 - **데이터**: CSV 로드 (`_load_conversation_csv`). 컬럼: `topic`, `id`, `video_path`(또는 `video_root/topic/id.mp4`), `sentence`, `translation` (JSON 배열 가능).
 - **비디오**: `SimpleVideoPlayer` (opencv → 프레임 캐시, 순차 read, FHD). 일시정지·되감기·앞으로 감기 지원.
