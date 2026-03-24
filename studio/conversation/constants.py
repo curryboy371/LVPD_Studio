@@ -25,8 +25,9 @@ _DEFAULT_CARD_FG = (200, 200, 200)
 class ShadowingStep(IntEnum):
     """쉐도잉 훈련 단계. 그리기/업데이트 분기용."""
 
-    LISTEN = 1  # Step 1: 원어민 속도로 듣기, 멈추면 병음/한자/해석 UI
-    UTIL = 2    # Step 2: 문장 활용 (슬롯 변형 문장)
+    VIDEO = 1   # 동영상 재생만 (페이드·병음/한자 UI 없음)
+    LISTEN = 2  # 원어민 속도로 듣기, 멈추면 병음/한자/해석·L1/L2 사운드
+    UTIL = 3    # 문장 활용 (슬롯 변형 문장·자막·단어 카드)
 
 
 class Step1SoundState(IntEnum):
