@@ -1,12 +1,16 @@
-"""회화 스튜디오 데이터 로딩: CSV/테이블/LoadedContent → 재생용 data_list."""
+"""회화 스튜디오 데이터 로딩.
+
+요구사항에 따라 기본 경로는 CSV 기반으로 재생용 `data_list`를 만든다.
+`data.table_manager` 등 테이블/모델 의존성은 사용하지 않는다(CSV-only).
+"""
 import csv
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
-from utils.pinyin_processor import get_pinyin_processor
 from utils.syllable_timing import parse_syllable_times_ms
 
 from .constants import _REPO_ROOT
@@ -23,6 +27,13 @@ def _parse_time_sec(val: Any, default: float = 0.0) -> float:
     return max(-1.0, x)
 
 
+def _raw_sentence_to_display(raw: str) -> str:
+    """'{苹果}{多少}{钱}？' → '苹果多少钱？'."""
+    if not raw:
+        return ""
+    return re.sub(r"\{([^}]*)\}", r"\1", raw)
+
+
 def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     """테이블 행 하나를 재생용 base 항목 딕셔너리로 변환."""
     topic = (row.get("topic") or "").strip()
@@ -36,6 +47,8 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         video_path = ""
 
     sen = row.get("sentence", "")
+    if isinstance(sen, str):
+        sen = _raw_sentence_to_display(sen)
     trans = row.get("translation", "")
     if isinstance(sen, str):
         sen = [sen] if sen else []
@@ -44,19 +57,27 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     words_raw = (row.get("words") or "").strip()
     words_list = [w.strip() for w in words_raw.split("|") if w.strip()] if words_raw else []
 
-    start_sec = _parse_time_sec(row.get("start_time") or row.get("start_ms", 0))
+    start_sec = _parse_time_sec(row.get("start_time") or row.get("start_ms", 0) or row.get("video_start_ms", 0))
     end_raw = row.get("end_time") or row.get("end_ms") or row.get("split_ms")
+    if end_raw in (None, ""):
+        end_raw = row.get("video_end_ms")
     end_sec = _parse_time_sec(end_raw, -1.0) if end_raw not in (None, "") else -1.0
 
-    sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or "").strip()
-    sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or "").strip()
+    sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or row.get("sound_lv1_path") or "").strip()
+    sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or row.get("sound_lv2_path") or "").strip()
     if sound_l1 and not os.path.isabs(sound_l1):
         sound_l1 = str(repo / sound_l1.replace("\\", "/"))
     if sound_l2 and not os.path.isabs(sound_l2):
         sound_l2 = str(repo / sound_l2.replace("\\", "/"))
 
-    syllable_times_l1 = parse_syllable_times_ms(str(row.get("syllable_times_l1_ms") or "").strip())
-    syllable_times_l2 = parse_syllable_times_ms(str(row.get("syllable_times_l2_ms") or "").strip())
+    syllable_times_l1_raw = row.get("syllable_times_l1_ms")
+    if syllable_times_l1_raw in (None, ""):
+        syllable_times_l1_raw = row.get("syllable_times_l1")
+    syllable_times_l2_raw = row.get("syllable_times_l2_ms")
+    if syllable_times_l2_raw in (None, ""):
+        syllable_times_l2_raw = row.get("syllable_times_l2")
+    syllable_times_l1 = parse_syllable_times_ms(str(syllable_times_l1_raw or "").strip())
+    syllable_times_l2 = parse_syllable_times_ms(str(syllable_times_l2_raw or "").strip())
 
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
@@ -84,141 +105,19 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     }
 
 
-def _data_list_from_loaded_content(content: Any) -> list[dict]:
-    """LoadedContent에서 재생용 _data_list 생성. segment/overlay 쌍당 한 항목."""
-    try:
-        from data.models import LoadedContent
-        content = content if isinstance(content, LoadedContent) else LoadedContent.model_validate(content)
-    except Exception:
-        return []
-    segments = content.video_segments
-    overlays = content.overlay_items
-    audio_tracks = getattr(content, "audio_tracks", []) or []
-    n = min(len(segments), len(overlays))
-    processor = get_pinyin_processor()
-    table_rows = []
-    try:
-        from data.table_manager import get_table
-        table_rows = get_table() or []
-    except Exception:
-        pass
-    out = []
-    for i in range(n):
-        seg = segments[i]
-        ov = overlays[i]
-        sen_raw = ov.sentence or ov.text
-        if isinstance(sen_raw, list):
-            sen_str = str(sen_raw[0]) if sen_raw else ""
-        else:
-            sen_str = str(sen_raw or "")
-        pinyin_sandhi_types = processor.get_sandhi_types(sen_str) if sen_str and processor.available else []
-        sound_l1 = audio_tracks[2 * i].sound_path if len(audio_tracks) > 2 * i else ""
-        sound_l2 = audio_tracks[2 * i + 1].sound_path if len(audio_tracks) > 2 * i + 1 else ""
-        row = table_rows[i] if i < len(table_rows) else {}
-        syllable_times_l1 = parse_syllable_times_ms(str(row.get("syllable_times_l1_ms") or "").strip())
-        syllable_times_l2 = parse_syllable_times_ms(str(row.get("syllable_times_l2_ms") or "").strip())
-        words_raw = (row.get("words") or "").strip()
-        words_list = [w.strip() for w in words_raw.split("|") if w.strip()] if words_raw else []
-        out.append({
-            "video_path": seg.file_path or "",
-            "start_time": seg.start_time,
-            "end_time": seg.end_time,
-            "sentence": [ov.sentence or ov.text] if (ov.sentence or ov.text) else [],
-            "translation": [ov.translation] if ov.translation else [],
-            "pinyin": (ov.pinyin or "").strip(),
-            "pinyin_phonetic": (ov.pinyin_phonetic or "").strip(),
-            "pinyin_lexical": (ov.pinyin_lexical or "").strip(),
-            "pinyin_sandhi_types": pinyin_sandhi_types,
-            "sound_l1": sound_l1,
-            "sound_l2": sound_l2,
-            "syllable_times_l1": syllable_times_l1,
-            "syllable_times_l2": syllable_times_l2,
-            "words": words_list,
-            "id": str(i),
-            "topic": "",
-            "index": i,
-        })
-    return out
+def _data_list_from_csv_rows(rows: list[dict], *, repo: Path) -> list[dict]:
+    """CSV row(= base 단위)만으로 재생용 data_list 생성.
 
-
-def _data_list_from_table_rows(rows: list[dict]) -> list[dict]:
-    """테이블 행(한 행당 base 한 개)을 재생용 _data_list로 변환. sub_sentences 테이블에서 슬롯(활용) 목록을 가져와 base(0) + 활용(1,2,...) 순으로 구성."""
+    render_only 범위에서는 util(활용 슬롯)까지 필요 없으므로,
+    sub_sentences 테이블 의존성을 피하기 위해 base만 생성한다.
+    """
     if not rows:
         return []
-    repo = _REPO_ROOT
-    processor = get_pinyin_processor()
-    from data.table_manager import get_sub_sentences_for_base, build_sub_sentence_word_list
-
     out: list[dict] = []
-    global_index = 0
-    for row in rows:
+    for i, row in enumerate(rows):
         row = dict(row)
-        base_id_raw = row.get("id")
-        try:
-            base_id = int(base_id_raw) if base_id_raw is not None else 0
-        except (TypeError, ValueError):
-            base_id = 0
-        base_id_str = str(base_id_raw or "")
-
-        item = _row_to_base_item(row, global_index, repo)
-        item["type"] = "base"
-        item["slot_index"] = 0
-        sen_str = (row.get("sentence") or "")
-        if isinstance(sen_str, list):
-            sen_str = sen_str[0] if sen_str else ""
-        sen_str = str(sen_str).strip()
-        item["pinyin_sandhi_types"] = processor.get_sandhi_types(sen_str) if sen_str and processor.available else []
-        out.append(item)
-        global_index += 1
-
-        base_row = row
-        base_item = item
-        base_sen = base_row.get("sentence", "")
-        base_trans = base_row.get("translation", "")
-        if isinstance(base_sen, str):
-            base_sen = [base_sen] if base_sen else []
-        if isinstance(base_trans, str):
-            base_trans = [base_trans] if base_trans else []
-        base_pinyin = (base_row.get("pinyin_marks") or base_row.get("pinyin") or "").strip()
-        words_raw = (base_row.get("words") or "").strip()
-        words_list = [w.strip() for w in words_raw.split("|") if w.strip()] if words_raw else []
-
-        sub_list = get_sub_sentences_for_base(base_id)
-        for variant_index, sub in enumerate(sub_list, start=1):
-            sentence_words = build_sub_sentence_word_list(base_id, sub.target_slot_order, sub.alt_word_id)
-            new_sentence_str = "".join(sentence_words)
-            sen = [new_sentence_str]
-            trans = [sub.alt_translation or ""]
-
-            util_item = {
-                "video_path": base_item["video_path"],
-                "start_time": base_item["start_time"],
-                "end_time": base_item["end_time"],
-                "sentence": sen,
-                "translation": trans,
-                "pinyin": "",
-                "pinyin_phonetic": "",
-                "pinyin_lexical": "",
-                "sound_l1": "",
-                "sound_l2": "",
-                "syllable_times_l1": [],
-                "syllable_times_l2": [],
-                "words": words_list,
-                "id": base_id_str,
-                "topic": base_item["topic"],
-                "index": global_index,
-                "type": "util",
-                "slot_index": variant_index,
-                "base_sentence": base_sen,
-                "base_translation": base_trans,
-                "base_pinyin": base_pinyin,
-                "pinyin_sandhi_types": [],
-                "sentence_words": sentence_words,
-                "target_slot_order": sub.target_slot_order,
-            }
-            out.append(util_item)
-            global_index += 1
-
+        # csv loader가 id/topic/video_path/start_time/end_time을 제공한다고 가정
+        out.append(_row_to_base_item(row, i, repo))
     return out
 
 
@@ -327,19 +226,141 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
     return rows
 
 
-def build_data_list(csv_path: str, content: Any) -> list[dict]:
-    """CSV 경로 또는 LoadedContent로 재생용 data_list 생성. 로딩 로직 일원화."""
-    if content is not None:
+def _load_base_sentences_csv(csv_path: str) -> list[dict]:
+    """신규 테이블의 base_sentences.csv를 직접 읽어 재생용 row(list[dict])로 변환."""
+    path = Path(csv_path)
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                rows.append({
+                    "id": (row.get("id") or "").strip(),
+                    "topic": (row.get("topic") or "").strip(),
+                    # get_table_rows() 포맷에 맞춰서 넣어둔다.
+                    "sentence": _raw_sentence_to_display((row.get("raw_sentence") or "").strip()),
+                    "translation": (row.get("translation") or "").strip(),
+                    "words": "",
+                    "video_path": (row.get("video_path") or "").strip(),
+                    "start_ms": row.get("video_start_ms") or 0,
+                    "end_ms": row.get("video_end_ms") or -1,
+                    "sound_l1": (row.get("sound_lv1_path") or "").strip(),
+                    "sound_l2": (row.get("sound_lv2_path") or "").strip(),
+                    "pinyin_marks": "",
+                    "pinyin_phonetic": "",
+                    "pinyin_lexical": "",
+                    "syllable_times_l1": (row.get("syllable_times_l1") or "").strip(),
+                })
+            except Exception:
+                continue
+    return rows
+
+
+def _load_words_csv(csv_path: str) -> dict[int, str]:
+    """words.csv를 읽어 word_id -> hanzi(word) 매핑을 만든다."""
+    path = Path(csv_path)
+    if not path.exists():
+        return {}
+    out: dict[int, str] = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                wid = int(float(row.get("id") or 0))
+                w = str(row.get("word") or "").strip()
+                if wid and w:
+                    out[wid] = w
+            except Exception:
+                continue
+    return out
+
+
+def _load_sentence_word_map_csv(csv_path: str) -> dict[int, list[int]]:
+    """sentence_word_map.csv를 읽어 sentence_id -> word_id list(slot_order 순) 매핑."""
+    path = Path(csv_path)
+    if not path.exists():
+        return {}
+    tmp: dict[int, list[tuple[int, int]]] = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                sid = int(float(row.get("sentence_id") or 0))
+                wid = int(float(row.get("word_id") or 0))
+                slot = int(float(row.get("slot_order") or 0))
+                if sid and wid:
+                    tmp.setdefault(sid, []).append((slot, wid))
+            except Exception:
+                continue
+    out: dict[int, list[int]] = {}
+    for sid, pairs in tmp.items():
+        pairs.sort(key=lambda x: x[0])
+        out[sid] = [wid for _, wid in pairs]
+    return out
+
+
+def _attach_words_to_base_rows(
+    base_rows: list[dict],
+    *,
+    words_by_id: dict[int, str],
+    word_ids_by_sentence_id: dict[int, list[int]],
+) -> list[dict]:
+    """base_rows에 words 문자열(apple|...)을 채운다."""
+    if not base_rows:
+        return base_rows
+    for row in base_rows:
         try:
-            from data.table_manager import get_table
-            table_rows = get_table()
-            if table_rows:
-                return _data_list_from_table_rows(table_rows)
-            return _data_list_from_loaded_content(content)
-        except Exception as e:
-            logging.getLogger(__name__).debug(
-                "table rows unavailable, using loaded content: %s", e, exc_info=True
-            )
-            return _data_list_from_loaded_content(content)
-    rows = _normalize_table_rows_one_per_base(_load_conversation_csv(csv_path))
-    return _data_list_from_table_rows(rows) if rows else []
+            sid = int(float(row.get("id") or 0))
+        except Exception:
+            sid = 0
+        if not sid:
+            continue
+        word_ids = word_ids_by_sentence_id.get(sid) or []
+        if not word_ids:
+            continue
+        words = [words_by_id.get(wid, "").strip() for wid in word_ids]
+        words = [w for w in words if w]
+        if words:
+            row["words"] = "|".join(words)
+    return base_rows
+
+
+def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
+    """CSV 기반으로 재생용 data_list 생성.
+
+    Args:
+        csv_path: conversation CSV 경로(기본 경로).
+        content: 기존 호환용(이번 리팩터링에서는 사용하지 않음).
+
+    Returns:
+        render에 필요한 최소 키를 포함한 dict 리스트.
+    """
+    _ = content
+
+    # 1) CSV 우선: 명시 경로가 있으면 conversation 전용 CSV로 처리
+    csv_path = (csv_path or "").strip()
+    repo = _REPO_ROOT
+    if csv_path:
+        rows = _load_conversation_csv(csv_path)
+        rows = _normalize_table_rows_one_per_base(rows)
+        return _data_list_from_csv_rows(rows, repo=repo)
+
+    # 2) 기본 CSV: resource/csv/base_sentences.csv 직접 로드
+    try:
+        from core.paths import DEFAULT_BASE_SENTENCES_CSV, DEFAULT_WORDS_TABLE_CSV, DEFAULT_SENTENCE_WORD_MAP_CSV
+
+        base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
+        words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
+        word_ids_by_sentence_id = _load_sentence_word_map_csv(str(DEFAULT_SENTENCE_WORD_MAP_CSV))
+        base_rows = _attach_words_to_base_rows(
+            base_rows,
+            words_by_id=words_by_id,
+            word_ids_by_sentence_id=word_ids_by_sentence_id,
+        )
+        base_rows = _normalize_table_rows_one_per_base(base_rows)
+        return _data_list_from_csv_rows(base_rows, repo=repo)
+    except Exception as e:
+        logging.getLogger(__name__).debug("base_sentences CSV direct load failed: %s", e, exc_info=True)
+    return []
