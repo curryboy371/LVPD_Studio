@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.syllable_timing import parse_syllable_times_ms
+from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
 
@@ -82,6 +83,21 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
     pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
+    raw_sentence = "".join(str(x) for x in sen if str(x).strip()).strip()
+    if raw_sentence:
+        try:
+            pp = get_pinyin_processor()
+            if pp.available:
+                if not pinyin_marks:
+                    pinyin_marks = pp.full_convert(raw_sentence)
+                if not pinyin_lexical:
+                    lexical_list = pp.get_lexical_pinyin(raw_sentence)
+                    pinyin_lexical = " ".join(lexical_list).strip()
+                if not pinyin_phonetic:
+                    phonetic_list = pp.get_phonetic_pinyin(raw_sentence)
+                    pinyin_phonetic = " ".join(phonetic_list).strip()
+        except Exception:
+            pass
 
     return {
         "video_path": video_path,
@@ -236,6 +252,29 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
         reader = csv.DictReader(f)
         for row in reader:
             try:
+                pinyin_marks = (
+                    row.get("pinyin_marks")
+                    or row.get("pinyin")
+                    or row.get("pinyin_text")
+                    or ""
+                ).strip()
+                pinyin_phonetic = (row.get("pinyin_phonetic") or row.get("pinyin_ipa") or "").strip()
+                pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
+                text = _raw_sentence_to_display((row.get("raw_sentence") or "").strip())
+                if text:
+                    try:
+                        pp = get_pinyin_processor()
+                        if pp.available:
+                            if not pinyin_marks:
+                                pinyin_marks = pp.full_convert(text)
+                            if not pinyin_lexical:
+                                lexical_list = pp.get_lexical_pinyin(text)
+                                pinyin_lexical = " ".join(lexical_list).strip()
+                            if not pinyin_phonetic:
+                                phonetic_list = pp.get_phonetic_pinyin(text)
+                                pinyin_phonetic = " ".join(phonetic_list).strip()
+                    except Exception:
+                        pass
                 rows.append({
                     "id": (row.get("id") or "").strip(),
                     "topic": (row.get("topic") or "").strip(),
@@ -248,9 +287,9 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     "end_ms": row.get("video_end_ms") or -1,
                     "sound_l1": (row.get("sound_lv1_path") or "").strip(),
                     "sound_l2": (row.get("sound_lv2_path") or "").strip(),
-                    "pinyin_marks": "",
-                    "pinyin_phonetic": "",
-                    "pinyin_lexical": "",
+                    "pinyin_marks": pinyin_marks,
+                    "pinyin_phonetic": pinyin_phonetic,
+                    "pinyin_lexical": pinyin_lexical,
                     "syllable_times_l1": (row.get("syllable_times_l1") or "").strip(),
                 })
             except Exception:

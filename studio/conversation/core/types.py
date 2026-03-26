@@ -62,7 +62,18 @@ def extract_sentence_render_data(item: ConversationItemLike) -> SentenceRenderDa
     """dict 기반 item에서 문장/병음/번역을 안전하게 추출."""
     sentences: Sequence[Any] = item.get("sentence") or []
     translations: Sequence[Any] = item.get("translation") or []
-    pinyin_text = str(item.get("pinyin") or "").strip()
+    # 데이터 소스에 따라 병음 키가 다를 수 있어 fallback 순서로 조회.
+    pinyin_raw = (
+        item.get("pinyin")
+        or item.get("pinyin_marks")
+        or item.get("pinyin_phonetic")
+        or item.get("pinyin_lexical")
+        or ""
+    )
+    if isinstance(pinyin_raw, (list, tuple)):
+        pinyin_text = " ".join(str(x) for x in pinyin_raw if str(x).strip()).strip()
+    else:
+        pinyin_text = str(pinyin_raw).strip()
 
     sentence = " ".join(str(x) for x in list(sentences)[:3]).strip() if sentences else ""
     translation = " ".join(str(x) for x in list(translations)[:3]).strip() if translations else ""

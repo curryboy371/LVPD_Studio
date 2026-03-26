@@ -15,6 +15,9 @@ class IStep(ABC):
 
     def __init__(self) -> None:
         self.is_done: bool = False
+        # 다음 Step으로 넘어가도 된다는 "전환 시그널".
+        # PlaybackManager는 이 값이 True일 때만 step_sequence를 진행한다.
+        self.transition_signal: bool = False
 
     @abstractmethod
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
@@ -32,4 +35,9 @@ class BaseStep(IStep):
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
+        # 직전 step의 마지막 프레임을 다음 step의 배경으로 쓰기 위한 스냅샷.
+        # PlaybackManager가 step 전환 시점에 캡처해서 주입할 수 있다.
+        self.bg_frame: pygame.Surface | None = None
+        # step이 전환 직전에 "다음 step으로 넘길 프레임"을 직접 합성했을 때 사용.
+        self.transition_bg_frame: pygame.Surface | None = None
 

@@ -92,7 +92,18 @@ class ConversationStudio:
             StepKind.LEARNING: LearningStep(drawer=self._drawer, video_player=self._video_player),
             StepKind.PRACTICE: PracticeStep(drawer=self._drawer, video_player=self._video_player),
         }
-        self._manager = PlaybackManager(items=self._data_list, steps=steps, video_player=self._video_player)
+        # 컨텐츠(화면) 시퀀스:
+        # - StepKind.VIDEO: 비디오만 재생(프레임 표시)하는 화면
+        # - StepKind.LEARNING: 비디오 위에 문장(한자/병음/번역)을 출력하는 화면
+        #
+        # "다음 컨텐츠로 전환"은 각 Step이 transition_signal=True로 올리면 PlaybackManager가 감지해
+        # 다음 StepKind로 자동 전환한다.
+        self._manager = PlaybackManager(
+            items=self._data_list,
+            steps=steps,
+            video_player=self._video_player,
+            step_sequence=[StepKind.VIDEO, StepKind.LEARNING],
+        )
 
     def get_title(self) -> str:
         return "LVPD Studio - 회화"

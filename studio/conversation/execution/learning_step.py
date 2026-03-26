@@ -20,7 +20,7 @@ class LearningStep(BaseStep):
         return
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
-        frame = self.video_player.get_frame(ctx.width, ctx.height)
+        frame = self.bg_frame or self.video_player.get_frame(ctx.width, ctx.height)
         if frame is not None:
             screen.blit(frame, (0, 0))
 
