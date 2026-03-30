@@ -5,6 +5,7 @@ from __future__ import annotations
 import pygame
 
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig, extract_sentence_render_data
+from ..tools.fonts import DEFAULT_PRACTICE_STYLE
 from .base import BaseStep
 
 
@@ -13,11 +14,13 @@ class PracticeStep(BaseStep):
 
     render_only 범위에서는 '단어 리스트를 순회' 로직은 넣지 않고,
     words가 있으면 첫 단어만 화면에 표시하는 수준으로 단순화한다.
+
+    문장 블록 `style`은 보통 스튜디오가 `ConversationRenderSettings.practice_text_colors`로 넘긴다.
     """
 
     def __init__(self, *, drawer, video_player, style: SentenceStyleConfig | None = None) -> None:
         super().__init__(drawer=drawer, video_player=video_player)
-        self._style = style or SentenceStyleConfig(hanzi_color=(255, 230, 120))
+        self._style = style or DEFAULT_PRACTICE_STYLE
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         _ = (ctx, item)

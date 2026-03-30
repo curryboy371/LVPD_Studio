@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import pygame
 
-from utils.fonts import load_font_chinese, load_font_chinese_freetype, load_font_korean
+from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chinese_freetype, load_font_korean
 
 from .constants import _REPO_ROOT
 from .data_loading import build_data_list
@@ -24,12 +24,22 @@ from .overlay_draw import draw_paused_and_debug
 from .video_players import SimpleVideoPlayer, VideoAudioPlayer
 
 from .core.playback_manager import PlaybackManager, StepKind
-from .core.types import FrameContext
+from .core.types import FrameContext, SentenceStyleConfig
 from .execution.learning_step import LearningStep
 from .execution.practice_step import PracticeStep
 from .execution.video_step import VideoStep
 from .tools.common_drawer import CommonDrawer
-from .tools.fonts import FontBundle
+from .tools.fonts import (
+    ConversationFontSizes,
+    ConversationRenderSettings,
+    DEFAULT_CONVERSATION_RENDER_SETTINGS,
+    DEFAULT_LEARNING_STYLE,
+    DEFAULT_PRACTICE_STYLE,
+    FontBundle,
+    GRAY_MUTED,
+    RED,
+    WHITE,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,15 +48,22 @@ logger = logging.getLogger(__name__)
 class ConversationStudio:
     """회화 스튜디오: LoadedContent/CSV 기반 비디오 + 텍스트 표시."""
 
-    def __init__(self, csv_path: str = "", content: Any = None, **_: Any) -> None:
+    def __init__(
+        self,
+        csv_path: str = "",
+        content: Any = None,
+        **_: Any,
+    ) -> None:
         self._csv_path = csv_path
         self._data_list = build_data_list(csv_path, content)
+        self._render_settings: Optional[ConversationRenderSettings] = None
 
         self._video_player = SimpleVideoPlayer()
         # 기존 디버그 오버레이가 깨지지 않게 유지(로직은 최소)
         self._video_audio = VideoAudioPlayer()
 
         # 폰트 핸들은 init()에서 pygame 초기화 이후 로드
+        # `_load_fonts`에서 채움. 크기별 용도는 init()의 FontBundle 주석과 동일.
         self._font_cn_big: Optional[pygame.font.Font] = None
         self._font_cn: Optional[pygame.font.Font] = None
         self._font_cn_big_ft: Any = None
@@ -71,26 +88,37 @@ class ConversationStudio:
 
     def init(self, config: Any = None) -> None:
         """pygame.init() 이후 한 번 호출. 폰트/3계층 객체 생성."""
-        _ = config
         if self._drawer is not None and self._manager is not None:
             return
 
-        self._load_fonts()
-        self._apply_font_fallbacks()
+        settings = self._resolve_render_settings(config)
+        self._render_settings = settings
 
+        learn_style, practice_style = self._load_fonts(settings.font_sizes)
+        self._apply_font_fallbacks(settings.font_sizes)
+
+        fs = settings.font_sizes
         fonts = FontBundle(
             hanzi_ft=self._font_cn_step1_ft or self._font_cn_big_ft,
-            hanzi_pg=self._font_cn_big or pygame.font.Font(None, 36),
+            hanzi_pg=self._font_cn_big or pygame.font.Font(None, fs.cn_big),
             pinyin_ft=self._font_cn_step1_pinyin_ft or self._font_cn_ft,
-            pinyin_pg=self._font_cn or pygame.font.Font(None, 28),
-            translation_pg=self._font_kr_step1 or self._font_kr or pygame.font.Font(None, 28),
+            pinyin_pg=self._font_cn or pygame.font.Font(None, fs.cn),
+            translation_pg=self._font_kr_step1 or self._font_kr or pygame.font.Font(None, fs.kr),
         )
         self._drawer = CommonDrawer(fonts=fonts)
 
         steps = {
             StepKind.VIDEO: VideoStep(drawer=self._drawer, video_player=self._video_player),
-            StepKind.LEARNING: LearningStep(drawer=self._drawer, video_player=self._video_player),
-            StepKind.PRACTICE: PracticeStep(drawer=self._drawer, video_player=self._video_player),
+            StepKind.LEARNING: LearningStep(
+                drawer=self._drawer,
+                video_player=self._video_player,
+                style=learn_style,
+            ),
+            StepKind.PRACTICE: PracticeStep(
+                drawer=self._drawer,
+                video_player=self._video_player,
+                style=practice_style,
+            ),
         }
         # 컨텐츠(화면) 시퀀스:
         # - StepKind.VIDEO: 비디오만 재생(프레임 표시)하는 화면
@@ -194,7 +222,8 @@ class ConversationStudio:
 
         if self._manager is None:
             # 데이터가 없거나 init 전이면 안내 문구만 표시
-            font = self._font_kr or pygame.font.Font(None, 28)
+            kr_sz = self._render_settings.font_sizes.kr if self._render_settings else 28
+            font = self._font_kr or pygame.font.Font(None, kr_sz)
             msg = font.render("ConversationStudio: manager not initialized", True, (180, 180, 180))
             screen.blit(msg, (20, 20))
             return
@@ -237,30 +266,46 @@ class ConversationStudio:
         resolved = _REPO_ROOT / path.replace("\\", "/")
         return str(resolved)
 
-    def _load_fonts(self) -> None:
-        """폰트 로드 (가능하면 freeType 사용)."""
-        self._font_cn_big = load_font_chinese(36)
-        self._font_cn = load_font_chinese(28)
-        self._font_cn_big_ft = load_font_chinese_freetype(36)
-        self._font_cn_ft = load_font_chinese_freetype(28)
-        self._font_cn_step1_ft = load_font_chinese_freetype(124) or self._font_cn_big_ft
-        self._font_cn_step1_pinyin_ft = load_font_chinese_freetype(66) or self._font_cn_ft
-        self._font_kr = load_font_korean(28)
-        self._font_kr_step1 = load_font_korean(56) or self._font_kr
+    def _resolve_render_settings(self, config: Any) -> ConversationRenderSettings:
+        """`config.conversation_render`가 있으면 사용, 없으면 기본값."""
+        if config is not None:
+            cr = getattr(config, "conversation_render", None)
+            if isinstance(cr, ConversationRenderSettings):
+                return cr
+        return DEFAULT_CONVERSATION_RENDER_SETTINGS
 
-    def _apply_font_fallbacks(self) -> None:
+    def _load_fonts(
+        self,
+        font_sizes: ConversationFontSizes,
+    ) -> tuple[SentenceStyleConfig, SentenceStyleConfig]:
+        """폰트 로드(가능하면 freeType). 색은 `load_font_*` 두 번째 인자(RGB 튜플)로만."""
+
+        fs = font_sizes
+        # 색은 아래 RGB 튜플 상수(RED, WHITE, …)만 두 번째 인자로 넘긴다.
+        self._font_cn_big = load_font_chinese(fs.cn_big, WHITE)
+        self._font_cn = load_font_chinese(fs.cn, RED)
+        self._font_cn_big_ft = load_font_chinese_freetype(fs.cn_big, WHITE)
+        self._font_cn_ft = load_font_chinese_freetype(fs.cn, RED)
+        self._font_cn_step1_ft = load_font_chinese_freetype(fs.cn_step1_hanzi, WHITE) or self._font_cn_big_ft
+        self._font_cn_step1_pinyin_ft = load_font_chinese_freetype(fs.cn_step1_pinyin, RED) or self._font_cn_ft
+        self._font_kr = load_font_korean(fs.kr, GRAY_MUTED)
+        self._font_kr_step1 = load_font_korean(fs.kr_step1, GRAY_MUTED) or self._font_kr
+
+        return DEFAULT_LEARNING_STYLE, DEFAULT_PRACTICE_STYLE
+
+    def _apply_font_fallbacks(self, sizes: ConversationFontSizes) -> None:
         """폰트 미로드 시 기본 폰트로 폴백."""
         from core.paths import DEFAULT_FONT_DIR, FONT_CN_FILENAME
 
         if self._font_cn_big is None:
-            self._font_cn_big = pygame.font.Font(None, 36)
+            self._font_cn_big = attach_font_fgcolor(pygame.font.Font(None, sizes.cn_big), WHITE)
             logger.warning(
                 "중국어 폰트 미로드 → 기본 폰트 사용(중국어 네모 가능). 다음 경로에 %s 넣기: %s",
                 FONT_CN_FILENAME,
                 DEFAULT_FONT_DIR.resolve(),
             )
         if self._font_cn is None:
-            self._font_cn = pygame.font.Font(None, 28)
+            self._font_cn = attach_font_fgcolor(pygame.font.Font(None, sizes.cn), RED)
         if self._font_kr is None:
-            self._font_kr = pygame.font.Font(None, 28)
+            self._font_kr = attach_font_fgcolor(pygame.font.Font(None, sizes.kr), GRAY_MUTED)
 

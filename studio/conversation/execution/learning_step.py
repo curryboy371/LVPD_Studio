@@ -5,15 +5,19 @@ from __future__ import annotations
 import pygame
 
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig, extract_sentence_render_data
+from ..tools.fonts import DEFAULT_LEARNING_STYLE
 from .base import BaseStep
 
 
 class LearningStep(BaseStep):
-    """학습(중앙 문장 표시) Step."""
+    """학습(중앙 문장 표시) Step.
+
+    `style`의 글자색은 보통 `ConversationStudio`가 `DEFAULT_LEARNING_STYLE`로 채운다.
+    """
 
     def __init__(self, *, drawer, video_player, style: SentenceStyleConfig | None = None) -> None:
         super().__init__(drawer=drawer, video_player=video_player)
-        self._style = style or SentenceStyleConfig()
+        self._style = style or DEFAULT_LEARNING_STYLE
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         _ = (ctx, item)

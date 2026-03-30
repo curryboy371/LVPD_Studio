@@ -161,19 +161,56 @@ class SimpleRecordingManager:
         return getattr(self, "_last_video_path", None)
 
 
+def _parse_conversation_font_sizes(text: str) -> Any:
+    """`cn_big,cn,step1_hanzi,step1_pinyin,kr,kr_step1` 여섯 크기."""
+    from studio.conversation.tools.fonts import ConversationFontSizes
+
+    parts = [int(x.strip()) for x in text.split(",")]
+    if len(parts) != 6:
+        raise ValueError(
+            "폰트 크기 6개 필요: cn_big,cn,cn_step1_hanzi,cn_step1_pinyin,kr,kr_step1 "
+            "(예: 36,28,124,66,28,56)"
+        )
+    return ConversationFontSizes(
+        cn_big=parts[0],
+        cn=parts[1],
+        cn_step1_hanzi=parts[2],
+        cn_step1_pinyin=parts[3],
+        kr=parts[4],
+        kr_step1=parts[5],
+    )
+
+
+def _conversation_render_from_cli_args(args: Any) -> Optional[Any]:
+    """CLI에서 `--font-sizes`가 있으면 `ConversationRenderSettings` 생성."""
+    from studio.conversation.tools.fonts import ConversationRenderSettings
+
+    if args.font_sizes is None:
+        return None
+    return ConversationRenderSettings(font_sizes=args.font_sizes)
+
+
 def run(
     studio: IStudio,
     mode: Literal["debug", "record"] = "debug",
     record_duration: float = 10.0,
     record_frames: Optional[int] = None,
+    *,
+    conversation_render: Optional[Any] = None,
 ) -> None:
-    """IStudio 실행. debug=화면만(녹화 없음), record=오프스크린 버퍼→인코딩만."""
+    """IStudio 실행. debug=화면만(녹화 없음), record=오프스크린 버퍼→인코딩만.
+
+    conversation 스튜디오: `conversation_render`(`ConversationRenderSettings`)를
+    `config.conversation_render`로 넘기면 폰트 크기가 적용된다. 색은 스튜디오 `load_font_*` 인자로만 지정한다.
+    """
     if mode == "record":
         os.environ["SDL_VIDEODRIVER"] = "dummy"
     import pygame
 
     pygame.init()
     config = StudioConfig(STUDIO_WIDTH, STUDIO_HEIGHT, STUDIO_FPS)
+    if conversation_render is not None:
+        config.conversation_render = conversation_render
     clock = pygame.time.Clock()
     studio.init(config)
 
@@ -331,6 +368,23 @@ def main() -> None:
         metavar="N",
         help="녹화 모드에서 녹화할 프레임 수. 지정 시 --record-duration 무시.",
     )
+
+    def _font_sizes_arg(s: str) -> Any:
+        try:
+            return _parse_conversation_font_sizes(s)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from e
+
+    parser.add_argument(
+        "--font-sizes",
+        type=_font_sizes_arg,
+        default=None,
+        metavar="A,B,C,D,E,F",
+        help=(
+            "conversation: 폰트 pt 6개 (쉼표): cn_big,cn,cn_step1_hanzi,cn_step1_pinyin,kr,kr_step1 "
+            "예: 36,28,124,66,28,56"
+        ),
+    )
     args = parser.parse_args()
 
     csv_path: str | None = (args.csv or "").strip() or None
@@ -353,6 +407,7 @@ def main() -> None:
         mode=args.mode,
         record_duration=args.record_duration,
         record_frames=args.record_frames,
+        conversation_render=_conversation_render_from_cli_args(args),
     )
 
 

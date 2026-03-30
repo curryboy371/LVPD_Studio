@@ -84,28 +84,13 @@ class CommonDrawer:
         alpha: int = 255,
         align: Align = "center",
     ) -> None:
-        """한자 → 병음 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다."""
+        """병음 → 한자 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다."""
         alpha = int(max(0, min(255, alpha)))
         hanzi = (data.sentence or "")[: style.max_hanzi]
         pinyin = (data.pinyin or "")[: style.max_pinyin]
         trans = (data.translation or "")[: style.max_translation]
 
         y = y_base
-        self._blit_text(
-            screen,
-            cache=self._cache_hanzi,
-            font_ft=self._fonts.hanzi_ft,
-            font_pg=self._fonts.hanzi_pg,
-            text=hanzi,
-            color=style.hanzi_color,
-            center_x=center_x,
-            y=y,
-            alpha=alpha,
-            min_margin_x=style.min_margin_x,
-            align=align,
-        )
-        y += style.line_gap_px
-
         if pinyin:
             self._blit_text(
                 screen,
@@ -121,6 +106,21 @@ class CommonDrawer:
                 align=align,
             )
             y += style.line_gap_px
+
+        self._blit_text(
+            screen,
+            cache=self._cache_hanzi,
+            font_ft=self._fonts.hanzi_ft,
+            font_pg=self._fonts.hanzi_pg,
+            text=hanzi,
+            color=style.hanzi_color,
+            center_x=center_x,
+            y=y,
+            alpha=alpha,
+            min_margin_x=style.min_margin_x,
+            align=align,
+        )
+        y += style.line_gap_px
 
         if trans:
             surf = self._fonts.translation_pg.render(trans, True, style.translation_color)
