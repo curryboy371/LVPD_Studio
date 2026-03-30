@@ -67,6 +67,7 @@ class LearningStep(BaseStep):
             self._stage = self._Stage.PLAY_L1
             self._next_stage_after_wait = self._Stage.PLAY_L2
             self._stage_elapsed_sec = 0.0
+            self.transition_bg_frame = None
             self.transition_signal = False
 
         wait_sec = 3.0
@@ -104,6 +105,12 @@ class LearningStep(BaseStep):
             return
 
         if self._stage == self._Stage.DONE:
+            # 이전 step에서 받은 배경을 다음 step에도 그대로 전달
+            if self.transition_bg_frame is None and self.bg_frame is not None:
+                try:
+                    self.transition_bg_frame = self.bg_frame.copy()
+                except Exception:
+                    self.transition_bg_frame = self.bg_frame
             self.transition_signal = True
             return
 
