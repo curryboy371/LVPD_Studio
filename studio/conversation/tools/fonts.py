@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from ..core.types import SentenceStyleConfig
-
 # pygame 텍스트 색 (R, G, B)
 RGB = tuple[int, int, int]
 
@@ -83,17 +81,6 @@ class ConversationRenderSettings:
 
 DEFAULT_CONVERSATION_RENDER_SETTINGS = ConversationRenderSettings(
     font_sizes=ConversationFontSizes(),
-)
-
-DEFAULT_LEARNING_STYLE = SentenceStyleConfig(
-    hanzi_color=WHITE,
-    pinyin_color=RED,
-    translation_color=GRAY_MUTED,
-)
-DEFAULT_PRACTICE_STYLE = SentenceStyleConfig(
-    hanzi_color=AMBER,
-    pinyin_color=RED,
-    translation_color=GRAY_MUTED,
 )
 
 

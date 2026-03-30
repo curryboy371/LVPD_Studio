@@ -84,7 +84,8 @@ class CommonDrawer:
         alpha: int = 255,
         align: Align = "center",
     ) -> None:
-        """병음 → 한자 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다."""
+        """병음 → 한자 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다.
+        한자와 번역 사이는 line_gap + translation_extra_gap_px."""
         alpha = int(max(0, min(255, alpha)))
         hanzi = (data.sentence or "")[: style.max_hanzi]
         pinyin = (data.pinyin or "")[: style.max_pinyin]
@@ -123,6 +124,7 @@ class CommonDrawer:
         y += style.line_gap_px
 
         if trans:
+            y += style.translation_extra_gap_px
             surf = self._fonts.translation_pg.render(trans, True, style.translation_color)
             if alpha < 255:
                 surf.set_alpha(alpha)

@@ -41,6 +41,8 @@ class SentenceStyleConfig:
     translation_color: tuple[int, int, int] = (200, 200, 200)
 
     line_gap_px: int = 110
+    # 한자 줄 다음, 번역 줄만 추가로 내릴 픽셀(병음↔한자 간격은 그대로)
+    translation_extra_gap_px: int = 0
     max_hanzi: int = 80
     max_pinyin: int = 120
     max_translation: int = 80

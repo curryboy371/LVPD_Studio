@@ -30,11 +30,10 @@ from .execution.practice_step import PracticeStep
 from .execution.video_step import VideoStep
 from .tools.common_drawer import CommonDrawer
 from .tools.fonts import (
+    AMBER,
     ConversationFontSizes,
     ConversationRenderSettings,
     DEFAULT_CONVERSATION_RENDER_SETTINGS,
-    DEFAULT_LEARNING_STYLE,
-    DEFAULT_PRACTICE_STYLE,
     FontBundle,
     GRAY_MUTED,
     RED,
@@ -291,7 +290,21 @@ class ConversationStudio:
         self._font_kr = load_font_korean(fs.kr, GRAY_MUTED)
         self._font_kr_step1 = load_font_korean(fs.kr_step1, GRAY_MUTED) or self._font_kr
 
-        return DEFAULT_LEARNING_STYLE, DEFAULT_PRACTICE_STYLE
+        # 문장 렌더 색은 위 `load_font_*`에 넘긴 RGB와 동일한 상수로 맞춘다(연습 한자만 AMBER).
+        trans_gap = 36
+        learn_style = SentenceStyleConfig(
+            hanzi_color=WHITE,
+            pinyin_color=RED,
+            translation_color=GRAY_MUTED,
+            translation_extra_gap_px=trans_gap,
+        )
+        practice_style = SentenceStyleConfig(
+            hanzi_color=AMBER,
+            pinyin_color=RED,
+            translation_color=GRAY_MUTED,
+            translation_extra_gap_px=trans_gap,
+        )
+        return learn_style, practice_style
 
     def _apply_font_fallbacks(self, sizes: ConversationFontSizes) -> None:
         """폰트 미로드 시 기본 폰트로 폴백."""
