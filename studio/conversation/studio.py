@@ -76,6 +76,7 @@ class ConversationStudio:
 
         self._drawer: Optional[CommonDrawer] = None
         self._manager: Optional[PlaybackManager] = None
+        self._last_config: Any = None
 
         # 첫 아이템의 미디어 소스 적용
         if self._data_list:
@@ -89,6 +90,7 @@ class ConversationStudio:
         """pygame.init() 이후 한 번 호출. 폰트/3계층 객체 생성."""
         if self._drawer is not None and self._manager is not None:
             return
+        self._last_config = config
 
         settings = self._resolve_render_settings(config)
         self._render_settings = settings
@@ -106,12 +108,50 @@ class ConversationStudio:
         )
         self._drawer = CommonDrawer(fonts=fonts)
 
+        def _play_insert_voice(path: str, *, item: Any = None) -> None:
+            _ = item
+            if not path:
+                return
+            try:
+                if pygame.mixer.get_init() is None:
+                    pygame.mixer.init()
+            except Exception:
+                return
+            try:
+                snd = pygame.mixer.Sound(path)
+            except Exception:
+                return
+            # mixer.music(VideoAudioPlayer)와 충돌 방지: 전용 채널 사용
+            try:
+                ch = pygame.mixer.Channel(1)
+                ch.play(snd)
+            except Exception:
+                try:
+                    snd.play()
+                except Exception:
+                    pass
+
+            # record 모드면 이벤트도 남김(사후 mux용)
+            cfg = self._last_config
+            log = getattr(cfg, "recording_log_event", None)
+            if log is None:
+                return
+            try:
+                from studio.recording_events import InsertSound, recording_log_event
+                timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+                dur = float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
+                recording_log_event(log, InsertSound(timeline_sec=timeline_sec, path=path, duration_sec=dur))
+            except Exception:
+                return
+
         steps = {
             StepKind.VIDEO: VideoStep(drawer=self._drawer, video_player=self._video_player),
             StepKind.LEARNING: LearningStep(
                 drawer=self._drawer,
                 video_player=self._video_player,
                 style=learn_style,
+                hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
+                play_voice=_play_insert_voice,
             ),
             StepKind.PRACTICE: PracticeStep(
                 drawer=self._drawer,
@@ -129,7 +169,7 @@ class ConversationStudio:
             items=self._data_list,
             steps=steps,
             video_player=self._video_player,
-            step_sequence=[StepKind.VIDEO, StepKind.LEARNING],
+            step_sequence=[StepKind.VIDEO, StepKind.LEARNING, StepKind.PRACTICE],
         )
 
     def get_title(self) -> str:
@@ -198,6 +238,7 @@ class ConversationStudio:
     def update(self, config: Any = None) -> None:
         if self._manager is None:
             return
+        self._last_config = config
 
         dt = 1.0 / 30.0
         if config is not None and getattr(config, "dt_sec", None) is not None:
