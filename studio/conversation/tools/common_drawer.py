@@ -8,10 +8,20 @@ from typing import Any, Literal, Optional
 
 import pygame
 
+from utils.tone_icon_assets import load_tone_icon_surface, tone_icon_path
+from utils.tone_icon_layout import ToneIconSlot
+
 from ..core.types import SentenceRenderData, SentenceStyleConfig
 
 
 Align = Literal["center", "left", "right"]
+
+# 병음 줄 위 성조 아이콘
+_TONE_ICON_GAP_ABOVE_PX = 8
+
+
+def _split_pinyin_syllables(s: str) -> list[str]:
+    return [x for x in s.strip().split() if x]
 
 
 def _font_sig(font: Any) -> tuple[Any, ...]:
@@ -73,6 +83,98 @@ class CommonDrawer:
         self._cache_hanzi = _LRUTextCache()
         self._cache_pinyin = _LRUTextCache()
 
+    def _pinyin_syllable_center_xs(
+        self,
+        syllables: list[str],
+        *,
+        color: tuple[int, int, int],
+        center_x: int,
+        min_margin_x: int,
+        align: Align,
+    ) -> list[int]:
+        """공백 구분 음절 각각의 가로 중심 x (화면 좌표)."""
+        if not syllables:
+            return []
+        widths: list[int] = []
+        for syl in syllables:
+            surf, _ = self._render_text(self._fonts.pinyin_ft, self._fonts.pinyin_pg, syl, color)
+            if surf is None:
+                widths.append(0)
+            else:
+                widths.append(int(surf.get_width()))
+        try:
+            sp_surf, _ = self._render_text(self._fonts.pinyin_ft, self._fonts.pinyin_pg, " ", color)
+            space_w = int(sp_surf.get_width()) if sp_surf is not None else 0
+        except Exception:
+            space_w = 0
+        total = sum(widths) + space_w * max(0, len(syllables) - 1)
+        if align == "center":
+            left = center_x - total // 2
+        elif align == "left":
+            left = center_x
+        else:
+            left = center_x - total
+        left = max(min_margin_x, int(left))
+        centers: list[int] = []
+        x = left
+        for i, w in enumerate(widths):
+            centers.append(x + (w // 2 if w else 0))
+            x += w
+            if i < len(widths) - 1:
+                x += space_w
+        return centers
+
+    def _align_tone_icon_slots(
+        self, syllables: list[str], slots: tuple[Optional[ToneIconSlot], ...]
+    ) -> tuple[Optional[ToneIconSlot], ...]:
+        k = len(syllables)
+        if k == 0:
+            return ()
+        lst = list(slots[:k]) if len(slots) >= k else list(slots) + [None] * (k - len(slots))
+        return tuple(lst[:k])
+
+    def _draw_tone_icons_above_pinyin(
+        self,
+        screen: pygame.Surface,
+        *,
+        pinyin_line: str,
+        slots: tuple[Optional[ToneIconSlot], ...],
+        y_pinyin: int,
+        center_x: int,
+        style: SentenceStyleConfig,
+        alpha: int,
+        align: Align,
+    ) -> None:
+        syllables = _split_pinyin_syllables(pinyin_line)
+        if not syllables or not any(s is not None for s in slots):
+            return
+        aligned = self._align_tone_icon_slots(syllables, slots)
+        color = style.pinyin_color
+        centers = self._pinyin_syllable_center_xs(
+            syllables,
+            color=color,
+            center_x=center_x,
+            min_margin_x=style.min_margin_x,
+            align=align,
+        )
+        for i, slot in enumerate(aligned):
+            if slot is None or i >= len(centers):
+                continue
+            path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
+            if path is None:
+                continue
+            surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
+            if surf is None:
+                continue
+            if alpha < 255:
+                surf = surf.copy()
+                surf.set_alpha(alpha)
+            cx = centers[i]
+            y = y_pinyin - _TONE_ICON_GAP_ABOVE_PX - surf.get_height()
+            x = cx - surf.get_width() // 2
+            x = max(style.min_margin_x, x)
+            screen.blit(surf, (x, y))
+
     def draw_sentence(
         self,
         screen: pygame.Surface,
@@ -93,6 +195,18 @@ class CommonDrawer:
 
         y = y_base
         if pinyin:
+            slots = data.tone_icon_slots or ()
+            if slots:
+                self._draw_tone_icons_above_pinyin(
+                    screen,
+                    pinyin_line=pinyin,
+                    slots=slots,
+                    y_pinyin=y,
+                    center_x=center_x,
+                    style=style,
+                    alpha=alpha,
+                    align=align,
+                )
             self._blit_text(
                 screen,
                 cache=self._cache_pinyin,

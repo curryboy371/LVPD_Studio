@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from dataclasses import dataclass, replace
+from typing import Any, Mapping, Optional, Protocol, Sequence
+
+from utils.tone_icon_layout import ToneIconSlot, build_tone_icon_slots
 
 
 class ConversationItem(Protocol):
@@ -30,6 +32,8 @@ class SentenceRenderData:
     sentence: str
     pinyin: str
     translation: str
+    # 병음 음절 수와 동일 길이; None이면 해당 음절에 아이콘 없음
+    tone_icon_slots: tuple[Optional[ToneIconSlot], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,13 @@ def extract_sentence_render_data(item: ConversationItemLike) -> SentenceRenderDa
     if not sentence:
         sentence = "(문장 없음)"
     return SentenceRenderData(sentence=sentence, pinyin=pinyin_text, translation=translation)
+
+
+def build_sentence_render_data_with_tone_icons(item: ConversationItemLike) -> SentenceRenderData:
+    """문장 렌더 데이터 + 표기/발음 성조 비교 아이콘 슬롯."""
+    base = extract_sentence_render_data(item)
+    slots = build_tone_icon_slots(item, base.pinyin)
+    return replace(base, tone_icon_slots=slots)
 
 
 def conversation_item_min_keys() -> tuple[str, ...]:

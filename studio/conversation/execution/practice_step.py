@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pygame
 
-from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig, extract_sentence_render_data
+from ..core.types import (
+    ConversationItemLike,
+    FrameContext,
+    SentenceStyleConfig,
+    build_sentence_render_data_with_tone_icons,
+)
 from .base import BaseStep
 
 
@@ -30,7 +35,7 @@ class PracticeStep(BaseStep):
         if frame is not None:
             screen.blit(frame, (0, 0))
 
-        data = extract_sentence_render_data(item)
+        data = build_sentence_render_data_with_tone_icons(item)
         center_x = ctx.width // 2
         y_base = int(ctx.height * 0.34)
         self.drawer.draw_sentence(

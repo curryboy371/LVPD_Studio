@@ -23,6 +23,9 @@ DEFAULT_OUTPUT_DIR = _REPO_ROOT / "output"
 
 # 폰트: resource/font 하위 (중국어·한국어 각각)
 DEFAULT_FONT_DIR = _REPO_ROOT / "resource" / "font"
+
+# 성조 비교 아이콘 PNG (병음 줄 위)
+DEFAULT_TONE_ICON_DIR = _REPO_ROOT / "resource" / "image" / "icon"
 FONT_CN_FILENAME = "MaruBuri-Light.otf"   # 중국어(문장·병음)용
 FONT_KR_FILENAME = "NotoSansKR-Regular.ttf"    # 한국어(번역·UI)용
 
