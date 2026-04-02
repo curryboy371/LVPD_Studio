@@ -24,30 +24,9 @@ def _split_pinyin_syllables(s: str) -> list[str]:
     return [x for x in s.strip().split() if x]
 
 
-def _font_sig(font: Any) -> tuple[Any, ...]:
-    if font is None:
-        return ("none", 0)
-    name: Any
-    try:
-        name = font.get_name()
-    except Exception:
-        name = type(font).__name__
-    h = 0
-    try:
-        h = int(font.get_height())
-    except Exception:
-        h = 0
-    bold: Any
-    try:
-        bold = bool(font.get_bold())
-    except Exception:
-        bold = None
-    italic: Any
-    try:
-        italic = bool(font.get_italic())
-    except Exception:
-        italic = None
-    return (name, h, bold, italic)
+def _text_cache_key(font_ft: Any, font_pg: Any, text: str, color: tuple[int, int, int]) -> tuple[Any, ...]:
+    """폰트 객체 id + 문자열 + 색으로 캐시 키를 만든다 (매 프레임 메타데이터 조회 비용 절감)."""
+    return (id(font_ft), id(font_pg), text, color)
 
 
 @dataclass
@@ -76,12 +55,203 @@ class CommonDrawer:
 
     - 문장(한자/병음/번역) 렌더링을 1곳으로 모은다.
     - Step은 '무엇을 그릴지'만 결정하고, 실제 텍스트 draw는 여기서 수행한다.
+    - 세로 배치는 `measure_sentence_block_extents` / `y_base_for_vertical_center`로 블록 높이를 구한 뒤
+      Step에서 `y_base`만 넘기면 된다 (Drawer는 좌표만 받아 그린다).
     """
 
     def __init__(self, *, fonts: Any) -> None:
         self._fonts = fonts
         self._cache_hanzi = _LRUTextCache()
         self._cache_pinyin = _LRUTextCache()
+        self._cache_translation = _LRUTextCache()
+        self._fade_states: dict[str, dict[str, float | int]] = {}
+
+    def fade_on(self, channel: str, sec: float = 0.0) -> None:
+        self._start_fade(channel, target_alpha=255, sec=sec)
+
+    def fade_off(self, channel: str, sec: float = 0.0) -> None:
+        self._start_fade(channel, target_alpha=0, sec=sec)
+
+    def fade_all_off(self, channels: list[str], sec: float = 0.0) -> None:
+        for ch in channels:
+            self.fade_off(ch, sec)
+
+    def fade_tick(self, dt_sec: float) -> None:
+        dt = max(0.0, float(dt_sec))
+        if dt <= 0.0 or not self._fade_states:
+            return
+        for st in self._fade_states.values():
+            sec = float(st.get("sec", 0.0) or 0.0)
+            if sec <= 1e-6:
+                continue
+            elapsed = float(st.get("elapsed", 0.0) or 0.0) + dt
+            frm = int(st.get("from", 0) or 0)
+            to = int(st.get("to", 0) or 0)
+            t = max(0.0, min(1.0, elapsed / sec))
+            st["alpha"] = int(frm + (to - frm) * t)
+            if t >= 1.0:
+                st["alpha"] = to
+                st["from"] = to
+                st["to"] = to
+                st["elapsed"] = 0.0
+                st["sec"] = 0.0
+            else:
+                st["elapsed"] = elapsed
+
+    def fade_alpha(self, channel: str) -> int:
+        st = self._fade_states.get(channel)
+        if st is None:
+            return 0
+        return max(0, min(255, int(st.get("alpha", 0) or 0)))
+
+    def _start_fade(self, channel: str, *, target_alpha: int, sec: float) -> None:
+        key = str(channel or "").strip()
+        if not key:
+            return
+        st = self._fade_states.get(key)
+        cur = int(st.get("alpha", 0) or 0) if st is not None else 0
+        to = max(0, min(255, int(target_alpha)))
+        duration = max(0.0, float(sec))
+        if duration <= 1e-6:
+            self._fade_states[key] = {
+                "alpha": to,
+                "from": to,
+                "to": to,
+                "elapsed": 0.0,
+                "sec": 0.0,
+            }
+            return
+        self._fade_states[key] = {
+            "alpha": cur,
+            "from": cur,
+            "to": to,
+            "elapsed": 0.0,
+            "sec": duration,
+        }
+
+    def measure_sentence_block_extents(self, data: SentenceRenderData, style: SentenceStyleConfig) -> tuple[int, int]:
+        """문장 블록의 세로 범위. (y_base 위로 돌출, y_base 아래로 돌출) 픽셀.
+
+        `y_base`는 `draw_sentence`의 첫 줄(병음 또는 한자) 상단과 같다.
+        성조 아이콘은 병음 위로만 그려지므로 `extent_above`에 포함된다.
+        """
+        hanzi = (data.sentence or "")[: style.max_hanzi]
+        pinyin = (data.pinyin or "")[: style.max_pinyin]
+        trans = (data.translation or "")[: style.max_translation]
+
+        extent_above = 0
+        if pinyin:
+            syllables = _split_pinyin_syllables(pinyin)
+            slots = data.tone_icon_slots or ()
+            aligned = self._align_tone_icon_slots(syllables, slots) if syllables else ()
+            max_icon_h = 0
+            for slot in aligned:
+                if slot is None:
+                    continue
+                path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
+                if path is None:
+                    continue
+                surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
+                if surf is not None:
+                    max_icon_h = max(max_icon_h, int(surf.get_height()))
+            if max_icon_h > 0:
+                extent_above = max_icon_h + _TONE_ICON_GAP_ABOVE_PX
+
+        h_pinyin = self._cached_line_height(
+            self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, pinyin, style.pinyin_color
+        )
+        h_hanzi = self._cached_line_height(
+            self._cache_hanzi, self._fonts.hanzi_ft, self._fonts.hanzi_pg, hanzi, style.hanzi_color
+        )
+        h_trans = 0
+        if (trans or "").strip():
+            surf = self._get_cached_translation_surf(trans, style.translation_color)
+            h_trans = int(surf.get_height()) if surf is not None else 0
+
+        extent_below = 0
+        if pinyin:
+            extent_below += h_pinyin + style.line_gap_px
+        extent_below += h_hanzi
+        if (trans or "").strip():
+            extent_below += style.line_gap_px + style.translation_extra_gap_px + h_trans
+        return extent_above, extent_below
+
+    def y_base_for_vertical_center(self, center_y: int, data: SentenceRenderData, style: SentenceStyleConfig) -> int:
+        """블록의 시각적 세로 중심이 `center_y`가 되도록 하는 `y_base` (첫 줄 상단)."""
+        above, below = self.measure_sentence_block_extents(data, style)
+        return int(center_y - (below - above) / 2)
+
+    def _cached_line_height(
+        self,
+        cache: _LRUTextCache,
+        font_ft: Any,
+        font_pg: Any,
+        text: str,
+        color: tuple[int, int, int],
+    ) -> int:
+        if not (text or "").strip():
+            return 0
+        surf, _ = self._get_cached_text_pair(cache, font_ft, font_pg, text, color)
+        return int(surf.get_height()) if surf is not None else 0
+
+    def _get_cached_text_pair(
+        self,
+        cache: _LRUTextCache,
+        font_ft: Any,
+        font_pg: Any,
+        text: str,
+        color: tuple[int, int, int],
+    ) -> tuple[Any, Any]:
+        key = _text_cache_key(font_ft, font_pg, text, color)
+        cached = cache.get(key)
+        if cached is None:
+            cached = self._render_text(font_ft, font_pg, text, color)
+            cache.put(key, cached)
+        return cached
+
+    def _get_cached_translation_surf(self, text: str, color: tuple[int, int, int]) -> Any:
+        font_pg = self._fonts.translation_pg
+        key = _text_cache_key(None, font_pg, text, color)
+        cached = self._cache_translation.get(key)
+        if cached is None:
+            surf = font_pg.render(text, True, color)
+            cached = (surf, surf.get_rect())
+            self._cache_translation.put(key, cached)
+        surf, _ = cached
+        return surf
+
+    @staticmethod
+    def _restore_surface_alpha(surf: pygame.Surface, old: Any) -> None:
+        try:
+            if old is None:
+                surf.set_alpha(None)
+            else:
+                surf.set_alpha(old)
+        except Exception:
+            pass
+
+    def _blit_surface_with_alpha(
+        self,
+        screen: pygame.Surface,
+        surf: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        min_margin_x: int,
+        align: Align,
+        alpha: int,
+    ) -> None:
+        if alpha <= 0:
+            return
+        if alpha >= 255:
+            self._blit_surface(screen, surf, center_x=center_x, y=y, min_margin_x=min_margin_x, align=align)
+            return
+        old = surf.get_alpha()
+        surf.set_alpha(alpha)
+        try:
+            self._blit_surface(screen, surf, center_x=center_x, y=y, min_margin_x=min_margin_x, align=align)
+        finally:
+            self._restore_surface_alpha(surf, old)
 
     def _pinyin_syllable_center_xs(
         self,
@@ -97,13 +267,17 @@ class CommonDrawer:
             return []
         widths: list[int] = []
         for syl in syllables:
-            surf, _ = self._render_text(self._fonts.pinyin_ft, self._fonts.pinyin_pg, syl, color)
+            surf, _ = self._get_cached_text_pair(
+                self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, syl, color
+            )
             if surf is None:
                 widths.append(0)
             else:
                 widths.append(int(surf.get_width()))
         try:
-            sp_surf, _ = self._render_text(self._fonts.pinyin_ft, self._fonts.pinyin_pg, " ", color)
+            sp_surf, _ = self._get_cached_text_pair(
+                self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, " ", color
+            )
             space_w = int(sp_surf.get_width()) if sp_surf is not None else 0
         except Exception:
             space_w = 0
@@ -166,14 +340,21 @@ class CommonDrawer:
             surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
             if surf is None:
                 continue
-            if alpha < 255:
-                surf = surf.copy()
-                surf.set_alpha(alpha)
             cx = centers[i]
-            y = y_pinyin - _TONE_ICON_GAP_ABOVE_PX - surf.get_height()
-            x = cx - surf.get_width() // 2
-            x = max(style.min_margin_x, x)
-            screen.blit(surf, (x, y))
+            iy = y_pinyin - _TONE_ICON_GAP_ABOVE_PX - surf.get_height()
+            ix = cx - surf.get_width() // 2
+            ix = max(style.min_margin_x, ix)
+            if alpha <= 0:
+                continue
+            if alpha >= 255:
+                screen.blit(surf, (ix, iy))
+            else:
+                old_a = surf.get_alpha()
+                surf.set_alpha(alpha)
+                try:
+                    screen.blit(surf, (ix, iy))
+                finally:
+                    self._restore_surface_alpha(surf, old_a)
 
     def draw_sentence(
         self,
@@ -239,10 +420,43 @@ class CommonDrawer:
 
         if trans:
             y += style.translation_extra_gap_px
-            surf = self._fonts.translation_pg.render(trans, True, style.translation_color)
-            if alpha < 255:
-                surf.set_alpha(alpha)
-            self._blit_surface(screen, surf, center_x=center_x, y=y, min_margin_x=style.min_margin_x, align=align)
+            surf = self._get_cached_translation_surf(trans, style.translation_color)
+            self._blit_surface_with_alpha(
+                screen,
+                surf,
+                center_x=center_x,
+                y=y,
+                min_margin_x=style.min_margin_x,
+                align=align,
+                alpha=alpha,
+            )
+
+    def draw_title(
+        self,
+        screen: pygame.Surface,
+        text: str,
+        *,
+        center_x: int,
+        y: int,
+        color: tuple[int, int, int] = (255, 255, 255),
+        alpha: int = 255,
+        align: Align = "center",
+        min_margin_x: int = 20,
+    ) -> None:
+        """타이틀 텍스트 렌더링. 폰트는 translation 폰트를 재사용한다."""
+        if not text:
+            return
+        alpha = int(max(0, min(255, alpha)))
+        surf = self._get_cached_translation_surf(text, color)
+        self._blit_surface_with_alpha(
+            screen,
+            surf,
+            center_x=center_x,
+            y=y,
+            min_margin_x=min_margin_x,
+            align=align,
+            alpha=alpha,
+        )
 
     def draw_tone_graph(self, screen: pygame.Surface, data: Any, rect: pygame.Rect, style: Any = None) -> None:
         """성조 그래프 렌더링 훅(현재 render_only 범위에서는 stub)."""
@@ -274,18 +488,18 @@ class CommonDrawer:
         min_margin_x: int,
         align: Align,
     ) -> None:
-        key = (_font_sig(font_ft), _font_sig(font_pg), text, color)
-        cached = cache.get(key)
-        if cached is None:
-            cached = self._render_text(font_ft, font_pg, text, color)
-            cache.put(key, cached)
-        surf, _ = cached
+        surf, _ = self._get_cached_text_pair(cache, font_ft, font_pg, text, color)
         if surf is None:
             return
-        if alpha < 255:
-            surf = surf.copy()
-            surf.set_alpha(alpha)
-        self._blit_surface(screen, surf, center_x=center_x, y=y, min_margin_x=min_margin_x, align=align)
+        self._blit_surface_with_alpha(
+            screen,
+            surf,
+            center_x=center_x,
+            y=y,
+            min_margin_x=min_margin_x,
+            align=align,
+            alpha=alpha,
+        )
 
     def _blit_surface(
         self,
