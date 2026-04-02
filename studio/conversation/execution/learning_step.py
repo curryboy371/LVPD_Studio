@@ -72,6 +72,8 @@ class LearningStep(BaseStep):
         for _wait in (S.WAIT_AFTER_L1, S.WAIT_AFTER_L2):
             self.bind_enter(_wait, lambda: self.set_timer(self._hold_sec))
 
+        self.bind_end(S.TITLE, lambda: self.show_sentence())
+
     def _play_voice_and_advance(self, key: str) -> None:
         self._try_play_item_voice(key)
         self.set_timer(0.0)
@@ -160,11 +162,6 @@ class LearningStep(BaseStep):
 
     def all_off(self, fade_out_sec: float = 0.0) -> None:
         self.drawer.fade_all_off([self._title_channel, self._sentence_channel], fade_out_sec)
-
-    def on_stage_end(self, stage: Any) -> None:
-        """스테이지가 바뀔 때의 UI 부수 효과."""
-        if stage == self.Stage.TITLE:
-            self.show_sentence()
 
     def on_main_end(self) -> None:
         if self.transition_bg_frame is None and self.bg_frame is not None:

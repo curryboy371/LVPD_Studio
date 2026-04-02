@@ -28,7 +28,7 @@ class StageSequenceEngine:
         self._on_end: dict[str, Callable[[], None]] = {}
         self._on_tick: dict[str, Callable[[FrameContext], None]] = {}
         self._on_remain_expired: dict[str, Callable[[], None]] = {}
-        # remain 만료 후 시퀀스 기본 진행(다음 stage). BaseStep이 _set_stage/on_stage_end와 연결한다.
+        # remain 만료 후 시퀀스 기본 진행(다음 stage). BaseStep이 _set_stage와 연결한다.
         self._default_advance: Callable[[], bool] | None = None
 
     @staticmethod
@@ -107,8 +107,6 @@ class StageSequenceEngine:
         """전환이 일어나면 이전 stage 값(키 문자열), 같으면 None.
 
         순서: (1) 이전 stage의 `bind_end` 콜백 (2) 새 stage로 상태 커밋.
-        BaseStep은 이어서 `on_stage_end(이전)`를 호출하므로, 자식에서는 보통
-        UI는 `on_stage_end`만, 엔진 등록형 정리는 `bind_end`만 쓰는 편이 낫다.
         """
         next_key = self.normalize_key(stage)
         prev_raw = self._stage
@@ -173,54 +171,28 @@ class StageSequenceEngine:
             self._remain_sec = None
             self._apply_remain_expired()
 
-    def tick_enter(
-        self,
-        *,
-        on_fallback: Callable[[Any], None] | None = None,
-    ) -> None:
+    def tick_enter(self) -> None:
         if not self._stage_entered:
             return
         self._stage_entered = False
         key = self._stage or ""
-        if key in self._on_enter:
-            try:
-                self._on_enter[key]()
-            except Exception:
-                pass
+        if key not in self._on_enter:
             return
-        if on_fallback is not None:
-            try:
-                on_fallback(self._stage)
-            except Exception:
-                pass
+        try:
+            self._on_enter[key]()
+        except Exception:
+            pass
 
-    def tick_stage_tick(
-        self,
-        ctx: FrameContext,
-        *,
-        on_fallback: Callable[[Any, FrameContext], None] | None = None,
-    ) -> None:
-        stage = self._stage
-        key = stage or ""
-        if key in self._on_tick:
-            try:
-                self._on_tick[key](ctx)
-            except Exception:
-                pass
+    def tick_stage_tick(self, ctx: FrameContext) -> None:
+        key = self._stage or ""
+        if key not in self._on_tick:
             return
-        if on_fallback is not None:
-            try:
-                on_fallback(stage, ctx)
-            except Exception:
-                pass
+        try:
+            self._on_tick[key](ctx)
+        except Exception:
+            pass
 
-    def tick(
-        self,
-        ctx: FrameContext,
-        *,
-        on_stage_first_tick_fallback: Callable[[Any], None] | None = None,
-        on_stage_tick_fallback: Callable[[Any, FrameContext], None] | None = None,
-    ) -> None:
-        self.tick_enter(on_fallback=on_stage_first_tick_fallback)
-        self.tick_stage_tick(ctx, on_fallback=on_stage_tick_fallback)
+    def tick(self, ctx: FrameContext) -> None:
+        self.tick_enter()
+        self.tick_stage_tick(ctx)
         self.tick_remain(ctx)

@@ -26,11 +26,9 @@
 3. `_tick_stage(ctx)` — 메인 틱 + substage 틱(진입 콜백 → 매 프레임 tick → remain)
 
 ---------------------------------------------------------------------------
-[스테이지를 떠날 때] bind_end vs on_stage_end
+[스테이지를 떠날 때] bind_end
 ---------------------------------------------------------------------------
-- 엔진 `transition_to`: **먼저** 떠나는 stage의 `bind_end`, **그다음** 새 stage로 상태 갱신.
-- BaseStep: 그 후 `on_stage_end(이전 stage)` 훅 호출.
-- 정리: **bind_end → (상태 변경) → on_stage_end**. UI 전환은 보통 `on_stage_end`만 써도 된다.
+- 엔진 `transition_to`: 떠나는 stage에 등록된 `bind_end`를 **먼저** 호출한 뒤 새 stage로 상태를 갱신한다.
 
 ---------------------------------------------------------------------------
 [아이템 동기화] 대화 아이템이 바뀔 때 시나리오를 처음부터
@@ -122,24 +120,16 @@ class SampleStep(BaseStep):
         #
         # 등록하지 않으면 기본값: 다음 substage로 자동 진행(마지막이면 finish 옵션에 따라 종료).
 
-        # [bind_end] — 이 substage를 **떠날 때** (다음으로 전환되기 직전, 엔진 내부).
-        # on_stage_end 보다 먼저 호출된다. 리소스 해제·카운터 집계 등에 쓸 수 있다.
-        # self.bind_end(S.INTRO, lambda: print("leave intro"))
+        # [bind_end] — 이 substage를 **떠날 때** (다음으로 전환되기 직전).
+        # 예: 인트로 종료 시 UI 전환 (실제로는 drawer 페이드 등)
+        # self.bind_end(S.INTRO, lambda: None)
 
         # [bind_tick] — 매 프레임마다 (대부분의 Step은 enter + timer 만으로 충분해서 안 씀).
         # self.bind_tick(S.CONTENT, lambda ctx: None)
 
     # -------------------------------------------------------------------------
-    # 3) 스테이지 전환 시 UI 부수효과 — “그림”은 여기/ render 에 맡기기 쉽다
+    # 3) 이 Step(main) 종료 — 마지막 substage에서 `_end_main_stage` 등
     # -------------------------------------------------------------------------
-    def on_stage_end(self, stage: Any) -> None:
-        """substage를 떠날 때 호출. stage 인자는 떠나는 쪽(이전)의 키/Enum 값."""
-
-        # StrEnum 이면 문자열과 비교해도 됨: self.Stage.INTRO == "sample_intro"
-        if stage == self.Stage.INTRO:
-            # 예: 인트로 끝나면 문장 채널 페이드 온 등 (실제로는 drawer 사용)
-            pass
-
     def on_main_end(self) -> None:
         """_end_main_stage() 가 불리면 최종적으로 한 번 호출됨.
 

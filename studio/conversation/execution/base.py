@@ -99,13 +99,7 @@ class BaseStep(IStep):
         self.substage.bind_enter(stage, fn)
 
     def bind_end(self, stage: Any, fn: Callable[[], None]) -> None:
-        """떠나는 substage에 대한 등록 콜백. 전환 시 **먼저** 호출된다.
-
-        이후 BaseStep이 `on_stage_end(이전 stage)` 훅을 호출한다.
-        같은 stage에 대해 `bind_end`와 `on_stage_end`를 함께 쓸 수 있으며,
-        순서는 항상 **bind_end → on_stage_end** 이다. UI는 보통 `on_stage_end`만 쓰고,
-        리소스 해제 등은 `bind_end`에 두면 된다.
-        """
+        """떠나는 substage에 대한 콜백. 다음 stage로 넘어가기 직전, 이전 stage 기준으로 호출된다."""
         self.substage.bind_end(stage, fn)
 
     def bind_tick(self, stage: Any, fn: Callable[[FrameContext], None]) -> None:
@@ -166,7 +160,7 @@ class BaseStep(IStep):
         return self._goto_next_substage()
 
     def _goto_next_substage(self) -> bool:
-        """시퀀스 기준 다음 stage로 전환한다(`on_stage_end` 포함)."""
+        """시퀀스 기준 다음 stage로 전환한다."""
         st = self.substage.current_stage
         seq = self.substage.sequence
         imap = self.substage.index_map
@@ -183,18 +177,6 @@ class BaseStep(IStep):
         """시퀀스 기준 다음 stage로 전환한다."""
         return self._goto_next_substage()
 
-    def on_stage_enter(self, stage: Any) -> None:
-        """stage 진입 시점 훅(하위 클래스 override 용)."""
-        _ = stage
-
-    def on_stage_end(self, stage: Any) -> None:
-        """substage를 떠날 때 호출되는 훅. `bind_end`가 먼저 실행된 뒤에 호출된다."""
-        _ = stage
-
-    def on_stage_tick(self, stage: Any, ctx: FrameContext) -> None:
-        """매 프레임 stage 처리 훅(등록된 on_tick이 없을 때만 호출)."""
-        _ = (stage, ctx)
-
     def on_main_first_tick(self) -> None:
         """현재 Step의 첫 프레임 처리 훅(등록된 main first-tick이 없을 때 호출)."""
         return
@@ -206,10 +188,6 @@ class BaseStep(IStep):
     def on_main_end(self) -> None:
         """현재 Step 종료 처리 훅(등록된 main end가 없을 때 호출)."""
         return
-
-    def on_stage_first_tick(self, stage: Any) -> None:
-        """stage 첫 프레임 처리 훅(등록된 bind_enter가 없을 때만 호출)."""
-        _ = stage
 
     def _tick_main_enter(self) -> None:
         """현재 Step의 첫 프레임 처리를 수행한다."""
@@ -265,11 +243,7 @@ class BaseStep(IStep):
         """현재 Step(main)과 stage(sub)의 first-tick/on_tick을 순서대로 호출한다."""
         self._tick_main_enter()
         self._tick_main(ctx)
-        self.substage.tick(
-            ctx,
-            on_stage_first_tick_fallback=self.on_stage_first_tick,
-            on_stage_tick_fallback=self.on_stage_tick,
-        )
+        self.substage.tick(ctx)
 
     def _item_identity_key(self, item: ConversationItemLike) -> Any:
         """아이템이 바뀌었는지 판별하는 키. 기본은 None(항상 동일 아이템으로 간주)."""
@@ -293,14 +267,8 @@ class BaseStep(IStep):
         return True
 
     def _set_stage(self, stage: Any) -> None:
-        """stage 전환. 엔진 `transition_to`에서 bind_end 후, 여기서 on_stage_end(prev)."""
-        prev = self.substage.transition_to(stage)
-        if prev is None:
-            return
-        try:
-            self.on_stage_end(prev)
-        except Exception:
-            pass
+        """stage 전환. `transition_to`에서 떠나는 stage의 `bind_end`를 호출한 뒤 상태를 갱신한다."""
+        self.substage.transition_to(stage)
 
     @property
     def _stage(self) -> Any:
