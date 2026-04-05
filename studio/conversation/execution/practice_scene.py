@@ -30,7 +30,7 @@ class PracticeScene(IConversationStep):
         self._sentence_channel = "practice_sentence"
         self.drawer.show_now(self._sentence_channel)
 
-    def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+    def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """render_only 범위에서 상태 갱신 없음(정적 연습 화면)."""
         _ = (ctx, item)
         return

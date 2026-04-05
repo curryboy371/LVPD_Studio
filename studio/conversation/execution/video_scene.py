@@ -39,7 +39,7 @@ class VideoScene(IConversationStep):
         self._is_fading: bool = False
         self._fade_max_alpha: int = int(255 * 0.8)
 
-    def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+    def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """구간 끝에서 일시정지되면 페이드아웃 후 전환 스냅샷과 `transition_signal`을 설정한다."""
         _ = (ctx, item)
         # 비디오 재생(시간 진행)은 PlaybackManager가 tick()으로 담당.
