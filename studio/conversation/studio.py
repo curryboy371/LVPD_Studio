@@ -24,7 +24,7 @@ from .overlay_draw import draw_paused_and_debug
 from .video_players import SimpleVideoPlayer, VideoAudioPlayer
 
 from .core.playback_manager import LastStepSequencePolicy, PlaybackManager, StepKind
-from .core.types import FrameContext, SentenceStyleConfig
+from .core.types import ColorStyle, FrameContext, LayoutStyle, SentenceStyleConfig
 from .execution.learning_step import LearningStep
 from .execution.practice_step import PracticeStep
 from .execution.video_step import VideoStep
@@ -357,16 +357,12 @@ class ConversationStudio:
         # 문장 렌더 색은 위 `load_font_*`에 넘긴 RGB와 동일한 상수로 맞춘다(연습 한자만 AMBER).
         trans_gap = 36
         learn_style = SentenceStyleConfig(
-            hanzi_color=WHITE,
-            pinyin_color=RED,
-            translation_color=GRAY_MUTED,
-            translation_extra_gap_px=trans_gap,
+            colors=ColorStyle(hanzi_color=WHITE, pinyin_color=RED, translation_color=GRAY_MUTED),
+            layout=LayoutStyle(translation_extra_gap_px=trans_gap),
         )
         practice_style = SentenceStyleConfig(
-            hanzi_color=AMBER,
-            pinyin_color=RED,
-            translation_color=GRAY_MUTED,
-            translation_extra_gap_px=trans_gap,
+            colors=ColorStyle(hanzi_color=AMBER, pinyin_color=RED, translation_color=GRAY_MUTED),
+            layout=LayoutStyle(translation_extra_gap_px=trans_gap),
         )
         return learn_style, practice_style
 

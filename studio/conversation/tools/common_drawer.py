@@ -9,7 +9,6 @@ from typing import Any, Literal, Optional
 import pygame
 
 from utils.tone_icon_assets import load_tone_icon_surface, tone_icon_path
-from utils.tone_icon_layout import ToneIconSlot
 
 from ..core.types import (
     ConversationItemLike,
@@ -18,18 +17,16 @@ from ..core.types import (
     SentenceStyleConfig,
     build_sentence_render_data_with_tone_icons,
 )
+from .fade_controller import FadeController
+from .tone_icon_renderer import (
+    TONE_ICON_GAP_ABOVE_PX,
+    ToneIconRenderer,
+    split_pinyin_syllables,
+)
 
 
 Align = Literal["center", "left", "right"]
 AlignV = Literal["center", "top", "bottom"]
-
-# 병음 줄 위 성조 아이콘
-_TONE_ICON_GAP_ABOVE_PX = 8
-
-
-def _split_pinyin_syllables(s: str) -> list[str]:
-    """병음 문자열을 공백 기준 음절 리스트로 나눈다."""
-    return [x for x in s.strip().split() if x]
 
 
 def _text_cache_key(font_ft: Any, font_pg: Any, text: str, color: tuple[int, int, int]) -> tuple[Any, ...]:
@@ -58,6 +55,29 @@ class _LRUTextCache:
             self._cache.popitem(last=False)
 
 
+@dataclass
+class _LRUSentenceDataCache:
+    """item → SentenceRenderData (빠른 스크롤 시 최근 N개 재사용)."""
+
+    cap: int = 32
+    _cache: "OrderedDict[Any, SentenceRenderData]" = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        self._cache = OrderedDict()
+
+    def get(self, key: Any) -> Optional[SentenceRenderData]:
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)
+        return self._cache[key]
+
+    def put(self, key: Any, value: SentenceRenderData) -> None:
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        if len(self._cache) > self.cap:
+            self._cache.popitem(last=False)
+
+
 class CommonDrawer:
     """공통 렌더러.
 
@@ -70,83 +90,38 @@ class CommonDrawer:
     ITEM_SENTENCE_CENTER_Y_RATIO = 0.43
 
     def __init__(self, *, fonts: Any) -> None:
-        """폰트 묶음·텍스트 캐시·페이드 상태를 초기화한다."""
+        """폰트 묶음·텍스트 캐시·페이드·성조 아이콘 렌더러를 초기화한다."""
         self._fonts = fonts
         self._cache_hanzi = _LRUTextCache()
         self._cache_pinyin = _LRUTextCache()
         self._cache_translation = _LRUTextCache()
-        self._fade_states: dict[str, dict[str, float | int]] = {}
-        self._sentence_data_cache_key: Any | None = None
-        self._sentence_data_cache_val: SentenceRenderData | None = None
+        self._fade = FadeController()
+        self._sentence_data_cache = _LRUSentenceDataCache()
+        self._tone_icons = ToneIconRenderer(
+            get_pinyin_pair=lambda text, color: self._get_cached_text_pair(
+                self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, text, color
+            )
+        )
 
     def fade_on(self, channel: str, sec: float = 0.0) -> None:
         """채널 알파를 255로 맞추되 sec>0이면 그 시간에 걸쳐 보간한다."""
-        self._start_fade(channel, target_alpha=255, sec=sec)
+        self._fade.fade_on(channel, sec)
 
     def fade_off(self, channel: str, sec: float = 0.0) -> None:
         """채널 알파를 0으로 내린다(선택적 페이드 시간)."""
-        self._start_fade(channel, target_alpha=0, sec=sec)
+        self._fade.fade_off(channel, sec)
 
     def fade_all_off(self, channels: list[str], sec: float = 0.0) -> None:
         """여러 채널을 한꺼번에 fade_off."""
-        for ch in channels:
-            self.fade_off(ch, sec)
+        self._fade.fade_all_off(channels, sec)
 
     def fade_tick(self, dt_sec: float) -> None:
         """진행 중인 페이드 상태를 dt만큼 전진시킨다."""
-        dt = max(0.0, float(dt_sec))
-        if dt <= 0.0 or not self._fade_states:
-            return
-        for st in self._fade_states.values():
-            sec = float(st.get("sec", 0.0) or 0.0)
-            if sec <= 1e-6:
-                continue
-            elapsed = float(st.get("elapsed", 0.0) or 0.0) + dt
-            frm = int(st.get("from", 0) or 0)
-            to = int(st.get("to", 0) or 0)
-            t = max(0.0, min(1.0, elapsed / sec))
-            st["alpha"] = int(frm + (to - frm) * t)
-            if t >= 1.0:
-                st["alpha"] = to
-                st["from"] = to
-                st["to"] = to
-                st["elapsed"] = 0.0
-                st["sec"] = 0.0
-            else:
-                st["elapsed"] = elapsed
+        self._fade.tick(dt_sec)
 
     def fade_alpha(self, channel: str) -> int:
         """채널의 현재 알파(0~255); 없으면 0."""
-        st = self._fade_states.get(channel)
-        if st is None:
-            return 0
-        return max(0, min(255, int(st.get("alpha", 0) or 0)))
-
-    def _start_fade(self, channel: str, *, target_alpha: int, sec: float) -> None:
-        """페이드 상태 딕셔너리에 목표 알파와 지속 시간을 기록한다."""
-        key = str(channel or "").strip()
-        if not key:
-            return
-        st = self._fade_states.get(key)
-        cur = int(st.get("alpha", 0) or 0) if st is not None else 0
-        to = max(0, min(255, int(target_alpha)))
-        duration = max(0.0, float(sec))
-        if duration <= 1e-6:
-            self._fade_states[key] = {
-                "alpha": to,
-                "from": to,
-                "to": to,
-                "elapsed": 0.0,
-                "sec": 0.0,
-            }
-            return
-        self._fade_states[key] = {
-            "alpha": cur,
-            "from": cur,
-            "to": to,
-            "elapsed": 0.0,
-            "sec": duration,
-        }
+        return self._fade.alpha(str(channel or "").strip())
 
     def measure_sentence_block_extents(self, data: SentenceRenderData, style: SentenceStyleConfig) -> tuple[int, int]:
         """문장 블록의 세로 범위. (y_base 위로 돌출, y_base 아래로 돌출) 픽셀.
@@ -154,15 +129,15 @@ class CommonDrawer:
         `y_base`는 `draw_sentence`의 첫 줄(병음 또는 한자) 상단과 같다.
         성조 아이콘은 병음 위로만 그려지므로 `extent_above`에 포함된다.
         """
-        hanzi = (data.sentence or "")[: style.max_hanzi]
-        pinyin = (data.pinyin or "")[: style.max_pinyin]
-        trans = (data.translation or "")[: style.max_translation]
+        hanzi = (data.sentence or "")[: style.text.max_hanzi]
+        pinyin = (data.pinyin or "")[: style.text.max_pinyin]
+        trans = (data.translation or "")[: style.text.max_translation]
 
         extent_above = 0
         if pinyin:
-            syllables = _split_pinyin_syllables(pinyin)
+            syllables = split_pinyin_syllables(pinyin)
             slots = data.tone_icon_slots or ()
-            aligned = self._align_tone_icon_slots(syllables, slots) if syllables else ()
+            aligned = self._tone_icons.align_tone_icon_slots(syllables, slots) if syllables else ()
             max_icon_h = 0
             for slot in aligned:
                 if slot is None:
@@ -170,29 +145,30 @@ class CommonDrawer:
                 path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
                 if path is None:
                     continue
+                # 모듈 전역 LRU — 매 프레임 디스크 로드 없음
                 surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
                 if surf is not None:
                     max_icon_h = max(max_icon_h, int(surf.get_height()))
             if max_icon_h > 0:
-                extent_above = max_icon_h + _TONE_ICON_GAP_ABOVE_PX
+                extent_above = max_icon_h + TONE_ICON_GAP_ABOVE_PX
 
         h_pinyin = self._cached_line_height(
-            self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, pinyin, style.pinyin_color
+            self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, pinyin, style.colors.pinyin_color
         )
         h_hanzi = self._cached_line_height(
-            self._cache_hanzi, self._fonts.hanzi_ft, self._fonts.hanzi_pg, hanzi, style.hanzi_color
+            self._cache_hanzi, self._fonts.hanzi_ft, self._fonts.hanzi_pg, hanzi, style.colors.hanzi_color
         )
         h_trans = 0
         if (trans or "").strip():
-            surf = self._get_cached_translation_surf(trans, style.translation_color)
+            surf = self._get_cached_translation_surf(trans, style.colors.translation_color)
             h_trans = int(surf.get_height()) if surf is not None else 0
 
         extent_below = 0
         if pinyin:
-            extent_below += h_pinyin + style.line_gap_px
+            extent_below += h_pinyin + style.layout.line_gap_px
         extent_below += h_hanzi
         if (trans or "").strip():
-            extent_below += style.line_gap_px + style.translation_extra_gap_px + h_trans
+            extent_below += style.layout.line_gap_px + style.layout.translation_extra_gap_px + h_trans
         return extent_above, extent_below
 
     def y_base_for_vertical_center(self, center_y: int, data: SentenceRenderData, style: SentenceStyleConfig) -> int:
@@ -254,12 +230,12 @@ class CommonDrawer:
         `align_v`가 ``center``일 때 세로 앵커는 `ITEM_SENTENCE_CENTER_Y_RATIO`(기본 0.43)로 고정한다.
         """
         key = self._sentence_item_cache_key(item)
-        if self._sentence_data_cache_key == key and self._sentence_data_cache_val is not None:
-            data = self._sentence_data_cache_val
+        cached = self._sentence_data_cache.get(key)
+        if cached is not None:
+            data = cached
         else:
             data = build_sentence_render_data_with_tone_icons(item)
-            self._sentence_data_cache_key = key
-            self._sentence_data_cache_val = data
+            self._sentence_data_cache.put(key, data)
         center_y_ratio = self.ITEM_SENTENCE_CENTER_Y_RATIO if align_v == "center" else 0.43
         y_base = self.layout_sentence_y_base(
             ctx,
@@ -298,9 +274,9 @@ class CommonDrawer:
             channel=channel,
             center_x=int(ctx.width) // 2,
             y=self.layout_title_y(ctx, y_ratio=y_ratio),
-            color=style.hanzi_color,
+            color=style.colors.hanzi_color,
             align=align,
-            min_margin_x=style.min_margin_x,
+            min_margin_x=style.layout.min_margin_x,
         )
 
     def _cached_line_height(
@@ -380,111 +356,6 @@ class CommonDrawer:
         finally:
             self._restore_surface_alpha(surf, old)
 
-    def _pinyin_syllable_center_xs(
-        self,
-        syllables: list[str],
-        *,
-        color: tuple[int, int, int],
-        center_x: int,
-        min_margin_x: int,
-        align: Align,
-    ) -> list[int]:
-        """병음 음절별 가로 중심 x 좌표(성조 아이콘 정렬용)."""
-        if not syllables:
-            return []
-        widths: list[int] = []
-        for syl in syllables:
-            surf, _ = self._get_cached_text_pair(
-                self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, syl, color
-            )
-            if surf is None:
-                widths.append(0)
-            else:
-                widths.append(int(surf.get_width()))
-        try:
-            sp_surf, _ = self._get_cached_text_pair(
-                self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, " ", color
-            )
-            space_w = int(sp_surf.get_width()) if sp_surf is not None else 0
-        except Exception:
-            space_w = 0
-        total = sum(widths) + space_w * max(0, len(syllables) - 1)
-        if align == "center":
-            left = center_x - total // 2
-        elif align == "left":
-            left = center_x
-        else:
-            left = center_x - total
-        left = max(min_margin_x, int(left))
-        centers: list[int] = []
-        x = left
-        for i, w in enumerate(widths):
-            centers.append(x + (w // 2 if w else 0))
-            x += w
-            if i < len(widths) - 1:
-                x += space_w
-        return centers
-
-    def _align_tone_icon_slots(
-        self, syllables: list[str], slots: tuple[Optional[ToneIconSlot], ...]
-    ) -> tuple[Optional[ToneIconSlot], ...]:
-        """음절 개수에 맞춰 슬롯 튜플 길이를 맞춘다."""
-        k = len(syllables)
-        if k == 0:
-            return ()
-        lst = list(slots[:k]) if len(slots) >= k else list(slots) + [None] * (k - len(slots))
-        return tuple(lst[:k])
-
-    def _draw_tone_icons_above_pinyin(
-        self,
-        screen: pygame.Surface,
-        *,
-        pinyin_line: str,
-        slots: tuple[Optional[ToneIconSlot], ...],
-        y_pinyin: int,
-        center_x: int,
-        style: SentenceStyleConfig,
-        alpha: int,
-        align: Align,
-    ) -> None:
-        """병음 줄 위에 음절별 성조 아이콘을 배치한다."""
-        syllables = _split_pinyin_syllables(pinyin_line)
-        if not syllables or not any(s is not None for s in slots):
-            return
-        aligned = self._align_tone_icon_slots(syllables, slots)
-        color = style.pinyin_color
-        centers = self._pinyin_syllable_center_xs(
-            syllables,
-            color=color,
-            center_x=center_x,
-            min_margin_x=style.min_margin_x,
-            align=align,
-        )
-        for i, slot in enumerate(aligned):
-            if slot is None or i >= len(centers):
-                continue
-            path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
-            if path is None:
-                continue
-            surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
-            if surf is None:
-                continue
-            cx = centers[i]
-            iy = y_pinyin - _TONE_ICON_GAP_ABOVE_PX - surf.get_height()
-            ix = cx - surf.get_width() // 2
-            ix = max(style.min_margin_x, ix)
-            if alpha <= 0:
-                continue
-            if alpha >= 255:
-                screen.blit(surf, (ix, iy))
-            else:
-                old_a = surf.get_alpha()
-                surf.set_alpha(alpha)
-                try:
-                    screen.blit(surf, (ix, iy))
-                finally:
-                    self._restore_surface_alpha(surf, old_a)
-
     def draw_sentence(
         self,
         screen: pygame.Surface,
@@ -508,15 +379,15 @@ class CommonDrawer:
             a = self.fade_alpha(str(channel or "").strip())
         if a <= 0:
             return
-        hanzi = (data.sentence or "")[: style.max_hanzi]
-        pinyin = (data.pinyin or "")[: style.max_pinyin]
-        trans = (data.translation or "")[: style.max_translation]
+        hanzi = (data.sentence or "")[: style.text.max_hanzi]
+        pinyin = (data.pinyin or "")[: style.text.max_pinyin]
+        trans = (data.translation or "")[: style.text.max_translation]
 
         y = y_base
         if pinyin:
             slots = data.tone_icon_slots or ()
             if slots:
-                self._draw_tone_icons_above_pinyin(
+                self._tone_icons.draw_above_pinyin(
                     screen,
                     pinyin_line=pinyin,
                     slots=slots,
@@ -532,14 +403,14 @@ class CommonDrawer:
                 font_ft=self._fonts.pinyin_ft,
                 font_pg=self._fonts.pinyin_pg,
                 text=pinyin,
-                color=style.pinyin_color,
+                color=style.colors.pinyin_color,
                 center_x=center_x,
                 y=y,
                 alpha=a,
-                min_margin_x=style.min_margin_x,
+                min_margin_x=style.layout.min_margin_x,
                 align=align,
             )
-            y += style.line_gap_px
+            y += style.layout.line_gap_px
 
         self._blit_text(
             screen,
@@ -547,24 +418,24 @@ class CommonDrawer:
             font_ft=self._fonts.hanzi_ft,
             font_pg=self._fonts.hanzi_pg,
             text=hanzi,
-            color=style.hanzi_color,
+            color=style.colors.hanzi_color,
             center_x=center_x,
             y=y,
             alpha=a,
-            min_margin_x=style.min_margin_x,
+            min_margin_x=style.layout.min_margin_x,
             align=align,
         )
-        y += style.line_gap_px
+        y += style.layout.line_gap_px
 
         if trans:
-            y += style.translation_extra_gap_px
-            surf = self._get_cached_translation_surf(trans, style.translation_color)
+            y += style.layout.translation_extra_gap_px
+            surf = self._get_cached_translation_surf(trans, style.colors.translation_color)
             self._blit_surface_with_alpha(
                 screen,
                 surf,
                 center_x=center_x,
                 y=y,
-                min_margin_x=style.min_margin_x,
+                min_margin_x=style.layout.min_margin_x,
                 align=align,
                 alpha=a,
             )

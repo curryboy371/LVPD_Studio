@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from utils.tone_icon_layout import ToneIconSlot, build_tone_icon_slots
@@ -37,22 +37,41 @@ class SentenceRenderData:
 
 
 @dataclass(frozen=True)
-class SentenceStyleConfig:
-    """Config-driven 문장 렌더링 스타일."""
+class ColorStyle:
+    """한자·병음·번역 줄 RGB."""
 
     hanzi_color: tuple[int, int, int] = (255, 255, 255)
     pinyin_color: tuple[int, int, int] = (220, 220, 220)
     translation_color: tuple[int, int, int] = (200, 200, 200)
 
+
+@dataclass(frozen=True)
+class LayoutStyle:
+    """줄 간격·여백."""
+
     line_gap_px: int = 110
     # 한자 줄 다음, 번역 줄만 추가로 내릴 픽셀(병음↔한자 간격은 그대로)
     translation_extra_gap_px: int = 0
+    # 화면 중앙 정렬 기준용 최소 좌우 여백
+    min_margin_x: int = 20
+
+
+@dataclass(frozen=True)
+class TextStyle:
+    """줄별 최대 글자 수(잘림)."""
+
     max_hanzi: int = 80
     max_pinyin: int = 120
     max_translation: int = 80
 
-    # 화면 중앙 정렬 기준용 최소 좌우 여백
-    min_margin_x: int = 20
+
+@dataclass(frozen=True)
+class SentenceStyleConfig:
+    """Config-driven 문장 렌더링 스타일(색 / 레이아웃 / 텍스트 한도 분리)."""
+
+    colors: ColorStyle = field(default_factory=ColorStyle)
+    layout: LayoutStyle = field(default_factory=LayoutStyle)
+    text: TextStyle = field(default_factory=TextStyle)
 
 
 @dataclass(frozen=True)

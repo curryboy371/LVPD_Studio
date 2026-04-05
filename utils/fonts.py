@@ -117,7 +117,7 @@ def attach_font_fgcolor(font: Any, fgcolor: Tuple[int, int, int]) -> Any:
     """freetype 폰트면 `fgcolor`를 설정한다.
 
     `pygame.font.Font`는 __slots__라 임의 속성을 붙일 수 없고, 전경색도 멤버로 두지 않는다.
-    그 경우는 무시하고(렌더 시 `SentenceStyleConfig` 색 사용), freetype만 `font.fgcolor`를 맞춘다.
+    그 경우는 무시하고(렌더 시 `ColorStyle`/`SentenceStyleConfig.colors` 사용), freetype만 `font.fgcolor`를 맞춘다.
     """
     if font is None:
         return None
