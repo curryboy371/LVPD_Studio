@@ -4,15 +4,35 @@ from __future__ import annotations
 
 import pygame
 
+from ..core.step_transition import StepTransitionMode
 from ..core.types import ConversationItemLike, FrameContext
-from .base import BaseStep
+from .base import IStep
 
 
-class VideoStep(BaseStep):
+class VideoStep(IStep):
     """비디오 프레임만 그리는 Step."""
 
-    def __init__(self, *, drawer, video_player) -> None:
-        super().__init__(drawer=drawer, video_player=video_player)
+    def __init__(
+        self,
+        *,
+        drawer,
+        video_player,
+        step_transition_mode: StepTransitionMode | None = None,
+        step_transition_duration_sec: float | None = None,
+        step_transition_overlay_peak_alpha: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.drawer = drawer
+        self.video_player = video_player
+        self.step_transition_mode: StepTransitionMode = StepTransitionMode.CUT
+        self.step_transition_duration_sec: float = 0.4
+        self.step_transition_overlay_peak_alpha: int = 220
+        if step_transition_mode is not None:
+            self.step_transition_mode = step_transition_mode
+        if step_transition_duration_sec is not None:
+            self.step_transition_duration_sec = float(step_transition_duration_sec)
+        if step_transition_overlay_peak_alpha is not None:
+            self.step_transition_overlay_peak_alpha = int(step_transition_overlay_peak_alpha)
         self._fade_out_sec: float = 1.2
         self._fade_elapsed: float = 0.0
         self._is_fading: bool = False

@@ -11,10 +11,17 @@ import pygame
 from utils.tone_icon_assets import load_tone_icon_surface, tone_icon_path
 from utils.tone_icon_layout import ToneIconSlot
 
-from ..core.types import SentenceRenderData, SentenceStyleConfig
+from ..core.types import (
+    ConversationItemLike,
+    FrameContext,
+    SentenceRenderData,
+    SentenceStyleConfig,
+    build_sentence_render_data_with_tone_icons,
+)
 
 
 Align = Literal["center", "left", "right"]
+AlignV = Literal["center", "top", "bottom"]
 
 # 병음 줄 위 성조 아이콘
 _TONE_ICON_GAP_ABOVE_PX = 8
@@ -54,10 +61,12 @@ class CommonDrawer:
     """공통 렌더러.
 
     - 문장(한자/병음/번역) 렌더링을 1곳으로 모은다.
-    - Step은 '무엇을 그릴지'만 결정하고, 실제 텍스트 draw는 여기서 수행한다.
-    - 세로 배치는 `measure_sentence_block_extents` / `y_base_for_vertical_center`로 블록 높이를 구한 뒤
-      Step에서 `y_base`만 넘기면 된다 (Drawer는 좌표만 받아 그린다).
+    - Step은 아이템·채널·레이아웃 의도(`align_v` 등)만 넘기고, item→`SentenceRenderData` 변환과
+      세로 배치는 Drawer 내부에서 처리한다.
     """
+
+    # `draw_item_sentence` 기본(align_v=center): 블록 시각적 중심이 놓일 세로 위치(화면 높이 비율)
+    ITEM_SENTENCE_CENTER_Y_RATIO = 0.43
 
     def __init__(self, *, fonts: Any) -> None:
         self._fonts = fonts
@@ -65,6 +74,8 @@ class CommonDrawer:
         self._cache_pinyin = _LRUTextCache()
         self._cache_translation = _LRUTextCache()
         self._fade_states: dict[str, dict[str, float | int]] = {}
+        self._sentence_data_cache_key: Any | None = None
+        self._sentence_data_cache_val: SentenceRenderData | None = None
 
     def fade_on(self, channel: str, sec: float = 0.0) -> None:
         self._start_fade(channel, target_alpha=255, sec=sec)
@@ -180,6 +191,108 @@ class CommonDrawer:
         """블록의 시각적 세로 중심이 `center_y`가 되도록 하는 `y_base` (첫 줄 상단)."""
         above, below = self.measure_sentence_block_extents(data, style)
         return int(center_y - (below - above) / 2)
+
+    @staticmethod
+    def _sentence_item_cache_key(item: ConversationItemLike) -> Any:
+        try:
+            return (
+                str(item.get("id") or ""),
+                float(item.get("start_time", 0.0) or 0.0),
+                float(item.get("end_time", -1.0) or -1.0),
+            )
+        except Exception:
+            return id(item)
+
+    def layout_sentence_y_base(
+        self,
+        ctx: FrameContext,
+        data: SentenceRenderData,
+        style: SentenceStyleConfig,
+        *,
+        align_v: AlignV = "center",
+        center_y_ratio: float = 0.43,
+        top_y_ratio: float = 0.12,
+        bottom_margin_px: int = 48,
+    ) -> int:
+        """문장 블록 첫 줄 상단(`y_base`)을 세로 정렬 모드에 맞게 계산한다."""
+        h = max(1, int(ctx.height))
+        if align_v == "center":
+            cy = int(h * float(center_y_ratio))
+            return self.y_base_for_vertical_center(cy, data, style)
+        if align_v == "top":
+            return int(h * float(top_y_ratio))
+        above, below = self.measure_sentence_block_extents(data, style)
+        return max(0, h - int(bottom_margin_px) - below)
+
+    def layout_title_y(self, ctx: FrameContext, *, y_ratio: float = 0.12) -> int:
+        return int(ctx.height * float(y_ratio))
+
+    def draw_item_sentence(
+        self,
+        screen: pygame.Surface,
+        item: ConversationItemLike,
+        *,
+        ctx: FrameContext,
+        channel: str,
+        style: SentenceStyleConfig,
+        align: Align = "center",
+        align_v: AlignV = "center",
+        top_y_ratio: float = 0.12,
+        bottom_margin_px: int = 48,
+    ) -> None:
+        """`build_sentence_render_data_with_tone_icons`로 item을 변환(아이템 단위 캐시) 후 레이아웃·`draw_sentence`.
+
+        `align_v`가 ``center``일 때 세로 앵커는 `ITEM_SENTENCE_CENTER_Y_RATIO`(기본 0.43)로 고정한다.
+        """
+        key = self._sentence_item_cache_key(item)
+        if self._sentence_data_cache_key == key and self._sentence_data_cache_val is not None:
+            data = self._sentence_data_cache_val
+        else:
+            data = build_sentence_render_data_with_tone_icons(item)
+            self._sentence_data_cache_key = key
+            self._sentence_data_cache_val = data
+        center_y_ratio = self.ITEM_SENTENCE_CENTER_Y_RATIO if align_v == "center" else 0.43
+        y_base = self.layout_sentence_y_base(
+            ctx,
+            data,
+            style,
+            align_v=align_v,
+            center_y_ratio=center_y_ratio,
+            top_y_ratio=top_y_ratio,
+            bottom_margin_px=bottom_margin_px,
+        )
+        self.draw_sentence(
+            screen,
+            data,
+            channel=channel,
+            center_x=int(ctx.width) // 2,
+            y_base=y_base,
+            style=style,
+            align=align,
+        )
+
+    def draw_item_title(
+        self,
+        screen: pygame.Surface,
+        text: str,
+        *,
+        ctx: FrameContext,
+        channel: str,
+        style: SentenceStyleConfig,
+        align: Align = "center",
+        y_ratio: float = 0.12,
+    ) -> None:
+        """타이틀 세로 위치를 `ctx` 기준으로 잡고 `draw_title`로 그린다."""
+        self.draw_title(
+            screen,
+            text,
+            channel=channel,
+            center_x=int(ctx.width) // 2,
+            y=self.layout_title_y(ctx, y_ratio=y_ratio),
+            color=style.hanzi_color,
+            align=align,
+            min_margin_x=style.min_margin_x,
+        )
 
     def _cached_line_height(
         self,
@@ -361,15 +474,24 @@ class CommonDrawer:
         screen: pygame.Surface,
         data: SentenceRenderData,
         *,
+        channel: str,
         center_x: int,
         y_base: int,
         style: SentenceStyleConfig,
-        alpha: int = 255,
         align: Align = "center",
+        alpha: Optional[int] = None,
     ) -> None:
         """병음 → 한자 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다.
-        한자와 번역 사이는 line_gap + translation_extra_gap_px."""
-        alpha = int(max(0, min(255, alpha)))
+        한자와 번역 사이는 line_gap + translation_extra_gap_px.
+
+        알파는 기본적으로 `fade_alpha(channel)`을 따른다. `alpha`를 넘기면 그 값으로 오버라이드한다.
+        """
+        if alpha is not None:
+            a = int(max(0, min(255, alpha)))
+        else:
+            a = self.fade_alpha(str(channel or "").strip())
+        if a <= 0:
+            return
         hanzi = (data.sentence or "")[: style.max_hanzi]
         pinyin = (data.pinyin or "")[: style.max_pinyin]
         trans = (data.translation or "")[: style.max_translation]
@@ -385,7 +507,7 @@ class CommonDrawer:
                     y_pinyin=y,
                     center_x=center_x,
                     style=style,
-                    alpha=alpha,
+                    alpha=a,
                     align=align,
                 )
             self._blit_text(
@@ -397,7 +519,7 @@ class CommonDrawer:
                 color=style.pinyin_color,
                 center_x=center_x,
                 y=y,
-                alpha=alpha,
+                alpha=a,
                 min_margin_x=style.min_margin_x,
                 align=align,
             )
@@ -412,7 +534,7 @@ class CommonDrawer:
             color=style.hanzi_color,
             center_x=center_x,
             y=y,
-            alpha=alpha,
+            alpha=a,
             min_margin_x=style.min_margin_x,
             align=align,
         )
@@ -428,7 +550,7 @@ class CommonDrawer:
                 y=y,
                 min_margin_x=style.min_margin_x,
                 align=align,
-                alpha=alpha,
+                alpha=a,
             )
 
     def draw_title(
@@ -436,17 +558,26 @@ class CommonDrawer:
         screen: pygame.Surface,
         text: str,
         *,
+        channel: str,
         center_x: int,
         y: int,
         color: tuple[int, int, int] = (255, 255, 255),
-        alpha: int = 255,
         align: Align = "center",
         min_margin_x: int = 20,
+        alpha: Optional[int] = None,
     ) -> None:
-        """타이틀 텍스트 렌더링. 폰트는 translation 폰트를 재사용한다."""
+        """타이틀 텍스트 렌더링. 폰트는 translation 폰트를 재사용한다.
+
+        알파는 기본적으로 `fade_alpha(channel)`을 따른다. `alpha`를 넘기면 그 값으로 오버라이드한다.
+        """
         if not text:
             return
-        alpha = int(max(0, min(255, alpha)))
+        if alpha is not None:
+            a = int(max(0, min(255, alpha)))
+        else:
+            a = self.fade_alpha(str(channel or "").strip())
+        if a <= 0:
+            return
         surf = self._get_cached_translation_surf(text, color)
         self._blit_surface_with_alpha(
             screen,
@@ -455,7 +586,7 @@ class CommonDrawer:
             y=y,
             min_margin_x=min_margin_x,
             align=align,
-            alpha=alpha,
+            alpha=a,
         )
 
     def draw_tone_graph(self, screen: pygame.Surface, data: Any, rect: pygame.Rect, style: Any = None) -> None:

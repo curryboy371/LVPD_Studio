@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import pygame
 
-from ..core.types import (
-    ConversationItemLike,
-    FrameContext,
-    SentenceStyleConfig,
-    build_sentence_render_data_with_tone_icons,
-)
-from .base import BaseStep
+from ..core.step_transition import StepTransitionMode
+from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
+from .base import IStep
 
 
-class PracticeStep(BaseStep):
+class PracticeStep(IStep):
     """연습 Step.
 
     render_only 범위에서는 '단어 리스트를 순회' 로직은 넣지 않고,
@@ -23,8 +19,15 @@ class PracticeStep(BaseStep):
     """
 
     def __init__(self, *, drawer, video_player, style: SentenceStyleConfig) -> None:
-        super().__init__(drawer=drawer, video_player=video_player)
+        super().__init__()
+        self.drawer = drawer
+        self.video_player = video_player
+        self.step_transition_mode: StepTransitionMode = StepTransitionMode.CUT
+        self.step_transition_duration_sec: float = 0.4
+        self.step_transition_overlay_peak_alpha: int = 220
         self._style = style
+        self._sentence_channel = "practice_sentence"
+        self.drawer.fade_on(self._sentence_channel, 0.0)
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         _ = (ctx, item)
@@ -35,17 +38,14 @@ class PracticeStep(BaseStep):
         if frame is not None:
             screen.blit(frame, (0, 0))
 
-        data = build_sentence_render_data_with_tone_icons(item)
-        center_x = ctx.width // 2
-        y_base = int(ctx.height * 0.34)
-        self.drawer.draw_sentence(
+        self.drawer.draw_item_sentence(
             screen,
-            data,
-            center_x=center_x,
-            y_base=y_base,
+            item,
+            ctx=ctx,
+            channel=self._sentence_channel,
             style=self._style,
-            alpha=255,
-            align="center",
+            align_v="top",
+            top_y_ratio=0.34,
         )
 
         words = item.get("words") or []
@@ -55,6 +55,7 @@ class PracticeStep(BaseStep):
             try:
                 font = pygame.font.Font(None, 44)
                 surf = font.render(word[:24], True, (255, 210, 80))
+                center_x = ctx.width // 2
                 screen.blit(surf, (max(20, center_x - surf.get_width() // 2), int(ctx.height * 0.72)))
             except Exception:
                 pass

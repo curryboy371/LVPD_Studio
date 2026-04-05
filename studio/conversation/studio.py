@@ -23,7 +23,7 @@ from .data_loading import build_data_list
 from .overlay_draw import draw_paused_and_debug
 from .video_players import SimpleVideoPlayer, VideoAudioPlayer
 
-from .core.playback_manager import PlaybackManager, StepKind
+from .core.playback_manager import LastStepSequencePolicy, PlaybackManager, StepKind
 from .core.types import FrameContext, SentenceStyleConfig
 from .execution.learning_step import LearningStep
 from .execution.practice_step import PracticeStep
@@ -95,6 +95,14 @@ class ConversationStudio:
         settings = self._resolve_render_settings(config)
         self._render_settings = settings
 
+        _lsp = getattr(settings, "conversation_last_step_sequence_policy", None)
+        if isinstance(_lsp, LastStepSequencePolicy):
+            _last_step_policy = _lsp
+        elif isinstance(_lsp, str) and _lsp.strip().lower() in ("advance_item", "advance", "next_item"):
+            _last_step_policy = LastStepSequencePolicy.ADVANCE_ITEM
+        else:
+            _last_step_policy = LastStepSequencePolicy.STAY
+
         learn_style, practice_style = self._load_fonts(settings.font_sizes)
         self._apply_font_fallbacks(settings.font_sizes)
 
@@ -144,6 +152,9 @@ class ConversationStudio:
             except Exception:
                 return
 
+        _adv = str(getattr(settings, "learning_voice_advance", "immediate") or "immediate").lower()
+        _wait_for_sound_end = _adv in ("after_sound", "sound_length", "wait_sound")
+
         steps = {
             StepKind.VIDEO: VideoStep(drawer=self._drawer, video_player=self._video_player),
             StepKind.LEARNING: LearningStep(
@@ -152,6 +163,10 @@ class ConversationStudio:
                 style=learn_style,
                 hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
                 play_voice=_play_insert_voice,
+                title_text=str(getattr(settings, "learning_title_text", "학습") or "학습"),
+                layer_channel_map=getattr(settings, "learning_layer_channel_map", None),
+                stage_audio_keys=getattr(settings, "learning_stage_audio_keys", None),
+                wait_for_sound_end=_wait_for_sound_end,
             ),
             StepKind.PRACTICE: PracticeStep(
                 drawer=self._drawer,
@@ -170,6 +185,7 @@ class ConversationStudio:
             steps=steps,
             video_player=self._video_player,
             step_sequence=[StepKind.VIDEO, StepKind.LEARNING, StepKind.PRACTICE],
+            last_step_sequence_policy=_last_step_policy,
         )
 
     def get_title(self) -> str:
