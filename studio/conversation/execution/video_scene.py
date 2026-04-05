@@ -66,8 +66,10 @@ class VideoScene(IConversationStep):
             else:
                 self._fade_elapsed += float(ctx.dt_sec)
                 if self._fade_elapsed >= self._fade_out_sec:
-                    # 다음 장면 배경으로 넘길 "페이드 적용된 마지막 프레임" 스냅샷 생성
-                    self.transition_bg_frame = self._build_faded_snapshot(ctx, fade_t=1.0)
+                    # render()와 동일한 fade 비율로 합성한 스냅샷(마지막 프레임까지의 페이드 상태)
+                    self.transition_bg_frame = self._build_faded_snapshot(
+                        ctx, fade_t=self._fade_ratio()
+                    )
                     self.transition_signal = True
         except Exception:
             return
@@ -81,13 +83,17 @@ class VideoScene(IConversationStep):
 
         if self._is_fading:
             # 마지막 프레임 위로 검은색 페이드 아웃 오버레이
-            denom = self._fade_out_sec if self._fade_out_sec > 1e-6 else 1e-6
-            t = max(0.0, min(1.0, self._fade_elapsed / denom))
+            t = self._fade_ratio()
             alpha = int(self._fade_max_alpha * t)
             if alpha > 0:
                 overlay = pygame.Surface((ctx.width, ctx.height), pygame.SRCALPHA)
                 overlay.fill((0, 0, 0, alpha))
                 screen.blit(overlay, (0, 0))
+
+    def _fade_ratio(self) -> float:
+        """render / 전환 스냅샷과 동일한 페이드 진행도(0~1)."""
+        denom = self._fade_out_sec if self._fade_out_sec > 1e-6 else 1e-6
+        return max(0.0, min(1.0, self._fade_elapsed / denom))
 
     def _build_faded_snapshot(self, ctx: FrameContext, *, fade_t: float) -> pygame.Surface | None:
         """현재 비디오 프레임 위에 fade를 합성한 스냅샷을 만든다."""

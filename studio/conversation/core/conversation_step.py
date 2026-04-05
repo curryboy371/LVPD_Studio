@@ -33,12 +33,18 @@ class IConversationStep(ABC):
         # 장면(Scene) 전환 합성용 배경 프레임.
         self.transition_bg_frame: pygame.Surface | None = None
 
-    def reset(self) -> None:
-        """ConversationStep 상태를 초기로 리셋한다."""
+    def reset(self, *, clear_background: bool = False) -> None:
+        """ConversationStep 상태를 초기로 리셋한다.
+
+        clear_background: True면 bg_frame까지 비운다. False면 이전 장면에서 넘어온
+        배경 스냅샷(bg_frame)은 유지하고 시그널·완료 상태만 초기화한다.
+        transition_bg_frame은 항상 비운다.
+        """
         self.is_done = False
         self.transition_signal = False
-        self.bg_frame = None
         self.transition_bg_frame = None
+        if clear_background:
+            self.bg_frame = None
 
     def complete(self) -> None:
         """현재 ConversationStep을 완료로 표시한다."""
