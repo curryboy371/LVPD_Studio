@@ -1,39 +1,39 @@
-"""Video-only step."""
+"""비디오 전용 장면(Scene)."""
 
 from __future__ import annotations
 
 import pygame
 
-from ..core.step_transition import ConversationStepTransitionMode
+from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext
-from ..core.step_base import IConversationStep
+from ..core.conversation_step import IConversationStep
 
 
-class VideoStep(IConversationStep):
-    """비디오 프레임만 그리는 ConversationStep."""
+class VideoScene(IConversationStep):
+    """비디오 프레임만 그리는 장면."""
 
     def __init__(
         self,
         *,
         drawer,
         video_player,
-        conversation_step_transition_mode: ConversationStepTransitionMode | None = None,
-        conversation_step_transition_duration_sec: float | None = None,
-        conversation_step_transition_overlay_peak_alpha: int | None = None,
+        scene_transition_mode: SceneTransitionMode | None = None,
+        scene_transition_duration_sec: float | None = None,
+        scene_transition_overlay_peak_alpha: int | None = None,
     ) -> None:
-        """비디오 전용 ConversationStep; StepKind 간 전환 시각 효과를 설정한다."""
+        """비디오 전용 장면; SceneKind 간 전환 연출을 설정한다."""
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
-        self.conversation_step_transition_mode: ConversationStepTransitionMode = ConversationStepTransitionMode.CUT
-        self.conversation_step_transition_duration_sec: float = 0.4
-        self.conversation_step_transition_overlay_peak_alpha: int = 220
-        if conversation_step_transition_mode is not None:
-            self.conversation_step_transition_mode = conversation_step_transition_mode
-        if conversation_step_transition_duration_sec is not None:
-            self.conversation_step_transition_duration_sec = float(conversation_step_transition_duration_sec)
-        if conversation_step_transition_overlay_peak_alpha is not None:
-            self.conversation_step_transition_overlay_peak_alpha = int(conversation_step_transition_overlay_peak_alpha)
+        self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
+        self.scene_transition_duration_sec: float = 0.4
+        self.scene_transition_overlay_peak_alpha: int = 220
+        if scene_transition_mode is not None:
+            self.scene_transition_mode = scene_transition_mode
+        if scene_transition_duration_sec is not None:
+            self.scene_transition_duration_sec = float(scene_transition_duration_sec)
+        if scene_transition_overlay_peak_alpha is not None:
+            self.scene_transition_overlay_peak_alpha = int(scene_transition_overlay_peak_alpha)
         self._fade_out_sec: float = 1.2
         self._fade_elapsed: float = 0.0
         self._is_fading: bool = False
@@ -66,7 +66,7 @@ class VideoStep(IConversationStep):
             else:
                 self._fade_elapsed += float(ctx.dt_sec)
                 if self._fade_elapsed >= self._fade_out_sec:
-                    # 다음 ConversationStep 배경으로 넘길 "페이드 적용된 마지막 프레임" 스냅샷 생성
+                    # 다음 장면 배경으로 넘길 "페이드 적용된 마지막 프레임" 스냅샷 생성
                     self.transition_bg_frame = self._build_faded_snapshot(ctx, fade_t=1.0)
                     self.transition_signal = True
         except Exception:
@@ -102,4 +102,3 @@ class VideoStep(IConversationStep):
             overlay.fill((0, 0, 0, alpha))
             snap.blit(overlay, (0, 0))
         return snap
-

@@ -1,15 +1,20 @@
+"""ConversationStep 내부 Stage(FSM) — SceneKind·장면 전환 연출과 별개.
+
+`FSMConversationStep` / `StageConfig` 는 한 SceneKind 슬롯 안의 로컬 상태만 다룬다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Any
+from typing import Any, Callable, Optional
 
-from .types import FrameContext, ConversationItemLike
-from .step_base import IConversationStep
+from .types import ConversationItemLike, FrameContext
+from .conversation_step import IConversationStep
 
 
 @dataclass
 class StageConfig:
-    """한 ConversationStep 안에서만 쓰는 FSM Stage 정의(StepKind 전환과 별개)."""
+    """한 ConversationStep 안에서만 쓰는 FSM Stage 정의(SceneKind 전환과 별개)."""
     on_enter: Optional[Callable[[], float]] = None
     on_update: Optional[Callable[[float], None]] = None
     on_exit: Optional[Callable[[], None]] = None
@@ -17,10 +22,10 @@ class StageConfig:
     transition_condition: Optional[Callable[[], bool]] = None
 
 
-class StagedConversationStep(IConversationStep):
-    """내부 Stage(FSM)를 가진 ConversationStep 베이스.
+class FSMConversationStep(IConversationStep):
+    """IConversationStep 이지만 내부 로직을 Stage(FSM)로 나눈 베이스.
 
-    `Stage` / `StageConfig` 는 StepKind 시퀀스가 아니라 화면 내부 단계만 다룬다.
+    `Stage` / `StageConfig` 는 SceneKind(장면 종류) 전환과 별개로, 한 화면 안의 상태만 다룬다.
     """
 
     def __init__(self) -> None:

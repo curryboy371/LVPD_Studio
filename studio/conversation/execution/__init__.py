@@ -1,2 +1,2 @@
-"""Conversation studio execution layer (steps)."""
+"""Conversation studio execution layer (scenes: Video / Learning / Practice)."""
 

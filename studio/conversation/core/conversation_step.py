@@ -1,7 +1,6 @@
-"""ConversationStep(재생 시퀀스 화면 단위) 인터페이스.
+"""IConversationStep — SceneKind 슬롯별 장면(VideoScene / LearningScene 등) 공통 베이스.
 
-LearningStep 등 내부의 Stage(FSM 단계)와 이름이 겹치지 않도록,
-PlaybackManager가 스위칭하는 쪽은 ConversationStep 으로 통일한다.
+내부 FSM 단계는 `conversation_step_fsm` 의 Stage / StageConfig 로 표현한다.
 """
 
 from __future__ import annotations
@@ -14,10 +13,10 @@ from .types import ConversationItemLike, FrameContext
 
 
 class IConversationStep(ABC):
-    """재생 파이프라인의 화면 단위(Video / Learning / Practice 등) 공통 인터페이스.
+    """재생 파이프라인의 화면 단위(VideoScene / LearningScene / PracticeScene 등) 공통 인터페이스.
 
-    PlaybackManager·StepKind 시퀀스 전환 합성에서 참조한다.
-    (한 화면 안의 세부 FSM 단계는 Stage / StageConfig 로 표현.)
+    PlaybackManager·SceneKind 시퀀스 전환 합성에서 참조한다.
+    (한 화면 안의 세부 FSM 단계는 `conversation_step_fsm` 의 Stage / StageConfig.)
     """
 
     is_done: bool
@@ -27,11 +26,11 @@ class IConversationStep(ABC):
 
     def __init__(self) -> None:
         self.is_done: bool = False
-        # 다음 ConversationStep(StepKind)으로 넘어가도 된다는 시그널.
+        # 다음 ConversationStep(SceneKind 슬롯)으로 넘어가도 된다는 시그널.
         self.transition_signal: bool = False
         # 이전 프레임을 다음 ConversationStep 배경으로 쓰기 위한 스냅샷.
         self.bg_frame: pygame.Surface | None = None
-        # StepKind 전환 합성용 배경 프레임.
+        # 장면(Scene) 전환 합성용 배경 프레임.
         self.transition_bg_frame: pygame.Surface | None = None
 
     def reset(self) -> None:
@@ -50,7 +49,7 @@ class IConversationStep(ABC):
         self.transition_signal = True
 
     def can_transition(self) -> bool:
-        """StepKind 시퀀스상 다음 화면으로 넘어갈 수 있는지."""
+        """SceneKind 시퀀스상 다음 화면으로 넘어갈 수 있는지."""
         return self.is_done and self.transition_signal
 
     def capture_bg(self, screen: pygame.Surface) -> None:
@@ -77,4 +76,3 @@ class IConversationStep(ABC):
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """현재 상태를 화면에 렌더링한다."""
         pass
-

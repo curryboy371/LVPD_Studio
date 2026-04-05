@@ -1,4 +1,4 @@
-"""Learning step: video + central sentence block."""
+"""학습 장면(Scene): 비디오 + 중앙 문장 블록."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from typing import Any
 
 import pygame
 
-from ..core.step_transition import ConversationStepTransitionMode
+from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
-from ..core.state_machine import StagedConversationStep, StageConfig
+from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
 
 
-class LearningStep(StagedConversationStep):
-    """학습 화면 ConversationStep(중앙 문장). 내부 진행은 `Stage` FSM."""
+class LearningScene(FSMConversationStep):
+    """학습 장면(중앙 문장). 내부 진행은 `Stage` FSM."""
 
     class Stage(Enum):
         TITLE = auto()
@@ -51,7 +51,7 @@ class LearningStep(StagedConversationStep):
         title_text: str = "학습",
         title_fade_in_sec: float = 1.0,
         layer_channel_prefix: str = "learning",
-        stage_audio_keys: dict["LearningStep.Stage", str] | None = None,
+        stage_audio_keys: dict["LearningScene.Stage", str] | None = None,
         wait_for_sound_end: bool = False,
     ) -> None:
         super().__init__()
@@ -68,10 +68,10 @@ class LearningStep(StagedConversationStep):
         self.title_text = title_text
         self.title_fade_in_sec = float(title_fade_in_sec)
 
-        # StepKind 간 전환 효과(내부 Stage 전환과 무관)
-        self.conversation_step_transition_mode = ConversationStepTransitionMode.CUT
-        self.conversation_step_transition_duration_sec = 0.4
-        self.conversation_step_transition_overlay_peak_alpha = 220
+        # SceneKind 간 전환 연출(내부 Stage FSM 전환과 무관)
+        self.scene_transition_mode = SceneTransitionMode.CUT
+        self.scene_transition_duration_sec = 0.4
+        self.scene_transition_overlay_peak_alpha = 220
 
         # 채널
         ch = self.channels_from_layers(["title", "sentence"], prefix=layer_channel_prefix)
@@ -141,7 +141,7 @@ class LearningStep(StagedConversationStep):
         self.drawer.fade_on(self.title_channel, self.title_fade_in_sec)
         return self.title_fade_in_sec
 
-    def _enter_play(self, stage: Stage) -> float:
+    def _enter_play(self, stage: "LearningScene.Stage") -> float:
         self.drawer.show_now(self.title_channel)
         self.drawer.show_now(self.sentence_channel)
 

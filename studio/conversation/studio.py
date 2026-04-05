@@ -23,11 +23,11 @@ from .data_loading import build_data_list
 from .overlay_draw import draw_paused_and_debug
 from .video_players import SimpleVideoPlayer, VideoAudioPlayer
 
-from .core.playback_manager import LastStepSequencePolicy, PlaybackManager, StepKind
+from .core.playback_manager import LastSceneSequencePolicy, PlaybackManager, SceneKind
 from .core.types import ColorStyle, FrameContext, LayoutStyle, SentenceStyleConfig
-from .execution.learning_step import LearningStep
-from .execution.practice_step import PracticeStep
-from .execution.video_step import VideoStep
+from .execution.learning_scene import LearningScene
+from .execution.practice_scene import PracticeScene
+from .execution.video_scene import VideoScene
 from .tools.common_drawer import CommonDrawer
 from .tools.fonts import (
     AMBER,
@@ -96,13 +96,15 @@ class ConversationStudio:
         settings = self._resolve_render_settings(config)
         self._render_settings = settings
 
-        _lsp = getattr(settings, "conversation_last_step_sequence_policy", None)
-        if isinstance(_lsp, LastStepSequencePolicy):
-            _last_step_policy = _lsp
+        _lsp = getattr(settings, "conversation_last_scene_sequence_policy", None)
+        if _lsp is None:
+            _lsp = getattr(settings, "conversation_last_step_sequence_policy", None)
+        if isinstance(_lsp, LastSceneSequencePolicy):
+            _last_scene_policy = _lsp
         elif isinstance(_lsp, str) and _lsp.strip().lower() in ("advance_item", "advance", "next_item"):
-            _last_step_policy = LastStepSequencePolicy.ADVANCE_ITEM
+            _last_scene_policy = LastSceneSequencePolicy.ADVANCE_ITEM
         else:
-            _last_step_policy = LastStepSequencePolicy.STAY
+            _last_scene_policy = LastSceneSequencePolicy.STAY
 
         learn_style, practice_style = self._load_fonts(settings.font_sizes)
         self._apply_font_fallbacks(settings.font_sizes)
@@ -157,37 +159,39 @@ class ConversationStudio:
         _adv = str(getattr(settings, "learning_voice_advance", "immediate") or "immediate").lower()
         _wait_for_sound_end = _adv in ("after_sound", "sound_length", "wait_sound")
 
-        steps = {
-            StepKind.VIDEO: VideoStep(drawer=self._drawer, video_player=self._video_player),
-            StepKind.LEARNING: LearningStep(
+        scenes = {
+            SceneKind.VIDEO: VideoScene(drawer=self._drawer, video_player=self._video_player),
+            SceneKind.LEARNING: LearningScene(
                 drawer=self._drawer,
                 video_player=self._video_player,
                 style=learn_style,
                 hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
                 play_voice=_play_insert_voice,
                 title_text=str(getattr(settings, "learning_title_text", "학습") or "학습"),
-                layer_channel_map=getattr(settings, "learning_layer_channel_map", None),
+                layer_channel_prefix=str(
+                    getattr(settings, "learning_layer_channel_prefix", None) or "learning"
+                ),
                 stage_audio_keys=getattr(settings, "learning_stage_audio_keys", None),
                 wait_for_sound_end=_wait_for_sound_end,
             ),
-            StepKind.PRACTICE: PracticeStep(
+            SceneKind.PRACTICE: PracticeScene(
                 drawer=self._drawer,
                 video_player=self._video_player,
                 style=practice_style,
             ),
         }
         # 컨텐츠(화면) 시퀀스:
-        # - StepKind.VIDEO: 비디오만 재생(프레임 표시)하는 화면
-        # - StepKind.LEARNING: 비디오 위에 문장(한자/병음/번역)을 출력하는 화면
+        # - SceneKind.VIDEO: 비디오만 재생(프레임 표시)하는 화면
+        # - SceneKind.LEARNING: 비디오 위에 문장(한자/병음/번역)을 출력하는 화면
         #
         # "다음 컨텐츠로 전환"은 각 ConversationStep이 transition_signal=True로 올리면 PlaybackManager가 감지해
-        # 다음 StepKind로 자동 전환한다.
+        # 다음 SceneKind로 자동 전환한다.
         self._manager = PlaybackManager(
             items=self._data_list,
-            steps=steps,
+            scenes=scenes,
             video_player=self._video_player,
-            step_sequence=[StepKind.VIDEO, StepKind.LEARNING, StepKind.PRACTICE],
-            last_step_sequence_policy=_last_step_policy,
+            scene_sequence=[SceneKind.VIDEO, SceneKind.LEARNING, SceneKind.PRACTICE],
+            last_scene_sequence_policy=_last_scene_policy,
         )
 
     def get_title(self) -> str:
@@ -195,7 +199,7 @@ class ConversationStudio:
         return "LVPD Studio - 회화"
 
     def handle_events(self, events: list, config: Any = None) -> bool:
-        """키 입력으로 데이터/step을 전환하는 최소 이벤트만 처리."""
+        """키 입력으로 데이터·SceneKind(장면 종류)을 전환하는 최소 이벤트만 처리."""
         _ = config
         if self._manager is None:
             return True
@@ -241,15 +245,15 @@ class ConversationStudio:
                     self._video_audio.pause()
                 continue
 
-            # step switching
+            # SceneKind(장면) 전환
             if e.key in (pygame.K_1, pygame.K_KP1):
-                self._manager.set_step(StepKind.VIDEO)
+                self._manager.set_scene_kind(SceneKind.VIDEO)
                 continue
             if e.key in (pygame.K_2, pygame.K_KP2):
-                self._manager.set_step(StepKind.LEARNING)
+                self._manager.set_scene_kind(SceneKind.LEARNING)
                 continue
             if e.key in (pygame.K_3, pygame.K_KP3):
-                self._manager.set_step(StepKind.PRACTICE)
+                self._manager.set_scene_kind(SceneKind.PRACTICE)
                 continue
 
         return True

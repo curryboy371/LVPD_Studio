@@ -1,16 +1,16 @@
-"""Practice step: video + sentence + current word (minimal)."""
+"""연습 장면(Scene): 비디오 + 문장 + 현재 단어(최소)."""
 
 from __future__ import annotations
 
 import pygame
 
-from ..core.step_transition import ConversationStepTransitionMode
+from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
-from ..core.step_base import IConversationStep
+from ..core.conversation_step import IConversationStep
 
 
-class PracticeStep(IConversationStep):
-    """연습 화면 ConversationStep.
+class PracticeScene(IConversationStep):
+    """연습 장면.
 
     render_only 범위에서는 '단어 리스트를 순회' 로직은 넣지 않고,
     words가 있으면 첫 단어만 화면에 표시하는 수준으로 단순화한다.
@@ -23,9 +23,9 @@ class PracticeStep(IConversationStep):
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
-        self.conversation_step_transition_mode: ConversationStepTransitionMode = ConversationStepTransitionMode.CUT
-        self.conversation_step_transition_duration_sec: float = 0.4
-        self.conversation_step_transition_overlay_peak_alpha: int = 220
+        self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
+        self.scene_transition_duration_sec: float = 0.4
+        self.scene_transition_overlay_peak_alpha: int = 220
         self._style = style
         self._sentence_channel = "practice_sentence"
         self.drawer.show_now(self._sentence_channel)
@@ -62,4 +62,3 @@ class PracticeStep(IConversationStep):
                 screen.blit(surf, (max(20, center_x - surf.get_width() // 2), int(ctx.height * 0.72)))
             except Exception:
                 pass
-
