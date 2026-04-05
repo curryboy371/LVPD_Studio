@@ -86,15 +86,18 @@ class PlaybackManager:
             self._apply_item_to_video(self._items[0])
 
     def has_items(self) -> bool:
+        """재생할 아이템이 하나라도 있으면 True."""
         return bool(self._items)
 
     def current_item(self) -> ConversationItemLike:
+        """현재 `item_index`에 해당하는 dict. 목록이 비면 빈 dict."""
         if not self._items:
             return {}
         idx = max(0, min(len(self._items) - 1, self.state.item_index))
         return self._items[idx]
 
     def set_step(self, kind: StepKind) -> None:
+        """사용자 입력 등으로 StepKind를 직접 바꾼다. 진행 중 전환은 취소한다."""
         # 수동 전환(숫자키 등)도 허용: 단, 다음 프레임부터 해당 step이 렌더/업데이트 된다.
         # 시퀀스 진행 중이라도 사용자가 직접 바꿀 수 있게 둔다.
         if kind in self._steps:
@@ -103,6 +106,7 @@ class PlaybackManager:
             self._reset_step_done_flag(kind)
 
     def next_item(self) -> None:
+        """다음 콘텐츠 아이템으로 이동하고 비디오 소스·Step 시퀀스 시작으로 맞춘다."""
         if not self._items:
             return
         self.state.item_index = min(len(self._items) - 1, self.state.item_index + 1)
@@ -116,6 +120,7 @@ class PlaybackManager:
             self._reset_step_done_flag(self.state.step_kind)
 
     def prev_item(self) -> None:
+        """이전 콘텐츠 아이템으로 이동하고 비디오·Step을 초기 화면으로 되돌린다."""
         if not self._items:
             return
         self.state.item_index = max(0, self.state.item_index - 1)
@@ -127,18 +132,21 @@ class PlaybackManager:
             self._reset_step_done_flag(self.state.step_kind)
 
     def toggle_pause(self) -> None:
+        """비디오 플레이어 일시정지/재생 토글."""
         try:
             self._video_player.toggle_pause()
         except Exception:
             pass
 
     def seek(self, delta_sec: float) -> None:
+        """현재 PTS 기준 상대 시크(초)."""
         try:
             self._video_player.seek(float(delta_sec))
         except Exception:
             pass
 
     def restart_segment(self) -> None:
+        """현재 아이템의 start_time으로 되감아 구간을 처음부터 재생."""
         item = self.current_item()
         start = float(item.get("start_time", 0.0) or 0.0)
         try:
@@ -147,7 +155,7 @@ class PlaybackManager:
             pass
 
     def update(self, ctx: FrameContext) -> None:
-        """프레임 업데이트."""
+        """비디오 시간을 진행하고, Step 전환 중이면 합성 업데이트, 아니면 현재 Step을 갱신한다."""
         try:
             self._video_player.tick(ctx.dt_sec)
         except Exception:
@@ -165,7 +173,7 @@ class PlaybackManager:
             self._begin_step_transition(ctx, step)
 
     def render(self, screen: pygame.Surface, ctx: FrameContext) -> None:
-        """현재 step 렌더."""
+        """전환 애니메이션 중이면 합성 렌더, 아니면 현재 Step의 `render`를 호출한다."""
         if self._pending_transition is not None:
             self._render_pending_transition(screen, ctx)
             return
@@ -176,21 +184,25 @@ class PlaybackManager:
         step.render(screen, ctx, item=self.current_item())
 
     def _cancel_pending_transition(self) -> None:
+        """진행 중 Step 전환(크로스페이드·오버레이) 상태를 제거한다."""
         self._pending_transition = None
 
     def _clear_transition_signal(self, outgoing_step: IStep) -> None:
+        """나가는 Step의 `transition_signal`을 False로 소비한다."""
         try:
             outgoing_step.transition_signal = False
         except Exception:
             pass
 
     def _ensure_scratch(self, ctx: FrameContext) -> pygame.Surface:
+        """전환 합성용 해상도에 맞는 임시 Surface를 준비한다."""
         w, h = int(ctx.width), int(ctx.height)
         if self._scratch is None or self._scratch.get_size() != (w, h):
             self._scratch = pygame.Surface((w, h))
         return self._scratch
 
     def _update_pending_transition(self, ctx: FrameContext) -> None:
+        """전환 타이머를 진행하고 OVERLAY면 중간에 Step을 바꾼 뒤 끝나면 pending을 해제한다."""
         p = self._pending_transition
         if p is None:
             return
@@ -211,6 +223,7 @@ class PlaybackManager:
             self._pending_transition = None
 
     def _render_pending_transition(self, screen: pygame.Surface, ctx: FrameContext) -> None:
+        """pending 전환 모드에 따라 크로스페이드 또는 검정 오버레이 렌더를 수행한다."""
         p = self._pending_transition
         if p is None:
             return
@@ -225,6 +238,7 @@ class PlaybackManager:
         ctx: FrameContext,
         p: PendingStepTransition,
     ) -> None:
+        """이전 스냅샷과 들어오는 Step 화면을 알파 블렌드한다."""
         scratch = self._ensure_scratch(ctx)
         item = self.current_item()
         d = p.duration_sec if p.duration_sec > 1e-6 else 1e-6
@@ -242,6 +256,7 @@ class PlaybackManager:
         ctx: FrameContext,
         p: PendingStepTransition,
     ) -> None:
+        """검정 오버레이로 이전·다음 화면을 전환하는 2단계 페이드를 그린다."""
         scratch = self._ensure_scratch(ctx)
         item = self.current_item()
         d = p.duration_sec if p.duration_sec > 1e-6 else 1e-6
@@ -280,6 +295,7 @@ class PlaybackManager:
             pass
 
     def _reset_step_done_flag(self, kind: StepKind) -> None:
+        """해당 Step의 완료·전환 플래그를 초기화해 새 구간에서 즉시 스킵되지 않게 한다."""
         # 컨텐츠(step) 전환 시 이전 완료 상태가 남아있으면 즉시 스킵되는 문제가 생길 수 있어서
         # 전환 시점에 플래그들을 리셋한다.
         step = self._steps.get(kind)
@@ -295,6 +311,7 @@ class PlaybackManager:
             pass
 
     def _snapshot_outgoing(self, ctx: FrameContext, outgoing_step: IStep) -> pygame.Surface | None:
+        """전환용으로 나가는 Step의 `transition_bg_frame` 또는 현재 비디오 프레임 스냅샷을 만든다."""
         snap = None
         try:
             trans = outgoing_step.transition_bg_frame
@@ -310,7 +327,7 @@ class PlaybackManager:
         return snap
 
     def _capture_and_set_next_bg(self, ctx: FrameContext, next_kind: StepKind) -> None:
-        """현재(나가는) step 기준 스냅샷을 다음 step의 bg_frame으로 주입."""
+        """나가는 Step 화면 스냅샷을 다음 Step의 `bg_frame`에 넣어 이어짐을 자연스럽게 한다."""
         cur_step = self._steps.get(self.state.step_kind)
         snap = self._snapshot_outgoing(ctx, cur_step) if cur_step is not None else None
         step = self._steps.get(next_kind)

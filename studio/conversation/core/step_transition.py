@@ -72,6 +72,7 @@ def blend_crossfade(
 
 
 def blit_black_overlay(screen: pygame.Surface, ctx: FrameContext, alpha: int) -> None:
+    """화면 전체에 지정 알파의 검정 레이어를 한 겹 올린다(OVERLAY 전환용)."""
     a = max(0, min(255, int(alpha)))
     if a <= 0:
         return

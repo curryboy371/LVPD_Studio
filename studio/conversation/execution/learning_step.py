@@ -35,6 +35,7 @@ class LearningStep(IStep):
         *,
         prefix: str,
     ) -> dict[str, str]:
+        """레이어 이름마다 `prefix_레이어` 형태의 페이드 채널 키를 만든다."""
         p = str(prefix).strip()
         if not p.endswith("_"):
             p = f"{p}_"
@@ -55,6 +56,7 @@ class LearningStep(IStep):
         stage_audio_keys: dict["LearningStep.Stage", str] | None = None,
         wait_for_sound_end: bool = False,
     ) -> None:
+        """Drawer·비디오·스타일·타이틀·음성 콜백으로 학습 단계 상태를 초기화한다."""
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
@@ -92,9 +94,11 @@ class LearningStep(IStep):
         self._set_stage(LearningStep.Stage.TITLE)
 
     def _all_channels(self) -> list[str]:
+        """타이틀·문장 페이드에 쓰는 채널 목록(중복 제거)."""
         return list(dict.fromkeys([self._title_channel, self._sentence_channel]))
 
     def _item_identity_key(self, item: ConversationItemLike) -> Any:
+        """아이템이 바뀌었는지 판별하기 위한 (id, 구간) 식별 키."""
         try:
             return (
                 str(item.get("id") or ""),
@@ -105,6 +109,7 @@ class LearningStep(IStep):
             return None
 
     def _reset_step_on_item_change(self, item: ConversationItemLike) -> None:
+        """다른 아이템으로 넘어갈 때 페이드·전환 상태·스테이지를 타이틀부터 다시 맞춘다."""
         _ = item
         self.drawer.fade_all_off(self._all_channels(), 0.0)
         self.transition_bg_frame = None
@@ -112,6 +117,7 @@ class LearningStep(IStep):
         self._set_stage(LearningStep.Stage.TITLE)
 
     def sync_item_identity(self, item: ConversationItemLike) -> bool:
+        """아이템이 바뀌었으면 리셋 후 True, 같으면 False."""
         key = self._item_identity_key(item)
         if key == self._active_item_key:
             return False
@@ -120,10 +126,12 @@ class LearningStep(IStep):
         return True
 
     def _fade_on_title_and_sentence(self) -> None:
+        """타이틀·문장 레이어를 즉시 보이게 한다."""
         self.drawer.fade_on(self._title_channel, 0.0)
         self.drawer.fade_on(self._sentence_channel, 0.0)
 
     def _play_item_sound(self, key: str) -> float:
+        """아이템 필드 경로 음성을 재생하고, 길이(초)를 반환(실패 시 0)."""
         path = str(self._current_item.get(key) or "").strip()
         if not path:
             return 0.0
@@ -144,6 +152,7 @@ class LearningStep(IStep):
             return 0.0
 
     def _apply_done_transition(self) -> None:
+        """학습 시퀀스 종료 시 전환용 배경 스냅샷을 채우고 `transition_signal`을 올린다."""
         if self.transition_bg_frame is None and self.bg_frame is not None:
             try:
                 self.transition_bg_frame = self.bg_frame.copy()
@@ -152,6 +161,7 @@ class LearningStep(IStep):
         self.transition_signal = True
 
     def _set_stage(self, stage: LearningStep.Stage) -> None:
+        """스테이지별 페이드·타이머·음성 재생을 설정한다."""
         self.stage = stage
 
         if stage == LearningStep.Stage.TITLE:
@@ -182,6 +192,7 @@ class LearningStep(IStep):
             self._apply_done_transition()
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """아이템 동기화 후 페이드를 진행하고, 타이머로 스테이지를 순서대로 넘긴다."""
         self._current_item = item
 
         if self.sync_item_identity(item):
@@ -210,6 +221,7 @@ class LearningStep(IStep):
             self._set_stage(LearningStep.Stage.DONE)
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """비디오 프레임 위에 문장·타이틀 텍스트를 채널 알파에 맞춰 그린다."""
         frame = self.bg_frame or self.video_player.get_frame(ctx.width, ctx.height)
         if frame is not None:
             screen.blit(frame, (0, 0))

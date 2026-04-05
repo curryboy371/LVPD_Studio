@@ -32,8 +32,8 @@ class IStep(ABC):
 
     @abstractmethod
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
-        """프레임당 로직 업데이트."""
+        """프레임당 상태·타이머·전환 시그널 등 Step 로직을 갱신한다."""
 
     @abstractmethod
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
-        """프레임 렌더링."""
+        """현재 아이템과 컨텍스트로 화면에 한 프레임을 그린다."""

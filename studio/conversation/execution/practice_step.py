@@ -19,6 +19,7 @@ class PracticeStep(IStep):
     """
 
     def __init__(self, *, drawer, video_player, style: SentenceStyleConfig) -> None:
+        """연습용 Drawer·비디오·문장 스타일을 연결하고 문장 채널 페이드를 켠다."""
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
@@ -30,10 +31,12 @@ class PracticeStep(IStep):
         self.drawer.fade_on(self._sentence_channel, 0.0)
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """render_only 범위에서 상태 갱신 없음(정적 연습 화면)."""
         _ = (ctx, item)
         return
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """비디오 위에 상단 정렬 문장과 첫 단어(있으면)를 표시한다."""
         frame = self.bg_frame or self.video_player.get_frame(ctx.width, ctx.height)
         if frame is not None:
             screen.blit(frame, (0, 0))

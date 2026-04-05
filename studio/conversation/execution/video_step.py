@@ -21,6 +21,7 @@ class VideoStep(IStep):
         step_transition_duration_sec: float | None = None,
         step_transition_overlay_peak_alpha: int | None = None,
     ) -> None:
+        """비디오 전용 Step; 전환 모드·페이드아웃 길이를 설정한다."""
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
@@ -39,6 +40,7 @@ class VideoStep(IStep):
         self._fade_max_alpha: int = int(255 * 0.8)
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """구간 끝에서 일시정지되면 페이드아웃 후 전환 스냅샷과 `transition_signal`을 설정한다."""
         _ = (ctx, item)
         # 비디오 재생(시간 진행)은 PlaybackManager가 tick()으로 담당.
         # 여기서는 "해당 아이템의 세그먼트가 끝났는지"를 감지해
@@ -71,6 +73,7 @@ class VideoStep(IStep):
             return
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """현재 비디오 프레임을 그리고, 페이드 중이면 검정 오버레이를 쌓는다."""
         _ = item
         frame = self.video_player.get_frame(ctx.width, ctx.height)
         if frame is not None:

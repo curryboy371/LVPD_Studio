@@ -32,9 +32,11 @@ class SimpleVideoPlayer:
         self._cached_size: tuple[int, int] = (0, 0)
 
     def _effective_end_sec(self) -> float:
+        """end_time이 음수면 파일 길이까지를 유효 종료 시각으로 본다."""
         return self._end_time if self._end_time >= 0 else self._duration_sec
 
     def set_source(self, path: str, start_time: float = 0.0, end_time: float = -1.0) -> None:
+        """OpenCV로 비디오를 열고 구간·FPS·길이를 설정한 뒤 start_time 위치로 시크한다."""
         try:
             import cv2
         except ImportError:
@@ -69,6 +71,7 @@ class SimpleVideoPlayer:
         self._cached_pts = -1.0
 
     def close(self) -> None:
+        """캡처 핸들과 캐시를 해제한다."""
         if self._cap is not None:
             try:
                 self._cap.release()
@@ -81,6 +84,7 @@ class SimpleVideoPlayer:
         self._cached_pts = -1.0
 
     def tick(self, dt_sec: float) -> None:
+        """일시정지가 아니면 PTS를 진행하고 구간 끝에서 멈춘다."""
         if self._paused or self._cap is None:
             return
         self._current_pts += dt_sec
@@ -90,6 +94,7 @@ class SimpleVideoPlayer:
             self._paused = True
 
     def seek(self, delta_sec: float) -> None:
+        """현재 PTS에 delta를 더해 유효 구간 안으로 클램프하고 OpenCV 위치를 맞춘다."""
         if self._cap is None:
             return
         try:
@@ -110,12 +115,15 @@ class SimpleVideoPlayer:
         self.seek(clamped - self._current_pts)
 
     def toggle_pause(self) -> None:
+        """재생/일시정지 플래그를 뒤집는다."""
         self._paused = not self._paused
 
     def is_paused(self) -> bool:
+        """현재 일시정지 여부."""
         return self._paused
 
     def get_frame(self, width: int, height: int) -> Optional[pygame.Surface]:
+        """현재 PTS에 맞는 프레임을 pygame Surface로 반환(캐시·리사이즈 포함)."""
         if self._cap is None:
             return self._cached_surf
         try:
@@ -124,6 +132,7 @@ class SimpleVideoPlayer:
             return self._cached_surf
 
     def _get_frame_impl(self, width: int, height: int) -> Optional[pygame.Surface]:
+        """OpenCV read·시크·캐시 정책으로 단일 프레임을 준비한다."""
         import cv2
         frame_interval = 1.0 / self._fps
         if (
@@ -195,6 +204,7 @@ class SimpleVideoPlayer:
         return self._cached_surf
 
     def _bgr_to_surface(self, frame: Any, width: int, height: int) -> Optional[pygame.Surface]:
+        """BGR numpy 배열을 RGB pygame Surface로 변환하고 목표 해상도에 맞춘다."""
         try:
             import cv2
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

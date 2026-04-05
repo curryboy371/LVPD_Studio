@@ -53,6 +53,7 @@ class ConversationStudio:
         content: Any = None,
         **_: Any,
     ) -> None:
+        """CSV·콘텐츠로 재생 목록을 만들고, 비디오/오디오 플레이어를 준비한다."""
         self._csv_path = csv_path
         self._data_list = build_data_list(csv_path, content)
         self._render_settings: Optional[ConversationRenderSettings] = None
@@ -117,6 +118,7 @@ class ConversationStudio:
         self._drawer = CommonDrawer(fonts=fonts)
 
         def _play_insert_voice(path: str, *, item: Any = None) -> None:
+            """학습 단계 삽입 음성을 재생하고, 녹화 모드면 타임라인 이벤트로 남긴다."""
             _ = item
             if not path:
                 return
@@ -189,6 +191,7 @@ class ConversationStudio:
         )
 
     def get_title(self) -> str:
+        """창 제목 표시용 문자열."""
         return "LVPD Studio - 회화"
 
     def handle_events(self, events: list, config: Any = None) -> bool:
@@ -252,6 +255,7 @@ class ConversationStudio:
         return True
 
     def update(self, config: Any = None) -> None:
+        """프레임당 dt·해상도 컨텍스트를 만들고 비디오 오디오·PlaybackManager를 갱신한다."""
         if self._manager is None:
             return
         self._last_config = config
@@ -273,6 +277,7 @@ class ConversationStudio:
         self._manager.update(ctx)
 
     def draw(self, screen: Any, config: Any) -> None:
+        """배경 채우기 후 현재 Step 화면을 그리고 일시정지·디버그 오버레이를 덧씌운다."""
         bg = getattr(config, "bg_color", (20, 20, 25))
         screen.fill(bg)
 
@@ -289,6 +294,7 @@ class ConversationStudio:
         draw_paused_and_debug(self, screen, config)
 
     def get_recording_prefix(self) -> Optional[str]:
+        """녹화 파일명 접두사(현재 아이템 id 기준). 데이터 없으면 None."""
         if not self._data_list:
             return None
         idx = self._manager.state.item_index if self._manager is not None else 0
@@ -302,6 +308,7 @@ class ConversationStudio:
     # ------------------------------------------------------------------
 
     def _apply_media_for_index(self, index: int) -> None:
+        """지정 인덱스 아이템의 비디오 경로·구간을 플레이어와 동기 추출 오디오에 반영한다."""
         if not self._data_list or index < 0 or index >= len(self._data_list):
             return
         item = self._data_list[index]
