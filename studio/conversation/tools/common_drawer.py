@@ -111,6 +111,14 @@ class CommonDrawer:
         """채널 알파를 0으로 내린다(선택적 페이드 시간)."""
         self._fade.fade_off(channel, sec)
 
+    def show_now(self, channel: str) -> None:
+        """페이드 없이 즉시 표시"""
+        self.fade_on(channel, 0.0)
+
+    def hide_now(self, channel: str) -> None:
+        """페이드 없이 즉시 숨김"""
+        self.fade_off(channel, 0.0)
+
     def fade_all_off(self, channels: list[str], sec: float = 0.0) -> None:
         """여러 채널을 한꺼번에 fade_off."""
         self._fade.fade_all_off(channels, sec)

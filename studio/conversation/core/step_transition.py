@@ -1,4 +1,7 @@
-"""Step 간 화면 전환 모드(PlaybackManager가 합성)."""
+"""ConversationStep(StepKind) 간 화면 전환 효과 — PlaybackManager가 합성.
+
+LearningStep 내부 Stage 전환과는 무관하다.
+"""
 
 from __future__ import annotations
 
@@ -11,36 +14,36 @@ import pygame
 from .types import FrameContext
 
 
-class StepTransitionMode(str, Enum):
-    """이전 Step이 `transition_signal`을 올릴 때 다음 Step으로 넘어가는 방식."""
+class ConversationStepTransitionMode(str, Enum):
+    """나가는 ConversationStep이 `transition_signal`을 올릴 때 다음 StepKind로 넘어가는 시각 효과."""
 
     CUT = "cut"
     """즉시 전환 + `bg_frame` 스냅샷 주입(기존 동작)."""
 
     CROSSFADE = "crossfade"
-    """이전 화면 스냅샷과 다음 Step 렌더를 알파 블렌드."""
+    """이전 화면 스냅샷과 다음 ConversationStep 렌더를 알파 블렌드."""
 
     OVERLAY = "overlay"
-    """검정 오버레이가 올라갔다가(중간에 Step 스위치) 내려가며 다음 화면을 드러냄."""
+    """검정 오버레이가 올라갔다가(중간에 StepKind 스위치) 내려가며 다음 화면을 드러냄."""
 
 
-def read_step_transition(step: Any) -> tuple[StepTransitionMode, float, int]:
-    """Step에 없으면 CUT / 기본 시간 / 기본 피크 알파."""
-    mode = getattr(step, "step_transition_mode", StepTransitionMode.CUT)
-    if not isinstance(mode, StepTransitionMode):
+def read_conversation_step_transition(conv_step: Any) -> tuple[ConversationStepTransitionMode, float, int]:
+    """ConversationStep에 없으면 CUT / 기본 시간 / 기본 피크 알파."""
+    mode = getattr(conv_step, "conversation_step_transition_mode", ConversationStepTransitionMode.CUT)
+    if not isinstance(mode, ConversationStepTransitionMode):
         try:
-            mode = StepTransitionMode(str(mode))
+            mode = ConversationStepTransitionMode(str(mode))
         except ValueError:
-            mode = StepTransitionMode.CUT
-    duration = float(getattr(step, "step_transition_duration_sec", 0.4) or 0.0)
-    peak = int(getattr(step, "step_transition_overlay_peak_alpha", 220) or 0)
+            mode = ConversationStepTransitionMode.CUT
+    duration = float(getattr(conv_step, "conversation_step_transition_duration_sec", 0.4) or 0.0)
+    peak = int(getattr(conv_step, "conversation_step_transition_overlay_peak_alpha", 220) or 0)
     peak = max(0, min(255, peak))
     return mode, duration, peak
 
 
 @dataclass
-class PendingStepTransition:
-    mode: StepTransitionMode
+class PendingConversationStepTransition:
+    mode: ConversationStepTransitionMode
     duration_sec: float
     elapsed_sec: float
     outgoing_snapshot: pygame.Surface | None
