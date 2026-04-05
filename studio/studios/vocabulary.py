@@ -11,21 +11,28 @@ class VocabularyStudio:
     """단어장 스튜디오 (스켈레톤): 제목 + 빈 화면 또는 고정 텍스트."""
 
     def __init__(self, **kwargs: Any) -> None:
+        """스켈레톤용 폰트 핸들만 준비한다(추가 인자는 무시)."""
+        _ = kwargs
         self._font: Optional[pygame.font.Font] = None
 
     def get_title(self) -> str:
+        """창 제목 표시용 문자열."""
         return "LVPD Studio - 단어장"
 
     def handle_events(self, events: list, config: Any = None) -> bool:
+        """키 입력은 아직 미구현; 항상 True로 루프를 유지한다."""
+        _ = config
         for e in events:
             if e.type == pygame.KEYDOWN:
                 pass
         return True
 
     def update(self, config: Any = None) -> None:
-        pass
+        """스켈레톤: 매 프레임 갱신 로직 없음."""
+        _ = config
 
     def draw(self, screen: Any, config: Any) -> None:
+        """배경 채우기 후 중앙에 안내 문구를 그린다."""
         screen.fill(config.bg_color)
         if self._font is None:
             self._font = pygame.font.Font(None, 36)
@@ -34,4 +41,5 @@ class VocabularyStudio:
         screen.blit(label, (w // 2 - 120, h // 2 - 18))
 
     def get_recording_prefix(self) -> Optional[str]:
+        """녹화 파일 접두사 미사용."""
         return None

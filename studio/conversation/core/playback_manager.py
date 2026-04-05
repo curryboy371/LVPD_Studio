@@ -70,6 +70,7 @@ class PlaybackManager:
         step_sequence: Sequence[StepKind] | None = None,
         last_step_sequence_policy: LastStepSequencePolicy = LastStepSequencePolicy.STAY,
     ) -> None:
+        """아이템·Step 매핑·시퀀스·정책으로 재생 상태를 초기화하고 첫 아이템을 비디오에 적용한다."""
         self._items = list(items)
         self._steps: dict[StepKind, IStep] = dict(steps)
         self._video_player = video_player

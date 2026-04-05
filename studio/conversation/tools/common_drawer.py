@@ -28,6 +28,7 @@ _TONE_ICON_GAP_ABOVE_PX = 8
 
 
 def _split_pinyin_syllables(s: str) -> list[str]:
+    """병음 문자열을 공백 기준 음절 리스트로 나눈다."""
     return [x for x in s.strip().split() if x]
 
 
@@ -69,6 +70,7 @@ class CommonDrawer:
     ITEM_SENTENCE_CENTER_Y_RATIO = 0.43
 
     def __init__(self, *, fonts: Any) -> None:
+        """폰트 묶음·텍스트 캐시·페이드 상태를 초기화한다."""
         self._fonts = fonts
         self._cache_hanzi = _LRUTextCache()
         self._cache_pinyin = _LRUTextCache()
@@ -78,16 +80,20 @@ class CommonDrawer:
         self._sentence_data_cache_val: SentenceRenderData | None = None
 
     def fade_on(self, channel: str, sec: float = 0.0) -> None:
+        """채널 알파를 255로 맞추되 sec>0이면 그 시간에 걸쳐 보간한다."""
         self._start_fade(channel, target_alpha=255, sec=sec)
 
     def fade_off(self, channel: str, sec: float = 0.0) -> None:
+        """채널 알파를 0으로 내린다(선택적 페이드 시간)."""
         self._start_fade(channel, target_alpha=0, sec=sec)
 
     def fade_all_off(self, channels: list[str], sec: float = 0.0) -> None:
+        """여러 채널을 한꺼번에 fade_off."""
         for ch in channels:
             self.fade_off(ch, sec)
 
     def fade_tick(self, dt_sec: float) -> None:
+        """진행 중인 페이드 상태를 dt만큼 전진시킨다."""
         dt = max(0.0, float(dt_sec))
         if dt <= 0.0 or not self._fade_states:
             return
@@ -110,12 +116,14 @@ class CommonDrawer:
                 st["elapsed"] = elapsed
 
     def fade_alpha(self, channel: str) -> int:
+        """채널의 현재 알파(0~255); 없으면 0."""
         st = self._fade_states.get(channel)
         if st is None:
             return 0
         return max(0, min(255, int(st.get("alpha", 0) or 0)))
 
     def _start_fade(self, channel: str, *, target_alpha: int, sec: float) -> None:
+        """페이드 상태 딕셔너리에 목표 알파와 지속 시간을 기록한다."""
         key = str(channel or "").strip()
         if not key:
             return
@@ -225,6 +233,7 @@ class CommonDrawer:
         return max(0, h - int(bottom_margin_px) - below)
 
     def layout_title_y(self, ctx: FrameContext, *, y_ratio: float = 0.12) -> int:
+        """타이틀 기준 세로 위치(화면 높이 비율)."""
         return int(ctx.height * float(y_ratio))
 
     def draw_item_sentence(
@@ -302,6 +311,7 @@ class CommonDrawer:
         text: str,
         color: tuple[int, int, int],
     ) -> int:
+        """한 줄 텍스트의 렌더 높이(캐시된 서피스 기준)."""
         if not (text or "").strip():
             return 0
         surf, _ = self._get_cached_text_pair(cache, font_ft, font_pg, text, color)
@@ -315,6 +325,7 @@ class CommonDrawer:
         text: str,
         color: tuple[int, int, int],
     ) -> tuple[Any, Any]:
+        """폰트·문자열·색 키로 (surf, rect) 쌍을 캐시에서 가져오거나 렌더해 넣는다."""
         key = _text_cache_key(font_ft, font_pg, text, color)
         cached = cache.get(key)
         if cached is None:
@@ -323,6 +334,7 @@ class CommonDrawer:
         return cached
 
     def _get_cached_translation_surf(self, text: str, color: tuple[int, int, int]) -> Any:
+        """번역용 폰트로 렌더한 서피스를 전용 캐시에서 반환한다."""
         font_pg = self._fonts.translation_pg
         key = _text_cache_key(None, font_pg, text, color)
         cached = self._cache_translation.get(key)
@@ -335,6 +347,7 @@ class CommonDrawer:
 
     @staticmethod
     def _restore_surface_alpha(surf: pygame.Surface, old: Any) -> None:
+        """set_alpha 실험 후 원래 알파 상태로 되돌린다."""
         try:
             if old is None:
                 surf.set_alpha(None)
@@ -354,6 +367,7 @@ class CommonDrawer:
         align: Align,
         alpha: int,
     ) -> None:
+        """정렬·여백을 적용해 서피스를 화면에 붙이되 alpha<255면 임시 알파를 쓴다."""
         if alpha <= 0:
             return
         if alpha >= 255:
@@ -375,7 +389,7 @@ class CommonDrawer:
         min_margin_x: int,
         align: Align,
     ) -> list[int]:
-        """공백 구분 음절 각각의 가로 중심 x (화면 좌표)."""
+        """병음 음절별 가로 중심 x 좌표(성조 아이콘 정렬용)."""
         if not syllables:
             return []
         widths: list[int] = []
@@ -414,6 +428,7 @@ class CommonDrawer:
     def _align_tone_icon_slots(
         self, syllables: list[str], slots: tuple[Optional[ToneIconSlot], ...]
     ) -> tuple[Optional[ToneIconSlot], ...]:
+        """음절 개수에 맞춰 슬롯 튜플 길이를 맞춘다."""
         k = len(syllables)
         if k == 0:
             return ()
@@ -432,6 +447,7 @@ class CommonDrawer:
         alpha: int,
         align: Align,
     ) -> None:
+        """병음 줄 위에 음절별 성조 아이콘을 배치한다."""
         syllables = _split_pinyin_syllables(pinyin_line)
         if not syllables or not any(s is not None for s in slots):
             return
@@ -595,6 +611,7 @@ class CommonDrawer:
         return
 
     def _render_text(self, font_ft: Any, font_pg: Any, text: str, color: tuple[int, int, int]) -> tuple[Any, Any]:
+        """freeType 우선, 실패 시 pygame.font로 한 줄을 렌더한다."""
         if font_ft is not None:
             try:
                 surf, rect = font_ft.render(text, color)
@@ -619,6 +636,7 @@ class CommonDrawer:
         min_margin_x: int,
         align: Align,
     ) -> None:
+        """캐시된 텍스트 서피스를 알파·정렬에 맞춰 화면에 붙인다."""
         surf, _ = self._get_cached_text_pair(cache, font_ft, font_pg, text, color)
         if surf is None:
             return
@@ -642,6 +660,7 @@ class CommonDrawer:
         min_margin_x: int,
         align: Align,
     ) -> None:
+        """center/left/right와 최소 여백을 적용해 서피스 좌표를 잡고 blit한다."""
         if surf is None:
             return
         if align == "center":
