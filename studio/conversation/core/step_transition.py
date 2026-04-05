@@ -56,7 +56,7 @@ def blend_crossfade(
     incoming: pygame.Surface,
     t: float,
 ) -> None:
-    """t=0 → outgoing만, t=1 → incoming만(픽셀 알파는 incoming 원본 유지)."""
+    """이전·다음 화면을 t에 따라 알파 합성한다(t=0 이전만, t=1 다음만)."""
     t = max(0.0, min(1.0, float(t)))
     w, h = screen.get_size()
     if outgoing is not None and t < 1.0 - 1e-6:

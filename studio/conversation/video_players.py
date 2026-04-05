@@ -19,6 +19,7 @@ from core.paths import (
 class SimpleVideoPlayer:
     """단일 비디오 파일의 화면만 재생 (OpenCV로 비디오 스트림만 읽음, 오디오 미사용). start_time~end_time 구간만 재생, end_time=-1이면 끝까지."""
     def __init__(self) -> None:
+        """캡처·PTS·캐시 필드를 초기 상태로 둔다."""
         self._path: str = ""
         self._cap: Any = None
         self._fps: float = STUDIO_VIDEO_FALLBACK_FPS
@@ -217,12 +218,15 @@ class SimpleVideoPlayer:
             return None
 
     def get_pts(self) -> float:
+        """논리 재생 시각(초)."""
         return self._current_pts
 
     def get_effective_end_sec(self) -> float:
+        """구간 종료 시각(초); end_time 미지정 시 파일 끝."""
         return self._effective_end_sec()
 
     def get_fps(self) -> float:
+        """소스에서 읽은 FPS(실패 시 폴백)."""
         return self._fps
 
 
@@ -230,6 +234,7 @@ class VideoAudioPlayer:
     """비디오와 동일 경로·동일 이름의 추출된 MP3를 재생. 비디오 내장 음원은 사용하지 않음."""
 
     def __init__(self) -> None:
+        """경로·추출 스레드·pending 잠금을 초기화한다."""
         self._path: str = ""
         self._start_time: float = 0.0
         self._temp_wav: Optional[str] = None
@@ -241,6 +246,7 @@ class VideoAudioPlayer:
         self._extract_thread: Optional[threading.Thread] = None
 
     def set_source(self, path: str, start_time: float = 0.0) -> None:
+        """동일 이름 mp3를 ffmpeg로 WAV 추출한 뒤 백그라운드에서 pending으로 둔다."""
         if path == self._path and self._start_time == start_time:
             return
         self.stop()
@@ -285,6 +291,7 @@ class VideoAudioPlayer:
         self._extract_thread.start()
 
     def _apply_pending(self) -> None:
+        """추출이 끝난 WAV를 mixer.music에 로드하고 start_time부터 재생한다."""
         with self._lock:
             wav = self._pending_wav
             path = self._pending_path
@@ -306,10 +313,12 @@ class VideoAudioPlayer:
             pass
 
     def has_pending(self) -> bool:
+        """백그라운드 추출 결과가 아직 적용 전이면 True."""
         with self._lock:
             return self._pending_wav is not None
 
     def seek_to(self, time_sec: float) -> None:
+        """mixer.music을 지정 시각부터 다시 재생(일시정지면 재생 후 pause)."""
         try:
             self._play_start_sec = time_sec
             if self._paused:
@@ -321,6 +330,7 @@ class VideoAudioPlayer:
             pass
 
     def pause(self) -> None:
+        """배경 음악 일시정지."""
         self._paused = True
         try:
             pygame.mixer.music.pause()
@@ -328,6 +338,7 @@ class VideoAudioPlayer:
             pass
 
     def unpause(self) -> None:
+        """배경 음악 재개."""
         self._paused = False
         try:
             pygame.mixer.music.unpause()
@@ -335,6 +346,7 @@ class VideoAudioPlayer:
             pass
 
     def stop(self) -> None:
+        """재생 중지·pending 취소·임시 WAV 파일 삭제."""
         try:
             pygame.mixer.music.stop()
         except Exception:
@@ -351,6 +363,7 @@ class VideoAudioPlayer:
         self._path = ""
 
     def get_status(self) -> str:
+        """디버그용 문자열: 로딩/없음/일시정지/재생 등."""
         if self.has_pending():
             return "로딩 중"
         if not self._path:
@@ -365,6 +378,7 @@ class VideoAudioPlayer:
             return "?"
 
     def get_position_sec(self) -> Optional[float]:
+        """mixer.music 기준 대략 재생 위치(초); 미초기화면 None."""
         if not self._path or self._temp_wav is None:
             return None
         try:

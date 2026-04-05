@@ -48,6 +48,7 @@ from data.table_manager import (
 class StudioConfig:
     """해상도·좌표 변환. 디버그 모드에서 dt_sec, actual_fps 등이 매 프레임 설정됨."""
     def __init__(self, width: int = STUDIO_WIDTH, height: int = STUDIO_HEIGHT, fps: int = STUDIO_FPS):
+        """창/버퍼 크기, FPS, 배경색, 기본 dt를 설정한다."""
         self.width = width
         self.height = height
         self.fps = fps
@@ -70,6 +71,7 @@ class SimpleRecordingManager:
     _PUT_TIMEOUT_SEC = 30.0
 
     def __init__(self, output_dir: str | Path | None = None):
+        """출력 디렉터리를 만들고 녹화 상태·큐·스레드 핸들을 초기화한다."""
         self.output_dir = Path(output_dir or _REPO_ROOT / "release")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.is_recording = False
@@ -80,6 +82,7 @@ class SimpleRecordingManager:
         self._last_video_path: Optional[Path] = None
 
     def start(self, filename_prefix: str = "rec", fps: float = STUDIO_FPS, size: tuple[int, int] = (STUDIO_WIDTH, STUDIO_HEIGHT)) -> None:
+        """프레임 큐와 writer 스레드를 시작해 녹화 상태로 만든다."""
         if self.is_recording:
             return
         self._fps = fps
@@ -96,6 +99,7 @@ class SimpleRecordingManager:
         self._thread.start()
 
     def submit_frame(self, frame_rgb) -> None:
+        """RGB 프레임을 큐에 넣어 백그라운드 인코더가 소비하게 한다."""
         if not self.is_recording or self._frame_queue is None or np is None:
             return
         frame = np.asarray(frame_rgb, dtype=np.uint8)
@@ -109,6 +113,7 @@ class SimpleRecordingManager:
                 pass
 
     def stop(self) -> None:
+        """녹화 플래그를 내리고 writer 스레드가 끝날 때까지 대기한다."""
         self.is_recording = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5.0)
@@ -116,12 +121,14 @@ class SimpleRecordingManager:
         self._frame_queue = None
 
     def _record_loop(self, filename_prefix: str) -> None:
+        """스레드 진입점: 비디오만 파일로 저장한다."""
         try:
             self._record_video_only(filename_prefix)
         except Exception as e:
             print("⚠️ 녹화 저장 중 오류:", e)
 
     def _record_video_only(self, filename_prefix: str) -> None:
+        """큐에서 프레임을 꺼내 OpenCV VideoWriter로 MP4를 쓴다."""
         try:
             import cv2
         except ImportError:
@@ -320,6 +327,7 @@ def _create_studio(
     content: Optional[Any] = None,
     **kwargs,
 ) -> IStudio:
+    """이름에 맞는 IStudio 인스턴스를 만든다(conversation / vocabulary)."""
     if name == "conversation":
         from studio.conversation import ConversationStudio
         return ConversationStudio(
@@ -334,6 +342,7 @@ def _create_studio(
 
 
 def main() -> None:
+    """CLI 인자 파싱 후 콘텐츠 로드·스튜디오 생성·run() 호출."""
     parser = argparse.ArgumentParser(description="LVPD 스튜디오 러너 (IStudio 구현체 실행)")
     parser.add_argument(
         "--studio",
