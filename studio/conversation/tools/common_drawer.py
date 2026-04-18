@@ -205,16 +205,38 @@ class CommonDrawer:
         center_y_ratio: float = 0.43,
         top_y_ratio: float = 0.12,
         bottom_margin_px: int = 48,
+        title_clearance: Optional[tuple[str, float, int]] = None,
     ) -> int:
-        """문장 블록 첫 줄 상단(`y_base`)을 세로 정렬 모드에 맞게 계산한다."""
+        """문장 블록 첫 줄 상단(`y_base`)을 세로 정렬 모드에 맞게 계산한다.
+
+        `title_clearance`가 (타이틀 문자열, 타이틀 `y` 비율, 타이틀 아래 여백 px)이면,
+        성조 아이콘이 병음 위로 올라가는 높이(`extent_above`)까지 포함해 상단 타이틀과 겹치지 않게
+        `y_base` 하한을 올린다 (`draw_item_title`의 `y_ratio`와 맞출 것).
+        """
         h = max(1, int(ctx.height))
+        above, below = self.measure_sentence_block_extents(data, style)
+
+        def _y_base_clear_of_title(y_base: int) -> int:
+            if not title_clearance:
+                return y_base
+            text, y_ratio, gap_px = title_clearance
+            if not (text or "").strip():
+                return y_base
+            title_y = int(h * float(y_ratio))
+            surf = self._get_cached_translation_surf(str(text).strip(), style.colors.hanzi_color)
+            title_h = int(surf.get_height()) if surf is not None else 0
+            floor = title_y + title_h + int(gap_px) + above
+            return max(y_base, floor)
+
         if align_v == "center":
             cy = int(h * float(center_y_ratio))
-            return self.y_base_for_vertical_center(cy, data, style)
+            y_base = self.y_base_for_vertical_center(cy, data, style)
+            return _y_base_clear_of_title(y_base)
         if align_v == "top":
-            return int(h * float(top_y_ratio))
-        above, below = self.measure_sentence_block_extents(data, style)
-        return max(0, h - int(bottom_margin_px) - below)
+            y_base = int(h * float(top_y_ratio))
+            return _y_base_clear_of_title(y_base)
+        y_base = max(0, h - int(bottom_margin_px) - below)
+        return _y_base_clear_of_title(y_base)
 
     def layout_title_y(self, ctx: FrameContext, *, y_ratio: float = 0.12) -> int:
         """타이틀 기준 세로 위치(화면 높이 비율)."""
@@ -232,6 +254,7 @@ class CommonDrawer:
         align_v: AlignV = "center",
         top_y_ratio: float = 0.12,
         bottom_margin_px: int = 48,
+        title_clearance: Optional[tuple[str, float, int]] = None,
     ) -> None:
         """`build_sentence_render_data_with_tone_icons`로 item을 변환(아이템 단위 캐시) 후 레이아웃·`draw_sentence`.
 
@@ -253,6 +276,7 @@ class CommonDrawer:
             center_y_ratio=center_y_ratio,
             top_y_ratio=top_y_ratio,
             bottom_margin_px=bottom_margin_px,
+            title_clearance=title_clearance,
         )
         self.draw_sentence(
             screen,

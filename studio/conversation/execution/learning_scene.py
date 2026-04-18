@@ -213,6 +213,7 @@ class LearningScene(FSMConversationStep):
             ctx=ctx,
             channel=self.sentence_channel,
             style=self.style,
+            title_clearance=(self.title_text, 0.12, 12),
         )
 
         self.drawer.draw_item_title(

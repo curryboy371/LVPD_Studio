@@ -210,6 +210,10 @@ class PlaybackManager:
         snap: pygame.Surface | None = None
         if scene.transition_bg_frame:
             snap = scene.transition_bg_frame.copy()
+        elif scene.bg_frame:
+            # 장면이 이미 공유 배경을 들고 있다면(예: LEARNING -> PRACTICE),
+            # raw 비디오 프레임보다 이 배경을 우선해서 밝기/톤을 유지한다.
+            snap = scene.bg_frame.copy()
         else:
             frame = self._video_player.get_frame(ctx.width, ctx.height)
             if frame:
@@ -274,6 +278,14 @@ class PlaybackManager:
     def set_scene_kind(self, kind: SceneKind) -> None:
         if kind not in self._scenes:
             return
+        current_scene = self._scenes.get(self.state.scene_kind)
+        if current_scene:
+            ctx = FrameContext(
+                dt_sec=0.0,
+                width=int(self._video_player.width()),
+                height=int(self._video_player.height()),
+            )
+            self._take_snapshot(ctx, current_scene)
         self._pending_transition = None
         self.state.scene_kind = kind
         self._reset_scene(kind)

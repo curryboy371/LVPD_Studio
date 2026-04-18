@@ -21,6 +21,11 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
         font_kr = studio._font_kr or pygame.font.Font(None, 28)
         vid_fps = studio._video_player.get_fps()
         pts = studio._video_player.get_pts()
+        manager = getattr(studio, "_manager", None)
+        scene_kind = None
+        if manager is not None:
+            scene_kind = getattr(getattr(manager, "state", None), "scene_kind", None)
+        scene_text = str(getattr(scene_kind, "value", scene_kind or "unknown"))
         audio_status = studio._video_audio.get_status()
         audio_pos = studio._video_audio.get_position_sec()
         if audio_pos is not None:
@@ -29,6 +34,7 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"FPS: {actual_fps:.1f}",
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
+                f"SceneKind: {scene_text}",
                 f"Audio: {audio_status} | {audio_pos:.2f}s",
                 f"Sync: {'+' if sync_drift >= 0 else ''}{sync_drift:.3f}s (vid−aud)",
             ]
@@ -37,6 +43,7 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"FPS: {actual_fps:.1f}",
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
+                f"SceneKind: {scene_text}",
                 f"Audio: {audio_status}",
             ]
         y_debug = 8

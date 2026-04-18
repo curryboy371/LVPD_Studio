@@ -159,26 +159,33 @@ class ConversationStudio:
         _adv = str(getattr(settings, "learning_voice_advance", "immediate") or "immediate").lower()
         _wait_for_sound_end = _adv in ("after_sound", "sound_length", "wait_sound")
 
+        learning_scene = LearningScene(
+            drawer=self._drawer,
+            video_player=self._video_player,
+            style=learn_style,
+            hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
+            play_voice=_play_insert_voice,
+            title_text=str(getattr(settings, "learning_title_text", "학습") or "학습"),
+            layer_channel_prefix=str(
+                getattr(settings, "learning_layer_channel_prefix", None) or "learning"
+            ),
+            stage_audio_keys=getattr(settings, "learning_stage_audio_keys", None),
+            wait_for_sound_end=_wait_for_sound_end,
+        )
+        practice_scene = PracticeScene(
+            drawer=self._drawer,
+            video_player=self._video_player,
+            style=practice_style,
+        )
+        # PRACTICE 장면 전환 연출은 LEARNING과 동일 기준을 사용한다.
+        practice_scene.scene_transition_mode = learning_scene.scene_transition_mode
+        practice_scene.scene_transition_duration_sec = learning_scene.scene_transition_duration_sec
+        practice_scene.scene_transition_overlay_peak_alpha = learning_scene.scene_transition_overlay_peak_alpha
+
         scenes = {
             SceneKind.VIDEO: VideoScene(drawer=self._drawer, video_player=self._video_player),
-            SceneKind.LEARNING: LearningScene(
-                drawer=self._drawer,
-                video_player=self._video_player,
-                style=learn_style,
-                hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
-                play_voice=_play_insert_voice,
-                title_text=str(getattr(settings, "learning_title_text", "학습") or "학습"),
-                layer_channel_prefix=str(
-                    getattr(settings, "learning_layer_channel_prefix", None) or "learning"
-                ),
-                stage_audio_keys=getattr(settings, "learning_stage_audio_keys", None),
-                wait_for_sound_end=_wait_for_sound_end,
-            ),
-            SceneKind.PRACTICE: PracticeScene(
-                drawer=self._drawer,
-                video_player=self._video_player,
-                style=practice_style,
-            ),
+            SceneKind.LEARNING: learning_scene,
+            SceneKind.PRACTICE: practice_scene,
         }
         # 컨텐츠(화면) 시퀀스:
         # - SceneKind.VIDEO: 비디오만 재생(프레임 표시)하는 화면
