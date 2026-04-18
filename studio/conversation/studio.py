@@ -176,6 +176,7 @@ class ConversationStudio:
             drawer=self._drawer,
             video_player=self._video_player,
             style=practice_style,
+            title_text=str(getattr(settings, "practice_title_text", "연습") or "연습"),
         )
         # PRACTICE 장면 전환 연출은 LEARNING과 동일 기준을 사용한다.
         practice_scene.scene_transition_mode = learning_scene.scene_transition_mode

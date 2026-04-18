@@ -18,7 +18,14 @@ class PracticeScene(IConversationStep):
     `style`은 `ConversationStudio.init`에서 폰트 로드와 맞춘 RGB로 구성해 넘긴다.
     """
 
-    def __init__(self, *, drawer, video_player, style: SentenceStyleConfig) -> None:
+    def __init__(
+        self,
+        *,
+        drawer,
+        video_player,
+        style: SentenceStyleConfig,
+        title_text: str = "연습",
+    ) -> None:
         """연습용 Drawer·비디오·문장 스타일을 연결하고 문장 채널 페이드를 켠다."""
         super().__init__()
         self.drawer = drawer
@@ -27,6 +34,7 @@ class PracticeScene(IConversationStep):
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
         self._style = style
+        self.title_text = str(title_text or "연습")
         self._sentence_channel = "practice_sentence"
         self.drawer.show_now(self._sentence_channel)
 
@@ -36,7 +44,7 @@ class PracticeScene(IConversationStep):
         return
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
-        """비디오 위에 상단 정렬 문장과 첫 단어(있으면)를 표시한다."""
+        """비디오 위에 LEARNING과 동일 세로 배치(중앙·타이틀 밴드 여유)의 문장과 첫 단어(있으면)를 표시한다."""
         frame = self.bg_frame or self.video_player.get_frame(ctx.width, ctx.height)
         if frame is not None:
             screen.blit(frame, (0, 0))
@@ -47,8 +55,7 @@ class PracticeScene(IConversationStep):
             ctx=ctx,
             channel=self._sentence_channel,
             style=self._style,
-            align_v="top",
-            top_y_ratio=0.34,
+            title_clearance=(self.title_text, 0.12, 12),
         )
 
         words = item.get("words") or []
