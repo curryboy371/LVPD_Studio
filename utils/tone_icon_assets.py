@@ -19,6 +19,10 @@ _TONE_STEM: dict[float, str] = {
     3.5: "3성반",
 }
 
+# 성조 아이콘을 전체적으로 "조금만" 줄여 표시하기 위한 비율.
+# 로드 시 1회 축소 + 캐시하여 프레임별 재스케일링 비용을 피한다.
+TONE_ICON_SCALE: float = 0.92
+
 
 def tone_stem_for_phonetic(tone: float) -> Optional[str]:
     """발음 성조 값에 대응하는 에셋 stem (확장자 제외)."""
@@ -102,6 +106,17 @@ def load_tone_icon_surface(path: Path, pygame_module: Any, *, is_mismatch: bool 
         surf = pygame_module.image.load(str(path)).convert_alpha()
     except Exception:
         return None
+    # 아이콘 크기를 소폭 축소해 병음 줄과의 시각적 밀도를 완화한다.
+    if 0.0 < TONE_ICON_SCALE < 1.0:
+        try:
+            w = int(surf.get_width())
+            h = int(surf.get_height())
+            nw = max(1, int(round(w * TONE_ICON_SCALE)))
+            nh = max(1, int(round(h * TONE_ICON_SCALE)))
+            if nw != w or nh != h:
+                surf = pygame_module.transform.smoothscale(surf, (nw, nh))
+        except Exception:
+            return None
     if is_mismatch:
         try:
             surf = _apply_orange_mismatch_tint(surf, pygame_module)

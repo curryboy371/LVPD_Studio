@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from enum import Enum, auto
+
 import pygame
 
 from ..core.scene_transition import SceneTransitionMode
-from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
+from ..core.types import (
+    ConversationItemLike,
+    FrameContext,
+    SentenceStyleConfig,
+    build_sentence_render_data_with_tone_icons,
+)
 from ..core.conversation_step import IConversationStep
+from utils.pinyin_processor import get_pinyin_processor
 
 
 class PracticeScene(IConversationStep):
@@ -18,6 +27,13 @@ class PracticeScene(IConversationStep):
     `style`은 `ConversationStudio.init`에서 폰트 로드와 맞춘 RGB로 구성해 넘긴다.
     """
 
+    class Stage(Enum):
+        """연습 장면 내부 단계."""
+
+        TITLE = auto()
+        SHOW_CONTENT = auto()
+        SHOW_SUB_CONTENT = auto()
+
     def __init__(
         self,
         *,
@@ -26,6 +42,7 @@ class PracticeScene(IConversationStep):
         style: SentenceStyleConfig,
         title_text: str = "연습",
         title_fade_in_sec: float = 1.0,
+        content_hold_sec: float = 3.0,
     ) -> None:
         """연습용 Drawer·비디오·문장 스타일을 연결하고 제목 페이드인을 준비한다."""
         super().__init__()
@@ -37,13 +54,23 @@ class PracticeScene(IConversationStep):
         self._style = style
         self.title_text = str(title_text or "연습")
         self.title_fade_in_sec = float(title_fade_in_sec)
+        # SHOW_CONTENT 단계에서 sub 문장으로 넘어가기 전 대기 시간(초).
+        self.content_hold_sec = float(content_hold_sec)
         self._title_channel = "practice_title"
         self._sentence_channel = "practice_sentence"
         self._active_item_key = None
         self._title_wait_remaining_sec = 0.0
+        self._content_wait_remaining_sec = 0.0
         self._content_visible = False
+        self._current_sub_variant = None
+        # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
+        self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
+
+    def _set_stage(self, stage: "PracticeScene.Stage") -> None:
+        """연습 장면 내부 Stage를 전환한다."""
+        self.stage = stage
 
     def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """아이템이 바뀌면 제목을 먼저 fade in 하고, 끝난 뒤 문장/단어를 노출한다."""
@@ -57,17 +84,44 @@ class PracticeScene(IConversationStep):
             # 새 아이템 진입 시에는 본문을 숨기고 제목 페이드부터 진행한다.
             self._content_visible = False
             self._title_wait_remaining_sec = self.title_fade_in_sec
+            # 기본 문장 노출 후 sub 문장으로 전환할 타이머를 초기화한다.
+            self._content_wait_remaining_sec = self.content_hold_sec
+            self._current_sub_variant = self._pick_sub_variant(item)
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
+            self._set_stage(self.Stage.TITLE)
             return
 
-        # 제목 페이드 시간이 지난 뒤에 본문(문장/단어)을 표시한다.
-        if not self._content_visible and self._title_wait_remaining_sec > 0.0:
-            self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - dt)
+        # Stage 기반으로 제목 페이드 완료 시점을 관리한다.
+        if self.stage == self.Stage.TITLE:
+            if self._title_wait_remaining_sec > 0.0:
+                self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - dt)
             if self._title_wait_remaining_sec <= 0.0:
                 self._content_visible = True
                 self.drawer.show_now(self._sentence_channel)
+                self._set_stage(self.Stage.SHOW_CONTENT)
+            return
+
+        # 기본 문장을 잠시 보여준 뒤, sub_sentences.csv 기반 변형이 있으면 다음 Stage로 넘긴다.
+        if self.stage == self.Stage.SHOW_CONTENT and self._current_sub_variant is not None:
+            if self._content_wait_remaining_sec > 0.0:
+                self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
+            if self._content_wait_remaining_sec <= 0.0:
+                self._set_stage(self.Stage.SHOW_SUB_CONTENT)
         return
+
+    def _pick_sub_variant(self, item: ConversationItemLike) -> dict | None:
+        """아이템의 sub_variants(=sub_sentences.csv 변형)에서 첫 항목을 선택한다."""
+        variants = item.get("sub_variants") or []
+        if not isinstance(variants, list) or not variants:
+            return None
+        first = variants[0]
+        if not isinstance(first, dict):
+            return None
+        replaced = str(first.get("replaced_sentence") or "").strip()
+        if not replaced:
+            return None
+        return first
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """비디오 위에 LEARNING과 동일 세로 배치(중앙·타이틀 밴드 여유)의 문장과 첫 단어(있으면)를 표시한다."""
@@ -86,23 +140,163 @@ class PracticeScene(IConversationStep):
         if not self._content_visible:
             return
 
+        render_item = item
+        # sub 단계에서는 sub_sentences.csv에서 만들어진 교체 문장/번역을 우선 렌더한다.
+        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
+            base_map = item if isinstance(item, dict) else {}
+            replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
+            pinyin_marks = ""
+            pinyin_phonetic = ""
+            pinyin_lexical = ""
+            # sub 문장은 base 문장과 달라질 수 있어, 매번 현재 문장 기준 병음을 재생성한다.
+            if replaced_sentence:
+                try:
+                    pinyin_processor = get_pinyin_processor()
+                    if pinyin_processor.available:
+                        pinyin_marks = pinyin_processor.full_convert(replaced_sentence)
+                        pinyin_lexical = " ".join(pinyin_processor.get_lexical_pinyin(replaced_sentence)).strip()
+                        pinyin_phonetic = " ".join(pinyin_processor.get_phonetic_pinyin(replaced_sentence)).strip()
+                except Exception:
+                    pass
+            render_item = {
+                **base_map,
+                "sentence": [replaced_sentence],
+                "translation": [str(self._current_sub_variant.get("alt_translation") or "").strip()],
+                # sub 문장에서도 병음/발음 정보를 채워야 병음 줄과 발음 아이콘이 함께 표시된다.
+                "pinyin": pinyin_marks,
+                "pinyin_marks": pinyin_marks,
+                "pinyin_phonetic": pinyin_phonetic,
+                "pinyin_lexical": pinyin_lexical,
+            }
+
+        # SHOW_SUB_CONTENT에서는 기본 한자색을 흰색으로 그리고,
+        # 변경된 단어(alt_word)만 노란색으로 오버레이한다.
+        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
+            self._draw_sub_sentence_with_highlight(
+                screen,
+                ctx=ctx,
+                base_item=item,
+                render_item=render_item,
+            )
+            return
+
+        draw_style = self._style
+        # SHOW_CONTENT 단계의 한자 색은 흰색으로 고정한다.
+        if self.stage == self.Stage.SHOW_CONTENT:
+            draw_style = replace(
+                self._style,
+                colors=replace(self._style.colors, hanzi_color=(255, 255, 255)),
+            )
+
         self.drawer.draw_item_sentence(
             screen,
-            item,
+            render_item,
             ctx=ctx,
             channel=self._sentence_channel,
-            style=self._style,
+            style=draw_style,
             title_clearance=(self.title_text, 0.12, 12),
         )
 
-        words = item.get("words") or []
-        word = str(words[0]) if words else ""
-        if word:
-            # 현재 단어 표시(최소)
-            try:
-                font = pygame.font.Font(None, 44)
-                surf = font.render(word[:24], True, (255, 210, 80))
-                center_x = ctx.width // 2
-                screen.blit(surf, (max(20, center_x - surf.get_width() // 2), int(ctx.height * 0.72)))
-            except Exception:
-                pass
+        # 하단 단어(노란 텍스트) 렌더링은 비활성화한다.
+        # PRACTICE 화면은 문장/번역 표시에만 집중한다.
+
+    def _draw_sub_sentence_with_highlight(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        base_item: ConversationItemLike,
+        render_item: ConversationItemLike,
+    ) -> None:
+        """SHOW_SUB_CONTENT용 한자 하이라이트 렌더.
+
+        기본 한자 줄은 흰색으로 그리고, 교체된 단어(alt_word)만 기존 연습 색상(노란색)으로 덮어쓴다.
+        """
+        white_style = replace(
+            self._style,
+            colors=replace(self._style.colors, hanzi_color=(255, 255, 255)),
+        )
+        self.drawer.draw_item_sentence(
+            screen,
+            render_item,
+            ctx=ctx,
+            channel=self._sentence_channel,
+            style=white_style,
+            title_clearance=(self.title_text, 0.12, 12),
+        )
+
+        replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
+        alt_word = str(self._current_sub_variant.get("alt_word") or "").strip()
+        base_sentence = ""
+        base_sentences = base_item.get("sentence") or []
+        if base_sentences:
+            base_sentence = str(base_sentences[0]).strip()
+        if not replaced_sentence or not alt_word or replaced_sentence == base_sentence:
+            return
+
+        data = build_sentence_render_data_with_tone_icons(render_item)
+        y_base = self.drawer.layout_sentence_y_base(
+            ctx,
+            data,
+            white_style,
+            align_v="center",
+            center_y_ratio=self.drawer.ITEM_SENTENCE_CENTER_Y_RATIO,
+            top_y_ratio=0.12,
+            bottom_margin_px=48,
+            title_clearance=(self.title_text, 0.12, 12),
+        )
+        hanzi_text = (data.sentence or "")[: white_style.text.max_hanzi]
+        if not hanzi_text:
+            return
+        idx = hanzi_text.find(alt_word)
+        if idx < 0:
+            return
+
+        # 별도 폰트를 만들지 않고, _sentence_channel이 쓰는 메인 한자 폰트 체계를 그대로 사용한다.
+        fonts = getattr(self.drawer, "_fonts", None)
+        hanzi_ft = getattr(fonts, "hanzi_ft", None)
+        hanzi_pg = getattr(fonts, "hanzi_pg", None)
+        cache_hanzi = getattr(self.drawer, "_cache_hanzi", None)
+        if hanzi_pg is None or cache_hanzi is None:
+            return
+
+        y_hanzi = y_base + (white_style.layout.line_gap_px if (data.pinyin or "").strip() else 0)
+        center_x = int(ctx.width) // 2
+        full_surf, _ = self.drawer._get_cached_text_pair(
+            cache_hanzi,
+            hanzi_ft,
+            hanzi_pg,
+            hanzi_text,
+            white_style.colors.hanzi_color,
+        )
+        full_w = int(full_surf.get_width())
+        x_line = max(white_style.layout.min_margin_x, center_x - full_w // 2)
+
+        prefix = hanzi_text[:idx]
+        target = hanzi_text[idx : idx + len(alt_word)]
+        if not target:
+            return
+        if prefix:
+            prefix_surf, _ = self.drawer._get_cached_text_pair(
+                cache_hanzi,
+                hanzi_ft,
+                hanzi_pg,
+                prefix,
+                white_style.colors.hanzi_color,
+            )
+            prefix_w = int(prefix_surf.get_width())
+        else:
+            prefix_w = 0
+        target_surf, _ = self.drawer._get_cached_text_pair(
+            cache_hanzi,
+            hanzi_ft,
+            hanzi_pg,
+            target,
+            self._style.colors.hanzi_color,
+        )
+        alpha = int(max(0, min(255, self.drawer.fade_alpha(self._sentence_channel))))
+        if alpha <= 0:
+            return
+        if alpha < 255:
+            target_surf.set_alpha(alpha)
+        screen.blit(target_surf, (x_line + prefix_w, y_hanzi))

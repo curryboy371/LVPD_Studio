@@ -118,6 +118,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         "index": index,
         "type": "base",
         "slot_index": 0,
+        "sub_variants": list(row.get("sub_variants") or []),
     }
 
 
@@ -278,6 +279,7 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                 rows.append({
                     "id": (row.get("id") or "").strip(),
                     "topic": (row.get("topic") or "").strip(),
+                    "raw_sentence": (row.get("raw_sentence") or "").strip(),
                     # get_table_rows() 포맷에 맞춰서 넣어둔다.
                     "sentence": _raw_sentence_to_display((row.get("raw_sentence") or "").strip()),
                     "translation": (row.get("translation") or "").strip(),
@@ -340,6 +342,100 @@ def _load_sentence_word_map_csv(csv_path: str) -> dict[int, list[int]]:
     return out
 
 
+def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
+    """sub_sentences.csv를 읽어 base_id별 활용 변형 목록으로 정리한다."""
+    path = Path(csv_path)
+    if not path.exists():
+        return {}
+    grouped: dict[int, list[dict]] = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                base_id = int(float(row.get("base_id") or 0))
+                if not base_id:
+                    continue
+                grouped.setdefault(base_id, []).append(
+                    {
+                        "id": int(float(row.get("id") or 0)),
+                        "target_slot_order": int(float(row.get("target_slot_order") or 0)),
+                        "alt_word_id": int(float(row.get("alt_word_id") or 0)),
+                        "alt_translation": str(row.get("alt_translation") or "").strip(),
+                        "alt_sound_path": str(row.get("alt_sound_path") or "").strip(),
+                    }
+                )
+            except Exception:
+                continue
+    for base_id in grouped:
+        grouped[base_id].sort(key=lambda x: (int(x.get("target_slot_order", 0)), int(x.get("id", 0))))
+    return grouped
+
+
+def _replace_slot_in_raw_sentence(raw_sentence: str, *, target_slot_order: int, new_word: str) -> str:
+    """raw_sentence의 슬롯(target_slot_order)만 교체해서 표시 문장을 만든다."""
+    if not raw_sentence:
+        return ""
+    idx = -1
+
+    def _slot_repl(match: re.Match[str]) -> str:
+        nonlocal idx
+        idx += 1
+        if idx == target_slot_order:
+            return "{" + str(new_word or "").strip() + "}"
+        return match.group(0)
+
+    replaced_raw = re.sub(r"\{([^}]*)\}", _slot_repl, raw_sentence)
+    return _raw_sentence_to_display(replaced_raw)
+
+
+def _attach_sub_variants_to_base_rows(
+    base_rows: list[dict],
+    *,
+    words_by_id: dict[int, str],
+    sub_rows_by_base_id: dict[int, list[dict]],
+) -> list[dict]:
+    """base row에 학습 활용용 sub 변형 리스트(`sub_variants`)를 채운다."""
+    if not base_rows or not sub_rows_by_base_id:
+        return base_rows
+    for row in base_rows:
+        try:
+            sid = int(float(row.get("id") or 0))
+        except Exception:
+            sid = 0
+        variants = sub_rows_by_base_id.get(sid) or []
+        if not variants:
+            continue
+        raw_sentence = str(row.get("raw_sentence") or "").strip()
+        sub_variants: list[dict] = []
+        for v in variants:
+            alt_word_id = int(v.get("alt_word_id", 0))
+            slot_order = int(v.get("target_slot_order", 0))
+            alt_word = words_by_id.get(alt_word_id, "").strip()
+            if not alt_word:
+                continue
+            replaced_sentence = _replace_slot_in_raw_sentence(
+                raw_sentence,
+                target_slot_order=slot_order,
+                new_word=alt_word,
+            )
+            if not replaced_sentence:
+                continue
+            sub_variants.append(
+                {
+                    "target_slot_order": slot_order,
+                    "alt_word_id": alt_word_id,
+                    "alt_word": alt_word,
+                    "replaced_sentence": replaced_sentence,
+                    "alt_translation": str(v.get("alt_translation") or "").strip(),
+                    "alt_sound_path": str(v.get("alt_sound_path") or "").strip(),
+                }
+            )
+        if sub_variants:
+            # LearningScene의 전용 Stage에서 바로 사용할 공통 키.
+            row["sub_variants"] = sub_variants
+    return base_rows
+
+
 def _attach_words_to_base_rows(
     base_rows: list[dict],
     *,
@@ -383,20 +479,68 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
     repo = _REPO_ROOT
     if csv_path:
         rows = _load_conversation_csv(csv_path)
+        # conversation CSV 경로를 쓰더라도, sub_sentences.csv 기반 활용 문장 정보를
+        # 붙여야 PRACTICE의 SHOW_SUB_CONTENT 단계로 정상 전환된다.
+        try:
+            from core.paths import (
+                DEFAULT_BASE_SENTENCES_CSV,
+                DEFAULT_WORDS_TABLE_CSV,
+                DEFAULT_SUB_SENTENCES_CSV,
+            )
+
+            words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
+            sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
+            base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
+            raw_sentence_by_id: dict[int, str] = {}
+            for base_row in base_rows:
+                try:
+                    sid = int(float(base_row.get("id") or 0))
+                except Exception:
+                    sid = 0
+                if sid:
+                    raw_sentence_by_id[sid] = str(base_row.get("raw_sentence") or "").strip()
+
+            for row in rows:
+                try:
+                    sid = int(float(row.get("id") or 0))
+                except Exception:
+                    sid = 0
+                if sid and not str(row.get("raw_sentence") or "").strip():
+                    row["raw_sentence"] = raw_sentence_by_id.get(sid, "")
+
+            rows = _attach_sub_variants_to_base_rows(
+                rows,
+                words_by_id=words_by_id,
+                sub_rows_by_base_id=sub_rows_by_base_id,
+            )
+        except Exception:
+            # 활용 데이터 보강 실패 시에도 base 재생은 유지한다.
+            pass
         rows = _normalize_table_rows_one_per_base(rows)
         return _data_list_from_csv_rows(rows, repo=repo)
 
     # 2) 기본 CSV: resource/csv/base_sentences.csv 직접 로드
     try:
-        from core.paths import DEFAULT_BASE_SENTENCES_CSV, DEFAULT_WORDS_TABLE_CSV, DEFAULT_SENTENCE_WORD_MAP_CSV
+        from core.paths import (
+            DEFAULT_BASE_SENTENCES_CSV,
+            DEFAULT_WORDS_TABLE_CSV,
+            DEFAULT_SENTENCE_WORD_MAP_CSV,
+            DEFAULT_SUB_SENTENCES_CSV,
+        )
 
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
         words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
         word_ids_by_sentence_id = _load_sentence_word_map_csv(str(DEFAULT_SENTENCE_WORD_MAP_CSV))
+        sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
         base_rows = _attach_words_to_base_rows(
             base_rows,
             words_by_id=words_by_id,
             word_ids_by_sentence_id=word_ids_by_sentence_id,
+        )
+        base_rows = _attach_sub_variants_to_base_rows(
+            base_rows,
+            words_by_id=words_by_id,
+            sub_rows_by_base_id=sub_rows_by_base_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)
         return _data_list_from_csv_rows(base_rows, repo=repo)

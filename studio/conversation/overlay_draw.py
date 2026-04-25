@@ -23,8 +23,18 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
         pts = studio._video_player.get_pts()
         manager = getattr(studio, "_manager", None)
         scene_kind = None
+        stage_text = "n/a"
         if manager is not None:
             scene_kind = getattr(getattr(manager, "state", None), "scene_kind", None)
+            current_scene = None
+            try:
+                current_scene = manager._scenes.get(scene_kind)  # noqa: SLF001
+            except Exception:
+                current_scene = None
+            # FSM 기반 Scene(LearningScene 등)면 현재 내부 Stage 이름을 디버그 라인에 노출한다.
+            stage_obj = getattr(current_scene, "stage", None) if current_scene is not None else None
+            if stage_obj is not None:
+                stage_text = str(getattr(stage_obj, "name", stage_obj))
         scene_text = str(getattr(scene_kind, "value", scene_kind or "unknown"))
         audio_status = studio._video_audio.get_status()
         audio_pos = studio._video_audio.get_position_sec()
@@ -35,6 +45,7 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
                 f"SceneKind: {scene_text}",
+                f"Stage: {stage_text}",
                 f"Audio: {audio_status} | {audio_pos:.2f}s",
                 f"Sync: {'+' if sync_drift >= 0 else ''}{sync_drift:.3f}s (vid−aud)",
             ]
@@ -44,6 +55,7 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
                 f"SceneKind: {scene_text}",
+                f"Stage: {stage_text}",
                 f"Audio: {audio_status}",
             ]
         y_debug = 8

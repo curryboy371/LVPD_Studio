@@ -186,11 +186,24 @@ class CommonDrawer:
 
     @staticmethod
     def _sentence_item_cache_key(item: ConversationItemLike) -> Any:
+        """아이템 캐시 키.
+
+        id/start/end만 쓰면 같은 아이템 내 문장 교체 Stage에서 캐시가 충돌할 수 있어
+        문장/번역/병음의 실제 표시 값도 키에 포함한다.
+        """
+        def _to_text(value: Any) -> str:
+            if isinstance(value, list):
+                return " ".join(str(v) for v in value if str(v).strip()).strip()
+            return str(value or "").strip()
+
         try:
             return (
                 str(item.get("id") or ""),
                 float(item.get("start_time", 0.0) or 0.0),
                 float(item.get("end_time", -1.0) or -1.0),
+                _to_text(item.get("sentence")),
+                _to_text(item.get("translation")),
+                _to_text(item.get("pinyin")),
             )
         except Exception:
             return id(item)
