@@ -19,8 +19,6 @@ def main() -> None:
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
         DEFAULT_BASE_SENTENCES_EXCEL,
-        DEFAULT_SENTENCE_WORD_MAP_CSV,
-        DEFAULT_SENTENCE_WORD_MAP_EXCEL,
         DEFAULT_SUB_SENTENCES_CSV,
         DEFAULT_SUB_SENTENCES_EXCEL,
         DEFAULT_WORDS_TABLE_CSV,
@@ -28,7 +26,6 @@ def main() -> None:
     )
     from tools.csv_gen import (
         base_sentences_excel_to_csv,
-        sentence_word_map_excel_to_csv,
         sub_sentences_excel_to_csv,
         words_table_excel_to_csv,
     )
@@ -71,24 +68,12 @@ def main() -> None:
     else:
         logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_SUB_SENTENCES_EXCEL)
 
-    if DEFAULT_SENTENCE_WORD_MAP_EXCEL.exists():
-        try:
-            p = sentence_word_map_excel_to_csv(
-                DEFAULT_SENTENCE_WORD_MAP_EXCEL, DEFAULT_SENTENCE_WORD_MAP_CSV
-            )
-            results.append(p)
-        except Exception as e:
-            logger.exception("sentence_word_map CSV 생성 실패: %s", e)
-            sys.exit(1)
-    else:
-        logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_SENTENCE_WORD_MAP_EXCEL)
-
     if results:
         logger.info("테이블 CSV 생성 완료: %s", results)
         for r in results:
             print("CSV 경로:", r)
     else:
-        logger.warning("생성된 CSV 없음 (4개 엑셀 모두 없음)")
+        logger.warning("생성된 CSV 없음 (3개 엑셀 모두 없음)")
 
 
 if __name__ == "__main__":

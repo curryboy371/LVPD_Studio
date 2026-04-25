@@ -1,5 +1,6 @@
 """
 sentence_word_map 엑셀 → sentence_word_map.csv 변환.
+Deprecated: 3테이블 운영(base_sentences/words/sub_sentences)에서는 기본 파이프라인에서 사용하지 않는다.
 컬럼: sentence_id, word_id, slot_order, is_clickable, is_slot_target.
 is_clickable / is_slot_target 는 CSV에 true/false 또는 1/0 로 저장.
 """

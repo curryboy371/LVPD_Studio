@@ -6,7 +6,6 @@ get_table / get_loaded_content 로 재생·스튜디오에서 사용.
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import re
 from pathlib import Path
@@ -58,22 +57,6 @@ def _to_float(val: Any, default: float = 0.0) -> float:
     return max(0.0, x)
 
 
-def _parse_syllable_times_l1(val: Any) -> list[int]:
-    """'[1200,1500,2000]' 또는 '1200,1500,2000' → list[int]."""
-    if val is None or (isinstance(val, str) and not val.strip()):
-        return []
-    s = _str(val)
-    if not s:
-        return []
-    s = s.strip()
-    if s.startswith("["):
-        try:
-            return [int(x) for x in json.loads(s)]
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
-    return [_to_int(x, 0) for x in s.split(",") if _str(x)]
-
-
 # ---------------------------------------------------------------------------
 # Base sentences
 # ---------------------------------------------------------------------------
@@ -104,9 +87,6 @@ def load_base_sentences_from_csv(
                     sound=BaseSentenceSound(
                         lv1_path=_str(row.get("sound_lv1_path")),
                         lv2_path=_str(row.get("sound_lv2_path")),
-                        syllable_times_l1=_parse_syllable_times_l1(
-                            row.get("syllable_times_l1")
-                        ),
                     ),
                 )
                 out.append(

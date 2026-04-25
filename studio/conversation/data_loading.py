@@ -11,7 +11,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from utils.syllable_timing import parse_syllable_times_ms
 from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
@@ -33,6 +32,13 @@ def _raw_sentence_to_display(raw: str) -> str:
     if not raw:
         return ""
     return re.sub(r"\{([^}]*)\}", r"\1", raw)
+
+
+def _raw_sentence_to_words(raw: str) -> list[str]:
+    """'{苹果}{多少}{钱}？'에서 중괄호 슬롯 단어만 추출."""
+    if not raw:
+        return []
+    return [str(x).strip() for x in re.findall(r"\{([^}]*)\}", raw) if str(x).strip()]
 
 
 def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
@@ -71,15 +77,6 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     if sound_l2 and not os.path.isabs(sound_l2):
         sound_l2 = str(repo / sound_l2.replace("\\", "/"))
 
-    syllable_times_l1_raw = row.get("syllable_times_l1_ms")
-    if syllable_times_l1_raw in (None, ""):
-        syllable_times_l1_raw = row.get("syllable_times_l1")
-    syllable_times_l2_raw = row.get("syllable_times_l2_ms")
-    if syllable_times_l2_raw in (None, ""):
-        syllable_times_l2_raw = row.get("syllable_times_l2")
-    syllable_times_l1 = parse_syllable_times_ms(str(syllable_times_l1_raw or "").strip())
-    syllable_times_l2 = parse_syllable_times_ms(str(syllable_times_l2_raw or "").strip())
-
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
     pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
@@ -110,8 +107,6 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         "pinyin_lexical": pinyin_lexical,
         "sound_l1": sound_l1,
         "sound_l2": sound_l2,
-        "syllable_times_l1": syllable_times_l1,
-        "syllable_times_l2": syllable_times_l2,
         "words": words_list,
         "id": vid,
         "topic": topic,
@@ -215,9 +210,6 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                 pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
                 sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or "").strip()
                 sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or "").strip()
-                syllable_times_l1_ms = (row.get("syllable_times_l1_ms") or "").strip()
-                syllable_times_l2_ms = (row.get("syllable_times_l2_ms") or "").strip()
-
                 rows.append({
                     "id": vid,
                     "topic": topic,
@@ -235,8 +227,6 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                     "pinyin_lexical": pinyin_lexical,
                     "sound_l1": sound_l1,
                     "sound_l2": sound_l2,
-                    "syllable_times_l1_ms": syllable_times_l1_ms,
-                    "syllable_times_l2_ms": syllable_times_l2_ms,
                 })
             except Exception:
                 continue
@@ -283,7 +273,7 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     # get_table_rows() 포맷에 맞춰서 넣어둔다.
                     "sentence": _raw_sentence_to_display((row.get("raw_sentence") or "").strip()),
                     "translation": (row.get("translation") or "").strip(),
-                    "words": "",
+                    "words": (row.get("base_words") or "").strip(),
                     "video_path": (row.get("video_path") or "").strip(),
                     "start_ms": row.get("video_start_ms") or 0,
                     "end_ms": row.get("video_end_ms") or -1,
@@ -292,7 +282,6 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     "pinyin_marks": pinyin_marks,
                     "pinyin_phonetic": pinyin_phonetic,
                     "pinyin_lexical": pinyin_lexical,
-                    "syllable_times_l1": (row.get("syllable_times_l1") or "").strip(),
                 })
             except Exception:
                 continue
@@ -462,6 +451,24 @@ def _attach_words_to_base_rows(
     return base_rows
 
 
+def _attach_words_from_base_words(base_rows: list[dict]) -> list[dict]:
+    """base_words(예: 苹果|多少|钱) 우선, 없으면 raw_sentence 슬롯 추출로 words를 채운다."""
+    if not base_rows:
+        return base_rows
+    for row in base_rows:
+        base_words = str(row.get("words") or row.get("base_words") or "").strip()
+        if base_words:
+            words = [w.strip() for w in base_words.split("|") if w.strip()]
+            if words:
+                row["words"] = "|".join(words)
+                continue
+        raw_sentence = str(row.get("raw_sentence") or "").strip()
+        raw_words = _raw_sentence_to_words(raw_sentence)
+        if raw_words:
+            row["words"] = "|".join(raw_words)
+    return base_rows
+
+
 def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
     """CSV 기반으로 재생용 data_list 생성.
 
@@ -499,6 +506,14 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
                     sid = 0
                 if sid:
                     raw_sentence_by_id[sid] = str(base_row.get("raw_sentence") or "").strip()
+            words_by_id_map: dict[int, str] = {}
+            for base_row in base_rows:
+                try:
+                    sid = int(float(base_row.get("id") or 0))
+                except Exception:
+                    sid = 0
+                if sid:
+                    words_by_id_map[sid] = str(base_row.get("words") or base_row.get("base_words") or "").strip()
 
             for row in rows:
                 try:
@@ -507,6 +522,8 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
                     sid = 0
                 if sid and not str(row.get("raw_sentence") or "").strip():
                     row["raw_sentence"] = raw_sentence_by_id.get(sid, "")
+                if sid and not str(row.get("words") or "").strip():
+                    row["words"] = words_by_id_map.get(sid, "")
 
             rows = _attach_sub_variants_to_base_rows(
                 rows,
@@ -524,19 +541,26 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
         from core.paths import (
             DEFAULT_BASE_SENTENCES_CSV,
             DEFAULT_WORDS_TABLE_CSV,
-            DEFAULT_SENTENCE_WORD_MAP_CSV,
             DEFAULT_SUB_SENTENCES_CSV,
         )
 
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
         words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
-        word_ids_by_sentence_id = _load_sentence_word_map_csv(str(DEFAULT_SENTENCE_WORD_MAP_CSV))
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
-        base_rows = _attach_words_to_base_rows(
-            base_rows,
-            words_by_id=words_by_id,
-            word_ids_by_sentence_id=word_ids_by_sentence_id,
-        )
+        base_rows = _attach_words_from_base_words(base_rows)
+        # 마이그레이션 기간에는 base_words가 비었을 때만 legacy sentence_word_map을 보조 입력으로 사용한다.
+        if not any(str(r.get("words") or "").strip() for r in base_rows):
+            try:
+                from core.paths import DEFAULT_SENTENCE_WORD_MAP_CSV
+
+                word_ids_by_sentence_id = _load_sentence_word_map_csv(str(DEFAULT_SENTENCE_WORD_MAP_CSV))
+                base_rows = _attach_words_to_base_rows(
+                    base_rows,
+                    words_by_id=words_by_id,
+                    word_ids_by_sentence_id=word_ids_by_sentence_id,
+                )
+            except Exception:
+                pass
         base_rows = _attach_sub_variants_to_base_rows(
             base_rows,
             words_by_id=words_by_id,

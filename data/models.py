@@ -119,11 +119,10 @@ class VideoRange(BaseModel):
 
 
 class BaseSentenceSound(BaseModel):
-    """문장 음성: L1/L2 경로 및 음절 시각(ms)."""
+    """문장 음성: L1/L2 경로."""
 
     lv1_path: str = Field(default="", description="L1 음성 경로")
     lv2_path: str = Field(default="", description="L2 음성 경로")
-    syllable_times_l1: list[int] = Field(default_factory=list, description="L1 음절별 시각(ms)")
 
 
 class BaseSentenceMedia(BaseModel):
