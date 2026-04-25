@@ -177,6 +177,8 @@ class ConversationStudio:
             video_player=self._video_player,
             style=practice_style,
             title_text=str(getattr(settings, "practice_title_text", "연습") or "연습"),
+            # LearningScene과 동일하게 제목 페이드 인 시간을 설정 가능하게 한다.
+            title_fade_in_sec=float(getattr(settings, "practice_title_fade_in_sec", 1.0) or 1.0),
         )
         # PRACTICE 장면 전환 연출은 LEARNING과 동일 기준을 사용한다.
         practice_scene.scene_transition_mode = learning_scene.scene_transition_mode
