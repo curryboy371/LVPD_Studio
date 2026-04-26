@@ -70,6 +70,8 @@ class SimpleVideoPlayer:
         except Exception:
             pass
         self._cached_pts = -1.0
+        # 구간 끝에서 True가 된 pause는 다음 소스/세그먼트로 바뀔 때 해제하지 않으면 영원히 멈춤.
+        self._paused = False
 
     def close(self) -> None:
         """캡처 핸들과 캐시를 해제한다."""
@@ -229,6 +231,16 @@ class SimpleVideoPlayer:
         """소스에서 읽은 FPS(실패 시 폴백)."""
         return self._fps
 
+    def width(self) -> int:
+        """스냅샷·FrameContext용 폭(마지막 디코드 크기가 있으면 그것을 쓴다)."""
+        w, _ = self._cached_size
+        return int(w) if w > 0 else int(STUDIO_WIDTH)
+
+    def height(self) -> int:
+        """스냅샷·FrameContext용 높이."""
+        _, h = self._cached_size
+        return int(h) if h > 0 else int(STUDIO_HEIGHT)
+
 
 class VideoAudioPlayer:
     """비디오와 동일 경로·동일 이름의 추출된 MP3를 재생. 비디오 내장 음원은 사용하지 않음."""
@@ -309,6 +321,8 @@ class VideoAudioPlayer:
             pygame.mixer.music.load(wav)
             pygame.mixer.music.play(start=self._start_time)
             self._play_start_sec = self._start_time
+            # 새 클립 재생이 일시정지 프레임으로 막이지 않도록
+            self._paused = False
         except Exception:
             pass
 
@@ -360,6 +374,7 @@ class VideoAudioPlayer:
             except OSError:
                 pass
         self._temp_wav = None
+        self._paused = False
         self._path = ""
 
     def get_status(self) -> str:

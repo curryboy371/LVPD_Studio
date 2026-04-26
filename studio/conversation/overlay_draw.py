@@ -24,8 +24,19 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
         manager = getattr(studio, "_manager", None)
         scene_kind = None
         stage_text = "n/a"
+        main_id_text = "—"
+        item_idx_text = "— / —"
         if manager is not None:
             scene_kind = getattr(getattr(manager, "state", None), "scene_kind", None)
+            st = getattr(manager, "state", None)
+            if st is not None and hasattr(st, "item_index"):
+                idx = int(getattr(st, "item_index", 0) or 0)
+                items = getattr(manager, "_items", None) or []
+                n = len(items) if items else 0
+                item_idx_text = f"{idx + 1} / {n}" if n else f"{idx + 1} / 0"
+                if items and 0 <= idx < len(items):
+                    mid = items[idx].get("id")
+                    main_id_text = str(mid) if mid is not None else "—"
             current_scene = None
             try:
                 current_scene = manager._scenes.get(scene_kind)  # noqa: SLF001
@@ -44,6 +55,8 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"FPS: {actual_fps:.1f}",
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
+                f"Item index: {item_idx_text}",
+                f"main id: {main_id_text}",
                 f"SceneKind: {scene_text}",
                 f"Stage: {stage_text}",
                 f"Audio: {audio_status} | {audio_pos:.2f}s",
@@ -54,6 +67,8 @@ def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
                 f"FPS: {actual_fps:.1f}",
                 f"Video FPS: {vid_fps:.1f}",
                 f"PTS: {pts:.2f}s",
+                f"Item index: {item_idx_text}",
+                f"main id: {main_id_text}",
                 f"SceneKind: {scene_text}",
                 f"Stage: {stage_text}",
                 f"Audio: {audio_status}",

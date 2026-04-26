@@ -60,6 +60,8 @@ class PlaybackManager:
         self._pending_transition: PendingSceneTransition | None = None
         self._scratch: pygame.Surface | None = None
         self._common_bg: pygame.Surface | None = None
+        # VIDEO fade-out 등에서 이어진 배경을 Learning→Practice로 그대로 넘길 때 사용(합성 스냅샷과 분리).
+        self._incoming_bg_handoff: pygame.Surface | None = None
 
         if self._items:
             self._apply_item_to_video(self.current_item())
@@ -206,28 +208,69 @@ class PlaybackManager:
     # Helpers
     # ---------------------------------------------------------
     def _take_snapshot(self, ctx: FrameContext, scene: IConversationStep) -> None:
-        """나가는 장면을 캡처해 `_common_bg`를 최신화한다."""
-        snap: pygame.Surface | None = None
+        """나가는 장면을 캡처해 `_common_bg`·다음 씬용 배경 이어받기를 준비한다.
+
+        - VideoScene: `transition_bg_frame`(fade-out 합성) → Learning `bg_frame`으로 그대로 전달(기존).
+        - Learning/Practice: 전환 연출용 `_common_bg`는 `render` 합성(문장 포함).
+          다음 씬 배경(`_incoming_bg_handoff`)은 **현재 씬이 쓰던 `bg_frame`**을 우선한다.
+          즉 VIDEO에서 저장·fade 처리된 배경이 Learning을 거쳐 Practice까지 동일하게 이어진다.
+          `bg_frame`이 없을 때만 `get_frame()`으로 폴백한다.
+        """
         if scene.transition_bg_frame:
-            snap = scene.transition_bg_frame.copy()
-        elif scene.bg_frame:
-            # 장면이 이미 공유 배경을 들고 있다면(예: LEARNING -> PRACTICE),
-            # raw 비디오 프레임보다 이 배경을 우선해서 밝기/톤을 유지한다.
-            snap = scene.bg_frame.copy()
+            self._common_bg = scene.transition_bg_frame.copy()
+            self._incoming_bg_handoff = None
+            return
+
+        w, h = int(ctx.width), int(ctx.height)
+        if w <= 0 or h <= 0:
+            return
+        if scene.bg_frame is not None:
+            self._incoming_bg_handoff = scene.bg_frame.copy()
         else:
-            frame = self._video_player.get_frame(ctx.width, ctx.height)
-            if frame:
-                snap = frame.copy()
-        if snap:
-            self._common_bg = snap
+            vf = self._video_player.get_frame(w, h)
+            self._incoming_bg_handoff = vf.copy() if vf is not None else None
+
+        if self._scratch is None or self._scratch.get_size() != (w, h):
+            self._scratch = pygame.Surface((w, h))
+        self._scratch.fill((0, 0, 0))
+        scene.render(self._scratch, ctx, item=self.current_item())
+        self._common_bg = self._scratch.copy()
 
     def _reset_scene(self, kind: SceneKind) -> None:
-        """씬을 리셋하고 `_common_bg`가 있으면 해당 씬의 `bg_frame`으로 복사해 넣는다."""
+        """씬을 리셋하고, 다음 씬 `bg_frame`에는 `_incoming_bg_handoff`(VIDEO fade 포함 연속 배경)를 넣는다.
+
+        `_incoming_bg_handoff`가 없으면(예: VIDEO→Learning 직후) `_common_bg`를 쓴다.
+        합성 스냅샷(`_common_bg`)은 OVERLAY/CROSSFADE 나가는 화면용이다.
+        """
         scene = self._scenes.get(kind)
-        if scene:
-            scene.reset(clear_background=True)
-            if self._common_bg:
-                scene.bg_frame = self._common_bg.copy()
+        if not scene:
+            return
+        scene.reset(clear_background=True)
+        if self._incoming_bg_handoff is not None:
+            scene.bg_frame = self._incoming_bg_handoff.copy()
+            self._incoming_bg_handoff = None
+        elif self._common_bg:
+            scene.bg_frame = self._common_bg.copy()
+        # VIDEO→Learning 등: 전환 프레임에서 아직 learning.update가 돌지 않아 옛 Stage(DONE)가 한 프레임 그려지는 깜빡임 방지
+        self._prime_scene_after_reset(kind)
+
+    def _prime_scene_after_reset(self, kind: SceneKind) -> None:
+        """같은 프레임의 draw 전에 item·FSM을 맞춘다(이전 방문 Stage 잔상 1프레임 노출 방지)."""
+        item = self.current_item()
+        if kind == SceneKind.LEARNING:
+            sc = self._scenes.get(SceneKind.LEARNING)
+            if sc is not None and hasattr(sc, "sync_item"):
+                setattr(sc, "current_item", item)
+                getattr(sc, "sync_item")(item)
+        elif kind == SceneKind.PRACTICE:
+            sc = self._scenes.get(SceneKind.PRACTICE)
+            if sc is not None:
+                prime_ctx = FrameContext(
+                    width=int(self._video_player.width()),
+                    height=int(self._video_player.height()),
+                    dt_sec=0.0,
+                )
+                sc.update(prime_ctx, item=item)
 
     def _on_sequence_error(self, outgoing_scene: IConversationStep) -> None:
         outgoing_scene.transition_signal = False
@@ -249,11 +292,49 @@ class PlaybackManager:
         """다음 아이템으로 이동하고 시퀀스 첫 장면으로 돌린다. `common_bg` 잔상은 `_reset_scene`으로 유지."""
         if not self._items:
             return
-        self.state.item_index = min(self.state.item_index + 1, len(self._items) - 1)
+        next_index = self._find_next_item_index_same_topic_then_fallback()
+        self.state.item_index = max(0, min(len(self._items) - 1, next_index))
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
         self.state.scene_kind = self._scene_sequence[0]
         self._reset_scene(self.state.scene_kind)
+
+    def _find_next_item_index_same_topic_then_fallback(self) -> int:
+        """현재 item 기준으로 같은 topic의 다음 id를 우선 탐색한다.
+
+        - 우선순위 1: 같은 topic && id가 현재보다 큰 항목 중 id 최소값
+        - 우선순위 2: 기존 동작(index + 1)
+        """
+        current_idx = max(0, min(len(self._items) - 1, int(self.state.item_index)))
+        current = self._items[current_idx] if self._items else {}
+        current_topic = str(current.get("topic") or "").strip()
+        current_id = self._to_int_or_none(current.get("id"))
+
+        if current_topic and current_id is not None:
+            best_idx: int | None = None
+            best_id: int | None = None
+            for idx, item in enumerate(self._items):
+                item_topic = str(item.get("topic") or "").strip()
+                if item_topic != current_topic:
+                    continue
+                item_id = self._to_int_or_none(item.get("id"))
+                if item_id is None or item_id <= current_id:
+                    continue
+                if best_id is None or item_id < best_id:
+                    best_id = item_id
+                    best_idx = idx
+            if best_idx is not None:
+                return best_idx
+
+        return min(current_idx + 1, len(self._items) - 1)
+
+    @staticmethod
+    def _to_int_or_none(value: Any) -> int | None:
+        """id 비교를 위해 값을 int로 안전 변환한다."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def prev_item(self) -> None:
         if not self._items:

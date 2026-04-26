@@ -83,6 +83,12 @@ class PracticeScene(IConversationStep):
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
 
+    def reset(self, *, clear_background: bool = False) -> None:
+        """다른 SceneKind로 갔다가 돌아올 때 Stage·타이머 잔상으로 문장/재생바가 깜빡이지 않게 한다."""
+        super().reset(clear_background=clear_background)
+        if clear_background:
+            self._active_item_key = None
+
     def _set_stage(self, stage: "PracticeScene.Stage") -> None:
         """연습 장면 내부 Stage를 전환한다."""
         self.stage = stage
@@ -123,10 +129,15 @@ class PracticeScene(IConversationStep):
             return
 
         # 기본 문장을 잠시 보여준 뒤, sub_sentences.csv 기반 변형이 있으면 다음 Stage로 넘긴다.
-        if self.stage == self.Stage.SHOW_CONTENT and self._current_sub_variant is not None:
+        if self.stage == self.Stage.SHOW_CONTENT:
             if self._content_wait_remaining_sec > 0.0:
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
             if self._content_wait_remaining_sec <= 0.0:
+                # sub 변형이 없으면 기본 문장 노출 후 곧바로 Step 완료 처리한다.
+                if self._current_sub_variant is None:
+                    self.complete()
+                    self.allow_transition()
+                    return
                 self._set_stage(self.Stage.SHOW_SUB_CONTENT)
                 wait_total = self._start_current_sub_variant_audio_and_get_wait()
                 self._sub_content_wait_total_sec = max(0.0, float(wait_total))
@@ -146,6 +157,10 @@ class PracticeScene(IConversationStep):
                         wait_total = self._start_current_sub_variant_audio_and_get_wait()
                         self._sub_content_wait_total_sec = max(0.0, float(wait_total))
                         self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                        return
+                # 마지막 sub 변형까지 모두 끝나면 다음 SceneKind로 전환한다.
+                self.complete()
+                self.allow_transition()
         return
 
     def _pick_sub_variants(self, item: ConversationItemLike) -> list[dict]:

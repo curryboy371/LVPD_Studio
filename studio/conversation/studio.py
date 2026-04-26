@@ -78,6 +78,8 @@ class ConversationStudio:
         self._drawer: Optional[CommonDrawer] = None
         self._manager: Optional[PlaybackManager] = None
         self._last_config: Any = None
+        # `PlaybackManager.next_item()` 등으로 item만 바뀐 경우에도 extract 오디오·경로를 맞추기 위한 동기화용
+        self._last_applied_item_index: Optional[int] = None
 
         # 첫 아이템의 미디어 소스 적용
         if self._data_list:
@@ -104,7 +106,8 @@ class ConversationStudio:
         elif isinstance(_lsp, str) and _lsp.strip().lower() in ("advance_item", "advance", "next_item"):
             _last_scene_policy = LastSceneSequencePolicy.ADVANCE_ITEM
         else:
-            _last_scene_policy = LastSceneSequencePolicy.STAY
+            # 기본값은 마지막 장면(PRACTICE) 완료 시 다음 item으로 자동 진행한다.
+            _last_scene_policy = LastSceneSequencePolicy.ADVANCE_ITEM
 
         learn_style, practice_style = self._load_fonts(settings.font_sizes)
         self._apply_font_fallbacks(settings.font_sizes)
@@ -290,6 +293,11 @@ class ConversationStudio:
             pass
 
         self._manager.update(ctx)
+        # 키보드가 아닌 경로(예: PRACTICE 완료 → next_item)에서도 비디오·추출 오디오를 현재 item과 일치시킨다.
+        if self._data_list and self._manager is not None:
+            cur = int(self._manager.state.item_index)
+            if self._last_applied_item_index != cur:
+                self._apply_media_for_index(cur)
 
     def draw(self, screen: Any, config: Any) -> None:
         """배경 채우기 후 현재 Step 화면을 그리고 일시정지·디버그 오버레이를 덧씌운다."""
@@ -333,6 +341,7 @@ class ConversationStudio:
         et = float(et_raw) if et_raw not in (None, "") else -1.0
         self._video_player.set_source(path, st, et)
         self._video_audio.set_source(path, st)
+        self._last_applied_item_index = int(index)
 
     def _resolve_video_path(self, path: str) -> str:
         """상대 경로는 repo 루트 기준으로 해석."""

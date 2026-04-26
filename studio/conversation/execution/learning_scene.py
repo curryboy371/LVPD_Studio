@@ -129,6 +129,15 @@ class LearningScene(FSMConversationStep):
 
         self.set_stage(S.TITLE)
 
+    def reset(self, *, clear_background: bool = False) -> None:
+        """장면 슬롯 재진입(숫자 키 전환 등) 시 내부 FSM이 DONE 등에 남아 UI가 깜빡이지 않도록 동기 키를 비운다.
+
+        `sync_item`이 호출하는 `reset()`은 clear_background=False이므로 active_item_key는 유지된다.
+        """
+        super().reset(clear_background=clear_background)
+        if clear_background:
+            self.active_item_key = None
+
     # ------------------------
     # Condition
     # ------------------------
