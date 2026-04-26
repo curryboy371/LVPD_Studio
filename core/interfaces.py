@@ -4,6 +4,8 @@
 
 스튜디오 러너 연동용 IStudio 인터페이스: 창·이벤트·업데이트·그리기·녹화 접두사.
 """
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional
 

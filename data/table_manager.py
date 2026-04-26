@@ -18,7 +18,6 @@ from data.models import (
     BaseSentenceSound,
     LoadedContent,
     OverlayItem,
-    SentenceWordMap,
     SubSentence,
     VideoRange,
     VideoSegment,
@@ -31,7 +30,6 @@ logger = logging.getLogger(__name__)
 _base_sentences: list[BaseSentence] | None = None
 _words_table: list[Word] | None = None
 _sub_sentences: list[SubSentence] | None = None
-_sentence_word_map: list[SentenceWordMap] | None = None
 # 재생용 테이블 행 (get_table_rows() 결과 저장, get_loaded_content()에서 사용)
 _table: list[dict[str, Any]] | None = None
 
@@ -97,6 +95,7 @@ def load_base_sentences_from_csv(
                         raw_sentence=_str(row.get("raw_sentence")),
                         translation=_str(row.get("translation")),
                         life_tip=_str(row.get("life_tip")),
+                        base_words=_str(row.get("base_words")),
                         media=media,
                     )
                 )
@@ -273,136 +272,17 @@ def get_sub_sentences_for_base(base_id: int) -> list[SubSentence]:
 
 
 # ---------------------------------------------------------------------------
-# Sentence word map
-# ---------------------------------------------------------------------------
-
-
-def load_sentence_word_map_from_csv(
-    csv_path: str | Path,
-    encoding: str = "utf-8-sig",
-) -> list[SentenceWordMap]:
-    """sentence_word_map.csv를 읽어 SentenceWordMap 리스트로 반환하고 저장소에 저장."""
-    path = Path(csv_path)
-    if not path.exists():
-        logger.warning("sentence_word_map CSV 없음: %s", path)
-        set_sentence_word_map([])
-        return []
-
-    out: list[SentenceWordMap] = []
-    with open(path, encoding=encoding, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                out.append(
-                    SentenceWordMap(
-                        sentence_id=_to_int(row.get("sentence_id"), 0),
-                        word_id=_to_int(row.get("word_id"), 0),
-                        slot_order=_to_int(row.get("slot_order"), 0),
-                        is_clickable=row.get("is_clickable", "true"),
-                        is_slot_target=row.get("is_slot_target", "false"),
-                    )
-                )
-            except Exception as e:
-                logger.debug(
-                    "sentence_word_map 행 스킵 (sentence_id=%s): %s",
-                    row.get("sentence_id"),
-                    e,
-                )
-
-    set_sentence_word_map(out)
-    _fill_base_sentence_word_maps()
-    logger.info("sentence_word_map CSV 로드 완료: %s (%d개)", path, len(out))
-    return out
-
-
-def _fill_base_sentence_word_maps() -> None:
-    """저장된 base_sentences 각 항목의 word_maps를 sentence_word_map에서 채운다."""
-    base = _base_sentences
-    map_list = _sentence_word_map
-    if not base or not map_list:
-        return
-    map_by_sentence: dict[int, list[SentenceWordMap]] = {}
-    for m in map_list:
-        map_by_sentence.setdefault(m.sentence_id, []).append(m)
-    for sid in map_by_sentence:
-        map_by_sentence[sid].sort(key=lambda x: x.slot_order)
-    for b in base:
-        b.word_maps.clear()
-        b.word_maps.extend(map_by_sentence.get(b.id, []))
-
-
-def set_sentence_word_map(rows: list[SentenceWordMap]) -> None:
-    """sentence_word_map 테이블을 저장한다."""
-    global _sentence_word_map
-    _sentence_word_map = list(rows) if rows else []
-
-
-def get_sentence_word_map() -> list[SentenceWordMap] | None:
-    """저장된 sentence_word_map을 반환한다. 없으면 None."""
-    return _sentence_word_map
-
-
-def get_sentence_word_maps(sentence_id: int) -> list[SentenceWordMap]:
-    """sentence_id에 해당하는 단어 배치 목록을 slot_order 순으로 반환한다."""
-    table = _sentence_word_map
-    if not table:
-        return []
-    out = [m for m in table if m.sentence_id == sentence_id]
-    out.sort(key=lambda m: m.slot_order)
-    return out
-
-
-def get_base_sentence_word_list(base_id: int) -> list[str]:
-    """base_id 문장의 단어 배열을 slot_order 순으로 반환한다.
-    sentence_word_map에서 sentence_id == base_id인 행을 slot_order 순으로 가져와
-    각 word_id에 해당하는 words.word를 배열로 만든다.
-    예: ["苹果", "多少", "钱"]
-    """
-    maps = get_sentence_word_maps(base_id)
-    if not maps:
-        return []
-    result: list[str] = []
-    for m in maps:
-        w = get_word(m.word_id)
-        result.append((w.word or "").strip() if w else "")
-    return result
-
-
-def build_sub_sentence_word_list(
-    base_id: int,
-    target_slot_order: int,
-    alt_word_id: int,
-) -> list[str]:
-    """Base 문장 단어 배열에서 target_slot_order 위치만 alt_word로 교체한 배열을 반환한다.
-    Step 1: get_base_sentence_word_list(base_id)
-    Step 2: result[target_slot_order] = get_word(alt_word_id).word
-    """
-    base_list = get_base_sentence_word_list(base_id)
-    if not base_list or not (0 <= target_slot_order < len(base_list)):
-        return list(base_list)
-    alt_word = get_word(alt_word_id)
-    alt_str = (alt_word.word or "").strip() if alt_word else ""
-    result = list(base_list)
-    result[target_slot_order] = alt_str
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Base sentence (단일 조회, word_maps 채움)
+# Base sentence (단일 조회)
 # ---------------------------------------------------------------------------
 
 
 def get_base_sentence(sentence_id: int) -> BaseSentence | None:
-    """sentence_id로 기본 문장을 조회한다. word_maps가 비어 있으면 채워서 반환."""
+    """sentence_id로 기본 문장을 조회한다."""
     base_list = _base_sentences
     if not base_list:
         return None
     for b in base_list:
         if b.id == sentence_id:
-            if not b.word_maps and _sentence_word_map:
-                maps = get_sentence_word_maps(sentence_id)
-                if maps:
-                    return b.model_copy(update={"word_maps": maps})
             return b
     return None
 
@@ -413,12 +293,11 @@ def get_base_sentence(sentence_id: int) -> BaseSentence | None:
 
 
 def clear_new_tables() -> None:
-    """4개 테이블 저장소를 모두 비운다."""
-    global _base_sentences, _words_table, _sub_sentences, _sentence_word_map
+    """base_sentences / words / sub_sentences 저장소를 모두 비운다."""
+    global _base_sentences, _words_table, _sub_sentences
     _base_sentences = None
     _words_table = None
     _sub_sentences = None
-    _sentence_word_map = None
 
 
 # ---------------------------------------------------------------------------
@@ -528,24 +407,20 @@ def load_all_from_csv(
     base_sentences_path: str | Path | None = None,
     words_path: str | Path | None = None,
     sub_sentences_path: str | Path | None = None,
-    sentence_word_map_path: str | Path | None = None,
     encoding: str = "utf-8-sig",
 ) -> None:
-    """4개 CSV를 기본 경로(또는 지정 경로)로 로드하고, BaseSentence.word_maps를 채운다."""
+    """base_sentences / words / sub_sentences CSV를 기본 경로(또는 지정 경로)로 로드한다."""
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
-        DEFAULT_SENTENCE_WORD_MAP_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
         DEFAULT_WORDS_TABLE_CSV,
     )
     base_sentences_path = base_sentences_path or DEFAULT_BASE_SENTENCES_CSV
     words_path = words_path or DEFAULT_WORDS_TABLE_CSV
     sub_sentences_path = sub_sentences_path or DEFAULT_SUB_SENTENCES_CSV
-    sentence_word_map_path = sentence_word_map_path or DEFAULT_SENTENCE_WORD_MAP_CSV
     load_base_sentences_from_csv(base_sentences_path, encoding=encoding)
     load_words_table_from_csv(words_path, encoding=encoding)
     load_sub_sentences_from_csv(sub_sentences_path, encoding=encoding)
-    load_sentence_word_map_from_csv(sentence_word_map_path, encoding=encoding)
 
 
 # ---------------------------------------------------------------------------
@@ -560,32 +435,24 @@ def _raw_sentence_to_display(raw: str) -> str:
     return re.sub(r"\{([^}]*)\}", r"\1", raw)
 
 
+def _raw_sentence_slot_words(raw: str) -> list[str]:
+    """'{苹果}{多少}{钱}'에서 중괄호 슬롯 단어만 순서대로 추출."""
+    if not raw:
+        return []
+    return [str(x).strip() for x in re.findall(r"\{([^}]*)\}", raw) if str(x).strip()]
+
+
 def get_table_rows() -> list[dict[str, Any]]:
     """저장된 base_sentences를 재생용 행 형식으로 반환. get_loaded_content()가 기대하는 키 포함."""
     base = get_base_sentences()
-    words_list = get_words()
-    map_list = get_sentence_word_map()
     if not base:
         return []
 
-    word_by_id: dict[int, str] = {}
-    if words_list:
-        word_by_id = {w.id: w.word for w in words_list}
-
-    map_by_sentence: dict[int, list[SentenceWordMap]] = {}
-    if map_list:
-        for m in map_list:
-            map_by_sentence.setdefault(m.sentence_id, []).append(m)
-        for k in map_by_sentence:
-            map_by_sentence[k].sort(key=lambda x: x.slot_order)
-
     rows: list[dict[str, Any]] = []
     for b in base:
-        words_str = ""
-        if b.id in map_by_sentence:
-            words_str = "|".join(
-                word_by_id.get(m.word_id, "") for m in map_by_sentence[b.id]
-            )
+        words_str = (b.base_words or "").strip()
+        if not words_str:
+            words_str = "|".join(_raw_sentence_slot_words(b.raw_sentence))
         rows.append({
             "topic": b.topic,
             "id": b.id,

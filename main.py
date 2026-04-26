@@ -244,13 +244,11 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     """스튜디오(디버깅) 모드: 신규 테이블 CSV 로드 후 화면만 출력 (녹화 없음)."""
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
-        DEFAULT_SENTENCE_WORD_MAP_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
         DEFAULT_WORDS_TABLE_CSV,
     )
     from data.table_manager import (
         load_base_sentences_from_csv,
-        load_sentence_word_map_from_csv,
         load_sub_sentences_from_csv,
         load_words_table_from_csv,
         get_table_rows,
@@ -261,7 +259,6 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
     load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
-    load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
     set_table(get_table_rows())
 
     content = generate_content_table("new tables")
@@ -276,13 +273,11 @@ def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     """배치 모드: 신규 테이블 로드 → 렌더 → mux → output/ 저장."""
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
-        DEFAULT_SENTENCE_WORD_MAP_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
         DEFAULT_WORDS_TABLE_CSV,
     )
     from data.table_manager import (
         load_base_sentences_from_csv,
-        load_sentence_word_map_from_csv,
         load_sub_sentences_from_csv,
         load_words_table_from_csv,
         get_table_rows,
@@ -293,7 +288,6 @@ def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
     load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
-    load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
     set_table(get_table_rows())
 
     content = generate_content_table("new tables")

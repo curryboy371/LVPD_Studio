@@ -3,6 +3,8 @@
 - debug: 화면 출력만, 녹화 없음 (상태/타이밍/UI/인터랙션 확인).
 - record: 오프스크린 버퍼만 렌더링 후 프레임 인코딩 (품질·결정론·프레임 정확성).
 """
+from __future__ import annotations
+
 import argparse
 import os
 import queue
@@ -23,7 +25,6 @@ if str(_REPO_ROOT) not in sys.path:
 from core.interfaces import IStudio
 from core.paths import (
     DEFAULT_BASE_SENTENCES_CSV,
-    DEFAULT_SENTENCE_WORD_MAP_CSV,
     DEFAULT_SUB_SENTENCES_CSV,
     DEFAULT_WORDS_TABLE_CSV,
     STUDIO_FPS,
@@ -35,7 +36,6 @@ from data.table_manager import (
     get_table,
     set_table,
     load_base_sentences_from_csv,
-    load_sentence_word_map_from_csv,
     load_sub_sentences_from_csv,
     load_words_table_from_csv,
     get_table_rows,
@@ -125,14 +125,14 @@ class SimpleRecordingManager:
         try:
             self._record_video_only(filename_prefix)
         except Exception as e:
-            print("⚠️ 녹화 저장 중 오류:", e)
+            print("[!] 녹화 저장 중 오류:", e)
 
     def _record_video_only(self, filename_prefix: str) -> None:
         """큐에서 프레임을 꺼내 OpenCV VideoWriter로 MP4를 쓴다."""
         try:
             import cv2
         except ImportError:
-            print("⚠️ opencv-python 없음. 녹화 비디오 저장을 건너뜁니다.")
+            print("[!] opencv-python 없음. 녹화 비디오 저장을 건너뜁니다.")
             return
         from datetime import datetime
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -161,7 +161,7 @@ class SimpleRecordingManager:
                     break
             out.release()
         self._last_video_path = path
-        print("⏹️ 녹화 저장:", path)
+        print("[rec] 녹화 저장:", path)
 
     def get_last_video_path(self) -> Optional[Path]:
         """녹화 종료 후 저장된 비디오 파일 경로. 오디오 mux 전에 사용."""
@@ -297,14 +297,14 @@ def _run_record(
         config.recording_log_event = None
         config.recording_time_sec = 0.0
 
-    print("⏹️ 녹화 완료:", target_frames, "프레임")
+    print("[rec] 녹화 완료:", target_frames, "프레임")
     video_path = recorder.get_last_video_path()
     duration_sec = target_frames / config.fps
     if video_path is not None and recording_events:
-        print("🔊 녹화 오디오 분리: 이벤트", len(recording_events), "개 → WAV 생성 후 mux")
+        print("[audio] 녹화 오디오 분리: 이벤트", len(recording_events), "개 -> WAV 생성 후 mux")
         _mux_recorded_audio(video_path, recording_events, config.fps, duration_sec)
     elif video_path is not None and not recording_events:
-        print("⚠️ 녹화 오디오 mux 건너뜀: 오디오 이벤트 없음 (스튜디오에서 이벤트 로그 필요)")
+        print("[!] 녹화 오디오 mux 건너뜀: 오디오 이벤트 없음 (스튜디오에서 이벤트 로그 필요)")
 
 
 def _mux_recorded_audio(
@@ -318,7 +318,7 @@ def _mux_recorded_audio(
         from studio.recorded_audio_mux import build_audio_and_mux
         build_audio_and_mux(video_path, recording_events, float(fps), duration_sec)
     except Exception as e:
-        print("⚠️ 녹화 오디오 mux 건너뜀:", e)
+        print("[!] 녹화 오디오 mux 건너뜀:", e)
 
 
 def _create_studio(
@@ -401,7 +401,6 @@ def main() -> None:
         load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
         load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
         load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
-        load_sentence_word_map_from_csv(DEFAULT_SENTENCE_WORD_MAP_CSV)
         set_table(get_table_rows())
         content = get_loaded_content() if get_table() else None
         if not content or (not content.video_segments and not content.overlay_items):

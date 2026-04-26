@@ -346,30 +346,6 @@ def _load_words_csv(csv_path: str) -> dict[int, str]:
     return out
 
 
-def _load_sentence_word_map_csv(csv_path: str) -> dict[int, list[int]]:
-    """sentence_word_map.csv를 읽어 sentence_id -> word_id list(slot_order 순) 매핑."""
-    path = Path(csv_path)
-    if not path.exists():
-        return {}
-    tmp: dict[int, list[tuple[int, int]]] = {}
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                sid = int(float(row.get("sentence_id") or 0))
-                wid = int(float(row.get("word_id") or 0))
-                slot = int(float(row.get("slot_order") or 0))
-                if sid and wid:
-                    tmp.setdefault(sid, []).append((slot, wid))
-            except Exception:
-                continue
-    out: dict[int, list[int]] = {}
-    for sid, pairs in tmp.items():
-        pairs.sort(key=lambda x: x[0])
-        out[sid] = [wid for _, wid in pairs]
-    return out
-
-
 def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
     path = Path(csv_path)
     if not path.exists():
@@ -478,32 +454,6 @@ def _attach_sub_variants_to_base_rows(
     return base_rows
 
 
-def _attach_words_to_base_rows(
-    base_rows: list[dict],
-    *,
-    words_by_id: dict[int, str],
-    word_ids_by_sentence_id: dict[int, list[int]],
-) -> list[dict]:
-    """base_rows에 words 문자열(apple|...)을 채운다."""
-    if not base_rows:
-        return base_rows
-    for row in base_rows:
-        try:
-            sid = int(float(row.get("id") or 0))
-        except Exception:
-            sid = 0
-        if not sid:
-            continue
-        word_ids = word_ids_by_sentence_id.get(sid) or []
-        if not word_ids:
-            continue
-        words = [words_by_id.get(wid, "").strip() for wid in word_ids]
-        words = [w for w in words if w]
-        if words:
-            row["words"] = "|".join(words)
-    return base_rows
-
-
 def _attach_words_from_base_words(base_rows: list[dict]) -> list[dict]:
     """base_words(예: 苹果|多少|钱) 우선, 없으면 raw_sentence 슬롯 추출로 words를 채운다."""
     if not base_rows:
@@ -607,19 +557,6 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
         words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
         base_rows = _attach_words_from_base_words(base_rows)
-        # 마이그레이션 기간에는 base_words가 비었을 때만 legacy sentence_word_map을 보조 입력으로 사용한다.
-        if not any(str(r.get("words") or "").strip() for r in base_rows):
-            try:
-                from core.paths import DEFAULT_SENTENCE_WORD_MAP_CSV
-
-                word_ids_by_sentence_id = _load_sentence_word_map_csv(str(DEFAULT_SENTENCE_WORD_MAP_CSV))
-                base_rows = _attach_words_to_base_rows(
-                    base_rows,
-                    words_by_id=words_by_id,
-                    word_ids_by_sentence_id=word_ids_by_sentence_id,
-                )
-            except Exception:
-                pass
         base_rows = _attach_sub_variants_to_base_rows(
             base_rows,
             words_by_id=words_by_id,

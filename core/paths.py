@@ -9,15 +9,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _RESOURCE_CSV_DIR = _REPO_ROOT / "resource" / "csv"
 _RESOURCE_TABLE_DIR = _REPO_ROOT / "resource" / "table"  # 엑셀 원본
 
-# 신규 4개 테이블 (base_sentences / words / sub_sentences / sentence_word_map)
+# 신규 테이블 (base_sentences / words / sub_sentences)
 DEFAULT_BASE_SENTENCES_EXCEL = _RESOURCE_TABLE_DIR / "base_sentences.xlsx"
 DEFAULT_BASE_SENTENCES_CSV = _RESOURCE_CSV_DIR / "base_sentences.csv"
 DEFAULT_WORDS_TABLE_EXCEL = _RESOURCE_TABLE_DIR / "words.xlsx"
 DEFAULT_WORDS_TABLE_CSV = _RESOURCE_CSV_DIR / "words.csv"
 DEFAULT_SUB_SENTENCES_EXCEL = _RESOURCE_TABLE_DIR / "sub_sentences.xlsx"
 DEFAULT_SUB_SENTENCES_CSV = _RESOURCE_CSV_DIR / "sub_sentences.csv"
-DEFAULT_SENTENCE_WORD_MAP_EXCEL = _RESOURCE_TABLE_DIR / "sentence_word_map.xlsx"
-DEFAULT_SENTENCE_WORD_MAP_CSV = _RESOURCE_CSV_DIR / "sentence_word_map.csv"
 
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "output"
 

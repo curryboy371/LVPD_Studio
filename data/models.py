@@ -107,7 +107,7 @@ class LoadedContent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 테이블 구조 (base_sentence / word / sub_sentence / sentence_word_map)
+# 테이블 구조 (base_sentence / word / sub_sentence)
 # ---------------------------------------------------------------------------
 
 
@@ -133,31 +133,6 @@ class BaseSentenceMedia(BaseModel):
     sound: BaseSentenceSound = Field(default_factory=BaseSentenceSound, description="음성 정보")
 
 
-class SentenceWordMap(BaseModel):
-    """문장의 slot_order 위치에 올 단어 및 클릭/슬롯 여부."""
-
-    sentence_id: int = Field(..., description="base_sentence.id")
-    word_id: int = Field(..., description="word.id")
-    slot_order: int = Field(default=0, ge=0, description="슬롯 순서")
-    is_clickable: bool = Field(default=True, description="클릭 가능 여부")
-    is_slot_target: bool = Field(default=False, description="슬롯 교체 대상 여부")
-
-    @field_validator("is_clickable", "is_slot_target", mode="before")
-    @classmethod
-    def to_bool(cls, v: object) -> bool:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        if isinstance(v, str):
-            s = v.strip().lower()
-            if s in ("true", "1", "yes", "y"):
-                return True
-            if s in ("false", "0", "no", "n", ""):
-                return False
-        return False
-
-
 class BaseSentence(BaseModel):
     """학습 원본 문장 + 미디어 리소스."""
 
@@ -167,11 +142,11 @@ class BaseSentence(BaseModel):
     raw_sentence: str = Field(default="", description="원문 (예: {苹果}{多少}{钱})")
     translation: str = Field(default="", description="번역")
     life_tip: str = Field(default="", description="생활 팁")
-    media: BaseSentenceMedia = Field(default_factory=BaseSentenceMedia, description="미디어 정보")
-    word_maps: list[SentenceWordMap] = Field(
-        default_factory=list,
-        description="이 문장(id)에 대한 단어 배치 목록. 로드 후 매니저에서 채움.",
+    base_words: str = Field(
+        default="",
+        description="기본 단어 순서(| 구분). 없으면 raw_sentence 슬롯으로 대체 가능.",
     )
+    media: BaseSentenceMedia = Field(default_factory=BaseSentenceMedia, description="미디어 정보")
 
 
 class Word(BaseModel):

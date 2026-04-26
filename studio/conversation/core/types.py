@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Optional, Protocol, Sequence
+from typing import Any, Mapping, Optional, Protocol, Sequence, Union
 
 from utils.tone_icon_layout import ToneIconSlot, build_tone_icon_slots
 
@@ -22,7 +22,7 @@ class ConversationItem(Protocol):
         ...
 
 
-ConversationItemLike = ConversationItem | Mapping[str, Any]
+ConversationItemLike = Union[ConversationItem, Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
