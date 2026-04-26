@@ -61,6 +61,11 @@ class PracticeScene(IConversationStep):
         self._active_item_key = None
         self._title_wait_remaining_sec = 0.0
         self._content_wait_remaining_sec = 0.0
+        # SHOW_SUB_CONTENT 단계에서 sub 문장 간 자동 전환 대기 시간(초).
+        self._sub_content_hold_sec = 3.0
+        self._sub_content_wait_remaining_sec = 0.0
+        self._sub_variants: list[dict] = []
+        self._sub_variant_index = 0
         self._content_visible = False
         self._current_sub_variant = None
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
@@ -86,7 +91,10 @@ class PracticeScene(IConversationStep):
             self._title_wait_remaining_sec = self.title_fade_in_sec
             # 기본 문장 노출 후 sub 문장으로 전환할 타이머를 초기화한다.
             self._content_wait_remaining_sec = self.content_hold_sec
-            self._current_sub_variant = self._pick_sub_variant(item)
+            self._sub_variants = self._pick_sub_variants(item)
+            self._sub_variant_index = 0
+            self._current_sub_variant = self._sub_variants[0] if self._sub_variants else None
+            self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
             self._set_stage(self.Stage.TITLE)
@@ -108,20 +116,35 @@ class PracticeScene(IConversationStep):
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
             if self._content_wait_remaining_sec <= 0.0:
                 self._set_stage(self.Stage.SHOW_SUB_CONTENT)
+                self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
+            return
+
+        # 임시 규칙: sub 문장이 여러 개인 경우 3초마다 다음 sub 문장으로 자동 전환한다.
+        if self.stage == self.Stage.SHOW_SUB_CONTENT and len(self._sub_variants) > 1:
+            if self._sub_content_wait_remaining_sec > 0.0:
+                self._sub_content_wait_remaining_sec = max(0.0, self._sub_content_wait_remaining_sec - dt)
+            if self._sub_content_wait_remaining_sec <= 0.0:
+                next_index = self._sub_variant_index + 1
+                if next_index < len(self._sub_variants):
+                    self._sub_variant_index = next_index
+                    self._current_sub_variant = self._sub_variants[self._sub_variant_index]
+                    self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
         return
 
-    def _pick_sub_variant(self, item: ConversationItemLike) -> dict | None:
-        """아이템의 sub_variants(=sub_sentences.csv 변형)에서 첫 항목을 선택한다."""
+    def _pick_sub_variants(self, item: ConversationItemLike) -> list[dict]:
+        """아이템의 sub_variants(=sub_sentences.csv 변형)에서 유효 항목만 반환한다."""
         variants = item.get("sub_variants") or []
         if not isinstance(variants, list) or not variants:
-            return None
-        first = variants[0]
-        if not isinstance(first, dict):
-            return None
-        replaced = str(first.get("replaced_sentence") or "").strip()
-        if not replaced:
-            return None
-        return first
+            return []
+        valid: list[dict] = []
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            replaced = str(variant.get("replaced_sentence") or "").strip()
+            if not replaced:
+                continue
+            valid.append(variant)
+        return valid
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """비디오 위에 LEARNING과 동일 세로 배치(중앙·타이틀 밴드 여유)의 문장과 첫 단어(있으면)를 표시한다."""
