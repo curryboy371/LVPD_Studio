@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import Enum, auto
+from pathlib import Path
 from typing import Callable
 
 import pygame
@@ -69,11 +70,14 @@ class PracticeScene(IConversationStep):
         self._sub_content_hold_sec = 3.0
         self._sub_content_wait_remaining_sec = 0.0
         self._sub_content_wait_total_sec = 0.0
+        self._sub_content_sound_sec = 0.0
         self._sub_variants: list[dict] = []
         self._sub_variant_index = 0
         self._content_visible = False
         self._current_sub_variant = None
         self._playback_bar = PlaybackBarRenderer()
+        self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
+        self._speak_icon_surface = self._load_mode_icon_surface("speak.png")
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self.drawer.hide_now(self._title_channel)
@@ -102,6 +106,7 @@ class PracticeScene(IConversationStep):
             self._current_sub_variant = self._sub_variants[0] if self._sub_variants else None
             self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
             self._sub_content_wait_total_sec = self._sub_content_hold_sec
+            self._sub_content_sound_sec = 0.0
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
             self._set_stage(self.Stage.TITLE)
@@ -128,18 +133,19 @@ class PracticeScene(IConversationStep):
                 self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
             return
 
-        # 임시 규칙: sub 문장이 여러 개인 경우 3초마다 다음 sub 문장으로 자동 전환한다.
-        if self.stage == self.Stage.SHOW_SUB_CONTENT and len(self._sub_variants) > 1:
+        # SHOW_SUB_CONTENT 타이머는 sub 개수와 무관하게 항상 흐르게 유지한다.
+        if self.stage == self.Stage.SHOW_SUB_CONTENT:
             if self._sub_content_wait_remaining_sec > 0.0:
                 self._sub_content_wait_remaining_sec = max(0.0, self._sub_content_wait_remaining_sec - dt)
             if self._sub_content_wait_remaining_sec <= 0.0:
-                next_index = self._sub_variant_index + 1
-                if next_index < len(self._sub_variants):
-                    self._sub_variant_index = next_index
-                    self._current_sub_variant = self._sub_variants[self._sub_variant_index]
-                    wait_total = self._start_current_sub_variant_audio_and_get_wait()
-                    self._sub_content_wait_total_sec = max(0.0, float(wait_total))
-                    self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                if len(self._sub_variants) > 1:
+                    next_index = self._sub_variant_index + 1
+                    if next_index < len(self._sub_variants):
+                        self._sub_variant_index = next_index
+                        self._current_sub_variant = self._sub_variants[self._sub_variant_index]
+                        wait_total = self._start_current_sub_variant_audio_and_get_wait()
+                        self._sub_content_wait_total_sec = max(0.0, float(wait_total))
+                        self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
         return
 
     def _pick_sub_variants(self, item: ConversationItemLike) -> list[dict]:
@@ -162,6 +168,7 @@ class PracticeScene(IConversationStep):
         variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
         sound_path = str(variant.get("alt_sound_path") or "").strip()
         if not sound_path:
+            self._sub_content_sound_sec = 0.0
             return self._sub_content_hold_sec
 
         if self.play_voice is not None:
@@ -175,9 +182,11 @@ class PracticeScene(IConversationStep):
                 pygame.mixer.init()
             sound_len_sec = float(pygame.mixer.Sound(sound_path).get_length() or 0.0)
             if sound_len_sec > 0.0:
+                self._sub_content_sound_sec = sound_len_sec
                 return sound_len_sec * 2.0
         except Exception:
             pass
+        self._sub_content_sound_sec = 0.0
         return self._sub_content_hold_sec
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
@@ -370,18 +379,60 @@ class PracticeScene(IConversationStep):
         _ = item
         total_sec = max(0.0, float(self._sub_content_wait_total_sec))
         remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
-        current_sec = max(0.0, total_sec - remaining_sec)
-        if total_sec <= 1e-6:
-            total_sec = max(0.1, float(self._sub_content_hold_sec))
-            current_sec = 0.0
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        listen_sec = max(0.0, float(self._sub_content_sound_sec))
+        practice_sec = max(0.0, total_sec - listen_sec)
+
+        # 2구간 재생:
+        # 1) 듣기 바: 0 -> sound_len
+        # 2) 말하기 바: 0 -> (total - sound_len)
+        is_listen_phase = listen_sec > 1e-6 and elapsed_sec < listen_sec
+        if is_listen_phase:
+            bar_current_sec = elapsed_sec
+            bar_total_sec = listen_sec
+        elif practice_sec > 1e-6:
+            bar_current_sec = min(max(0.0, elapsed_sec - listen_sec), practice_sec)
+            bar_total_sec = practice_sec
         else:
-            current_sec = min(current_sec, total_sec)
+            bar_total_sec = max(0.1, total_sec if total_sec > 1e-6 else float(self._sub_content_hold_sec))
+            bar_current_sec = min(elapsed_sec, bar_total_sec)
 
         self._playback_bar.draw(
             screen,
             frame_width=ctx.width,
             frame_height=ctx.height,
-            current_sec=current_sec,
-            total_sec=total_sec,
+            current_sec=bar_current_sec,
+            total_sec=bar_total_sec,
             show_time_text=False,
         )
+        self._draw_mode_icon(screen, ctx=ctx, is_listen_phase=is_listen_phase)
+
+    def _load_mode_icon_surface(self, filename: str) -> pygame.Surface | None:
+        """재생 모드 아이콘을 로드하고 공통 크기로 축소한다."""
+        root = Path(__file__).resolve().parents[3]
+        candidates = (
+            root / "resource" / "image" / "icon" / filename,
+            root / "resource" / "images" / "icon" / filename,
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                # convert_alpha()는 display 초기화 타이밍에 따라 실패할 수 있어 생략한다.
+                surface = pygame.image.load(str(path))
+                target_size = 318
+                return pygame.transform.smoothscale(surface, (target_size, target_size))
+            except Exception:
+                continue
+        return None
+
+    def _draw_mode_icon(self, screen: pygame.Surface, *, ctx: FrameContext, is_listen_phase: bool) -> None:
+        """현재 재생 구간에 맞는 모드 아이콘을 좌하단에 표시한다."""
+        icon_surface = self._listen_icon_surface if is_listen_phase else self._speak_icon_surface
+        if icon_surface is None:
+            return
+        margin_left = 24
+        margin_bottom = 20
+        x = margin_left
+        y = int(ctx.height) - int(icon_surface.get_height()) - margin_bottom
+        screen.blit(icon_surface, (x, y))
