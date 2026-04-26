@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, List
 
 from utils.pinyin_processor import get_pinyin_processor
 
@@ -511,12 +511,31 @@ def _attach_words_from_base_words(base_rows: list[dict]) -> list[dict]:
     return base_rows
 
 
-def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
+def _filter_data_list_by_session_topics(
+    data: list[dict],
+    session_topics: Optional[List[str]],
+) -> list[dict]:
+    """`session_topics`가 있으면 `item['topic']`이 그 집합에 속하는 항목만 남긴다."""
+    if not session_topics:
+        return data
+    ts = {str(t).strip() for t in session_topics if str(t).strip()}
+    if not ts:
+        return data
+    return [d for d in data if str(d.get("topic") or "").strip() in ts]
+
+
+def build_data_list(
+    csv_path: str,
+    content: Any = None,
+    *,
+    session_topics: Optional[List[str]] = None,
+) -> list[dict]:
     """CSV 기반으로 재생용 data_list 생성.
 
     Args:
         csv_path: conversation CSV 경로(기본 경로).
         content: 기존 호환용(이번 리팩터링에서는 사용하지 않음).
+        session_topics: 지정 시 해당 topic 문자열과 일치하는 항목만 재생 목록에 남긴다.
 
     Returns:
         render에 필요한 최소 키를 포함한 dict 리스트(topic·숫자 id 오름차순, index 재부여).
@@ -582,7 +601,8 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
                 )
         except Exception:
             pass
-        return _sort_data_list_for_playback(_data_list_from_csv_rows(rows, repo=repo))
+        out = _sort_data_list_for_playback(_data_list_from_csv_rows(rows, repo=repo))
+        return _filter_data_list_by_session_topics(out, session_topics)
 
     # 2) 기본 CSV: resource/csv/base_sentences.csv 직접 로드
     try:
@@ -602,7 +622,8 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
             sub_rows_by_base_id=sub_rows_by_base_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)
-        return _sort_data_list_for_playback(_data_list_from_csv_rows(base_rows, repo=repo))
+        out = _sort_data_list_for_playback(_data_list_from_csv_rows(base_rows, repo=repo))
+        return _filter_data_list_by_session_topics(out, session_topics)
     except Exception as e:
         logging.getLogger(__name__).debug("base_sentences CSV direct load failed: %s", e, exc_info=True)
     return []

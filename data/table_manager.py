@@ -21,6 +21,7 @@ from data.models import (
     SubSentence,
     VideoRange,
     VideoSegment,
+    VocabularyWordRow,
     Word,
 )
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 _base_sentences: list[BaseSentence] | None = None
 _words_table: list[Word] | None = None
 _sub_sentences: list[SubSentence] | None = None
+_vocabulary_word_rows: list[VocabularyWordRow] | None = None
 # 재생용 테이블 행 (get_table_rows() 결과 저장, get_loaded_content()에서 사용)
 _table: list[dict[str, Any]] | None = None
 
@@ -272,6 +274,101 @@ def get_sub_sentences_for_base(base_id: int) -> list[SubSentence]:
 
 
 # ---------------------------------------------------------------------------
+# Vocabulary word rows (단어장 행 → words.id 참조)
+# ---------------------------------------------------------------------------
+
+
+def load_vocabulary_word_rows_from_csv(
+    csv_path: str | Path,
+    encoding: str = "utf-8-sig",
+) -> list[VocabularyWordRow]:
+    """단어장 전용 CSV를 읽는다. 컬럼: id, topic, word_id, pronunciation_mask, desc(선택·엑셀 메모용)."""
+    path = Path(csv_path)
+    if not path.exists():
+        logger.warning("vocabulary word rows CSV 없음: %s", path)
+        set_vocabulary_word_rows([])
+        return []
+
+    out: list[VocabularyWordRow] = []
+    with open(path, encoding=encoding, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                wid = _to_int(row.get("word_id"), 0)
+                if wid < 1:
+                    continue
+                out.append(
+                    VocabularyWordRow(
+                        id=_to_int(row.get("id"), 0),
+                        topic=_str(row.get("topic")),
+                        word_id=wid,
+                        pronunciation_mask=_str(row.get("pronunciation_mask")),
+                        desc=_str(row.get("desc")),
+                    )
+                )
+            except Exception as e:
+                logger.debug("vocabulary_word_rows 행 스킵 (id=%s): %s", row.get("id"), e)
+
+    out.sort(key=lambda r: (r.id if r.id else 10**9, r.topic, r.word_id))
+    set_vocabulary_word_rows(out)
+    logger.info("vocabulary_word_rows CSV 로드 완료: %s (%d개)", path, len(out))
+    return out
+
+
+def set_vocabulary_word_rows(rows: list[VocabularyWordRow]) -> None:
+    """단어장 행 테이블을 저장한다."""
+    global _vocabulary_word_rows
+    _vocabulary_word_rows = list(rows) if rows else []
+
+
+def get_vocabulary_word_rows() -> list[VocabularyWordRow] | None:
+    """저장된 단어장 행을 반환한다. 없으면 None."""
+    return _vocabulary_word_rows
+
+
+def ensure_vocabulary_word_rows_loaded(
+    csv_path: str | Path | None = None,
+    encoding: str = "utf-8-sig",
+) -> None:
+    """단어장 CSV가 아직 로드되지 않았을 때만 기본 경로로 로드한다."""
+    global _vocabulary_word_rows
+    if _vocabulary_word_rows is not None:
+        return
+    from core.paths import DEFAULT_VOCABULARY_WORD_ROWS_CSV
+
+    load_vocabulary_word_rows_from_csv(csv_path or DEFAULT_VOCABULARY_WORD_ROWS_CSV, encoding=encoding)
+
+
+def select_all_vocabulary_word_rows() -> list[VocabularyWordRow]:
+    """로드된 단어장 행 전체(정렬본). `--studio vocabulary` 등."""
+    ensure_vocabulary_word_rows_loaded()
+    table = get_vocabulary_word_rows() or []
+    return sorted(
+        table,
+        key=lambda row: (row.id if row.id else 10**9, row.topic, row.word_id),
+    )
+
+
+def select_vocabulary_word_rows_for_session_topics(topics: list[str]) -> list[VocabularyWordRow]:
+    """`vocabulary_word_rows`에서 CSV `topic` 컬럼이 세션 topic과 **정확히 일치**하는 행만 반환한다.
+
+    - `topics`가 비어 있으면: 매칭할 topic이 없으므로 **빈 목록**을 반환한다.
+      (단독 단어장 전체는 `select_all_vocabulary_word_rows()`를 사용한다.)
+    - 빈 topic(`""`) 행은 와일드카드로 넣지 않는다.
+    """
+    ensure_vocabulary_word_rows_loaded()
+    table = get_vocabulary_word_rows() or []
+    if not table:
+        return []
+    topic_set = {str(t).strip() for t in topics if str(t).strip()}
+    if not topic_set:
+        return []
+    out = [r for r in table if (r.topic or "").strip() in topic_set]
+    out.sort(key=lambda row: (row.id if row.id else 10**9, row.topic, row.word_id))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Base sentence (단일 조회)
 # ---------------------------------------------------------------------------
 
@@ -293,11 +390,12 @@ def get_base_sentence(sentence_id: int) -> BaseSentence | None:
 
 
 def clear_new_tables() -> None:
-    """base_sentences / words / sub_sentences 저장소를 모두 비운다."""
-    global _base_sentences, _words_table, _sub_sentences
+    """base_sentences / words / sub_sentences / vocabulary_word_rows 저장소를 모두 비운다."""
+    global _base_sentences, _words_table, _sub_sentences, _vocabulary_word_rows
     _base_sentences = None
     _words_table = None
     _sub_sentences = None
+    _vocabulary_word_rows = None
 
 
 # ---------------------------------------------------------------------------

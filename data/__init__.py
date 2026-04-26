@@ -11,6 +11,7 @@ from data.models import (
     SubSentence,
     VideoRange,
     VideoSegment,
+    VocabularyWordRow,
     Word,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "SubSentence",
     "VideoRange",
     "VideoSegment",
+    "VocabularyWordRow",
     "Word",
 ]

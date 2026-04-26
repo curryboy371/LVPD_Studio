@@ -63,6 +63,9 @@ class PlaybackManager:
         self._common_bg: pygame.Surface | None = None
         # VIDEO fade-out 등에서 이어진 배경을 Learning→Practice로 그대로 넘길 때 사용(합성 스냅샷과 분리).
         self._incoming_bg_handoff: pygame.Surface | None = None
+        # 마지막 항목의 PRACTICE에서 `_handle_last_scene`가 호출된 뒤(회화 후 단어 등).
+        # STAY 정책 시 `is_done`이 False로 돌아가 `is_full_run_complete`만으로는 단어 단계 진입이 불가능하다.
+        self._words_handoff_ready: bool = False
 
         if self._items:
             self._apply_item_to_video(self.current_item())
@@ -101,6 +104,13 @@ class PlaybackManager:
         if scene is None:
             return False
         return bool(scene.is_done) and not bool(scene.transition_signal)
+
+    def is_words_handoff_ready(self) -> bool:
+        """마지막 항목 PRACTICE가 종료 처리(`_handle_last_scene`)까지 끝났는지.
+
+        `is_full_run_complete`와 달리 LastSceneSequencePolicy.STAY 이후에도 True가 될 수 있다.
+        """
+        return bool(self._words_handoff_ready)
 
     def update(self, ctx: FrameContext) -> None:
         self._video_player.tick(ctx.dt_sec)
@@ -311,9 +321,11 @@ class PlaybackManager:
 
     def _handle_last_scene(self, scene: IConversationStep) -> None:
         scene.transition_signal = False
+        cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
+        if self._items and cur >= len(self._items) - 1:
+            self._words_handoff_ready = True
         if self._last_scene_policy == LastSceneSequencePolicy.ADVANCE_ITEM:
             # 마지막 항목 PRACTICE까지 끝나면 next_item()을 호출하면 index가 그대로라 VIDEO부터 같은 항목이 무한 반복된다.
-            cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
             if cur < len(self._items) - 1:
                 self.next_item()
         else:
@@ -327,6 +339,7 @@ class PlaybackManager:
         """
         if not self._items:
             return
+        self._words_handoff_ready = False
         cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
         if cur >= len(self._items) - 1:
             return
@@ -340,6 +353,7 @@ class PlaybackManager:
     def prev_item(self) -> None:
         if not self._items:
             return
+        self._words_handoff_ready = False
         self.state.item_index = max(0, self.state.item_index - 1)
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
@@ -361,6 +375,7 @@ class PlaybackManager:
     def set_scene_kind(self, kind: SceneKind) -> None:
         if kind not in self._scenes:
             return
+        self._words_handoff_ready = False
         current_scene = self._scenes.get(self.state.scene_kind)
         if current_scene:
             ctx = FrameContext(

@@ -52,11 +52,13 @@ class ConversationStudio:
         self,
         csv_path: str = "",
         content: Any = None,
+        *,
+        session_topics: Optional[list[str]] = None,
         **_: Any,
     ) -> None:
         """CSV·콘텐츠로 재생 목록을 만들고, 비디오/오디오 플레이어를 준비한다."""
         self._csv_path = csv_path
-        self._data_list = build_data_list(csv_path, content)
+        self._data_list = build_data_list(csv_path, content, session_topics=session_topics)
         self._render_settings: Optional[ConversationRenderSettings] = None
 
         self._video_player = SimpleVideoPlayer()
@@ -371,6 +373,30 @@ class ConversationStudio:
         if self._manager is None:
             return False
         return self._manager.is_full_run_complete()
+
+    def is_conversation_run_complete(self) -> bool:
+        """복합 스튜디오(회화 후 단어 등)용: 회화 트랙만 전부 끝났는지(녹화 종료와 동일 기준)."""
+        if self._manager is None:
+            return False
+        return self._manager.is_full_run_complete()
+
+    def is_ready_for_aggregate_words_phase(self) -> bool:
+        """회화 후 단어 화면으로 넘길 때: `is_full_run_complete` 또는 마지막 PRACTICE 종료 핸들러까지 반영된 경우.
+
+        LastSceneSequencePolicy.STAY이면 `is_done`이 False로 돌아가 `is_full_run_complete`만으로는
+        단어 단계로 진입하지 못하므로 `PlaybackManager.is_words_handoff_ready`를 함께 본다.
+        """
+        if not self._data_list:
+            return True
+        if self._manager is None:
+            return False
+        if self._manager.is_full_run_complete():
+            return True
+        return self._manager.is_words_handoff_ready()
+
+    def get_data_list(self) -> list[Any]:
+        """재생 목록 복사본(단어 집계 등 외부 읽기용)."""
+        return list(self._data_list)
 
     def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
         """record 루프 종료 직전: 열린 비디오 오디오 구간을 VideoSegmentEnd로 닫는다."""

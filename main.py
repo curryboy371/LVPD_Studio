@@ -1,7 +1,7 @@
 """
 단일 진입점. 명령별 실행:
 
-  python main.py studio  → 스튜디오 (기본: 화면 디버그). --mode record 로 오프스크린 녹화
+  python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). --mode record 로 오프스크린 녹화
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
 
 테이블 CSV 생성은 배치 파일에서만 실행 (create_all_csv.bat → run_create_new_tables_csv.py).
@@ -245,11 +245,13 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
+        DEFAULT_VOCABULARY_WORD_ROWS_CSV,
         DEFAULT_WORDS_TABLE_CSV,
     )
     from data.table_manager import (
         load_base_sentences_from_csv,
         load_sub_sentences_from_csv,
+        load_vocabulary_word_rows_from_csv,
         load_words_table_from_csv,
         get_table_rows,
     )
@@ -258,18 +260,28 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         run,
         _create_studio,
         _conversation_render_from_cli_args,
+        _parse_session_topics_arg,
     )
 
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
     load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+    load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
     set_table(get_table_rows())
 
     content = generate_content_table("new tables")
     if not content.video_segments and not content.overlay_items:
         logger.error("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 에 base_sentences.csv 등이 있는지 확인하세요.")
         sys.exit(1)
-    studio = _create_studio("conversation", "", content=content)
+    # F5 / `python main.py studio`: 디버깅용으로 집계 단어(voca) 화면부터 시작(회화 생략)
+    session_topics = _parse_session_topics_arg(getattr(args, "topic", "") or "")
+    studio = _create_studio(
+        "conversation_then_words",
+        "",
+        content=content,
+        debug_start_in_words_phase=True,
+        **({"session_topics": session_topics} if session_topics else {}),
+    )
     run(
         studio,
         mode=args.mode,
@@ -286,11 +298,13 @@ def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
+        DEFAULT_VOCABULARY_WORD_ROWS_CSV,
         DEFAULT_WORDS_TABLE_CSV,
     )
     from data.table_manager import (
         load_base_sentences_from_csv,
         load_sub_sentences_from_csv,
+        load_vocabulary_word_rows_from_csv,
         load_words_table_from_csv,
         get_table_rows,
     )
@@ -300,6 +314,7 @@ def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
     load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+    load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
     set_table(get_table_rows())
 
     content = generate_content_table("new tables")
@@ -379,6 +394,16 @@ def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
         help=(
             "conversation: 폰트 pt 6개: cn_big,cn,cn_step1_hanzi,cn_step1_pinyin,kr,kr_step1 "
             "(예: 36,28,124,66,28,56)"
+        ),
+    )
+    p.add_argument(
+        "--topic",
+        type=str,
+        default="",
+        metavar="TOPIC",
+        help=(
+            "회화+단어 디버그: topic이 일치하는 회화 항목·vocabulary_word_rows만 사용. "
+            "여러 개는 쉼표 또는 |. 비우면 전체(단어 목록은 재생 항목의 topic으로 테이블 조회)."
         ),
     )
 

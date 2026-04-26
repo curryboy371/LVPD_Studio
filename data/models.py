@@ -170,3 +170,19 @@ class SubSentence(BaseModel):
     alt_word_id: int = Field(..., description="대체 단어 word.id")
     alt_translation: str = Field(default="", description="대체 번역")
     alt_sound_path: str = Field(default="", description="대체 음성 경로")
+
+
+class VocabularyWordRow(BaseModel):
+    """단어장(VocabularyStudio) 한 행: 마스터 `words.id`를 참조한다."""
+
+    id: int = Field(default=0, description="단어장 행 PK·표시 순서(작을수록 위; 세션 집계 시 1부터 부여)")
+    topic: str = Field(default="", description="주제·단원(회화 topic 등)")
+    word_id: int = Field(..., ge=1, description="words.id")
+    pronunciation_mask: str = Field(
+        default="",
+        description="발음 마스크(학습용 가림·표기 등). 비우면 화면에는 words.pinyin을 보조로 사용",
+    )
+    desc: str = Field(
+        default="",
+        description="엑셀용 메모·설명(런타임 UI·로직에서 사용하지 않음)",
+    )

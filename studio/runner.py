@@ -26,6 +26,7 @@ from core.interfaces import IStudio
 from core.paths import (
     DEFAULT_BASE_SENTENCES_CSV,
     DEFAULT_SUB_SENTENCES_CSV,
+    DEFAULT_VOCABULARY_WORD_ROWS_CSV,
     DEFAULT_WORDS_TABLE_CSV,
     STUDIO_FPS,
     STUDIO_HEIGHT,
@@ -37,8 +38,11 @@ from data.table_manager import (
     set_table,
     load_base_sentences_from_csv,
     load_sub_sentences_from_csv,
+    load_vocabulary_word_rows_from_csv,
     load_words_table_from_csv,
     get_table_rows,
+    select_all_vocabulary_word_rows,
+    select_vocabulary_word_rows_for_session_topics,
 )
 
 
@@ -387,23 +391,49 @@ def _mux_recorded_audio(
         print("[!] 녹화 오디오 mux 건너뜀:", e)
 
 
+def _parse_session_topics_arg(raw: str) -> Optional[list[str]]:
+    """CLI `--topic` 값: 쉼표 또는 세로줄로 구분된 topic 목록. 비어 있으면 None."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    parts = [p.strip() for p in s.replace("|", ",").split(",") if p.strip()]
+    return parts or None
+
+
 def _create_studio(
     name: str,
     csv_path: str | None,
     content: Optional[Any] = None,
     **kwargs,
 ) -> IStudio:
-    """이름에 맞는 IStudio 인스턴스를 만든다(conversation / vocabulary)."""
+    """이름에 맞는 IStudio 인스턴스를 만든다(conversation / vocabulary / conversation_then_words)."""
+    kw = dict(kwargs)
+    session_topics: Optional[list[str]] = kw.pop("session_topics", None)
+
     if name == "conversation":
         from studio.conversation import ConversationStudio
         return ConversationStudio(
             csv_path=csv_path or "",
             content=content,
-            **kwargs,
+            session_topics=session_topics,
+        )
+    if name == "conversation_then_words":
+        from studio.studios.conversation_then_words import ConversationThenWordsStudio
+        return ConversationThenWordsStudio(
+            csv_path=csv_path or "",
+            content=content,
+            session_topics=session_topics,
+            **kw,
         )
     if name == "vocabulary":
         from studio.studios.vocabulary import VocabularyStudio
-        return VocabularyStudio(**kwargs)
+        kw.pop("vocabulary_topics", None)
+        if "word_rows" not in kw:
+            if session_topics:
+                kw["word_rows"] = select_vocabulary_word_rows_for_session_topics(list(session_topics))
+            else:
+                kw["word_rows"] = select_all_vocabulary_word_rows()
+        return VocabularyStudio(**kw)
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
 
@@ -414,8 +444,8 @@ def main() -> None:
         "--studio",
         type=str,
         default="conversation",
-        choices=("conversation", "vocabulary"),
-        help="실행할 스튜디오 (기본: conversation)",
+        choices=("conversation", "conversation_then_words", "vocabulary"),
+        help="실행할 스튜디오 (기본: conversation). conversation_then_words=회화 후 집계 단어 화면",
     )
     parser.add_argument(
         "--csv",
@@ -474,22 +504,43 @@ def main() -> None:
             "예: 36,28,124,66,28,56"
         ),
     )
+    parser.add_argument(
+        "--topic",
+        type=str,
+        default="",
+        metavar="TOPIC",
+        help=(
+            "회화·회화+단어·단어장: base_sentences / vocabulary_word_rows의 topic과 일치하는 항목만. "
+            "여러 개는 쉼표 또는 | 로 구분. 비우면 회화는 전체, 단어장(vocabulary)은 테이블 전체."
+        ),
+    )
     args = parser.parse_args()
 
     csv_path: str | None = (args.csv or "").strip() or None
-    if args.studio == "conversation":
+    if args.studio in ("conversation", "conversation_then_words"):
         load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
         load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
         load_sub_sentences_from_csv(DEFAULT_SUB_SENTENCES_CSV)
+        load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
         set_table(get_table_rows())
         content = get_loaded_content() if get_table() else None
         if not content or (not content.video_segments and not content.overlay_items):
             print("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 를 확인하세요.", file=sys.stderr)
             sys.exit(1)
+    elif args.studio == "vocabulary":
+        load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+        load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
+        content = None
     else:
         content = None
 
-    studio = _create_studio(args.studio, csv_path or "", content=content)
+    session_topics = _parse_session_topics_arg(getattr(args, "topic", "") or "")
+    studio = _create_studio(
+        args.studio,
+        csv_path or "",
+        content=content,
+        **({"session_topics": session_topics} if session_topics else {}),
+    )
     run(
         studio,
         mode=args.mode,

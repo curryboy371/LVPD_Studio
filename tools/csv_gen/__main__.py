@@ -21,12 +21,15 @@ def main() -> None:
         DEFAULT_BASE_SENTENCES_EXCEL,
         DEFAULT_SUB_SENTENCES_CSV,
         DEFAULT_SUB_SENTENCES_EXCEL,
+        DEFAULT_VOCABULARY_WORD_ROWS_CSV,
+        DEFAULT_VOCABULARY_WORD_ROWS_EXCEL,
         DEFAULT_WORDS_TABLE_CSV,
         DEFAULT_WORDS_TABLE_EXCEL,
     )
     from tools.csv_gen import (
         base_sentences_excel_to_csv,
         sub_sentences_excel_to_csv,
+        vocabulary_word_rows_excel_to_csv,
         words_table_excel_to_csv,
     )
 
@@ -68,12 +71,24 @@ def main() -> None:
     else:
         logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_SUB_SENTENCES_EXCEL)
 
+    if DEFAULT_VOCABULARY_WORD_ROWS_EXCEL.exists():
+        try:
+            p = vocabulary_word_rows_excel_to_csv(
+                DEFAULT_VOCABULARY_WORD_ROWS_EXCEL, DEFAULT_VOCABULARY_WORD_ROWS_CSV
+            )
+            results.append(p)
+        except Exception as e:
+            logger.exception("vocabulary_word_rows CSV 생성 실패: %s", e)
+            sys.exit(1)
+    else:
+        logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_VOCABULARY_WORD_ROWS_EXCEL)
+
     if results:
         logger.info("테이블 CSV 생성 완료: %s", results)
         for r in results:
             print("CSV 경로:", r)
     else:
-        logger.warning("생성된 CSV 없음 (3개 엑셀 모두 없음)")
+        logger.warning("생성된 CSV 없음 (엑셀 원본이 resource\\table\\ 에 없음)")
 
 
 if __name__ == "__main__":
