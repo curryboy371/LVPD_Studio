@@ -204,11 +204,16 @@ def run(
     record_frames: Optional[int] = None,
     *,
     conversation_render: Optional[Any] = None,
+    record_until_content_done: bool = False,
+    record_max_sec: float = 3600.0,
 ) -> None:
     """IStudio 실행. debug=화면만(녹화 없음), record=오프스크린 버퍼→인코딩만.
 
     conversation 스튜디오: `conversation_render`(`ConversationRenderSettings`)를
     `config.conversation_render`로 넘기면 폰트 크기가 적용된다. 색은 스튜디오 `load_font_*` 인자로만 지정한다.
+
+    record_until_content_done: True면 `studio.should_stop_recording()`이 True가 될 때까지 프레임을 찍되,
+    최대 `record_max_sec` 초(×fps)에서 강제 종료한다.
     """
     if mode == "record":
         os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -224,7 +229,16 @@ def run(
     if mode == "debug":
         _run_debug(studio, config, clock, pygame)
     else:
-        _run_record(studio, config, clock, pygame, record_duration, record_frames)
+        _run_record(
+            studio,
+            config,
+            clock,
+            pygame,
+            record_duration,
+            record_frames,
+            record_until_content_done=record_until_content_done,
+            record_max_sec=record_max_sec,
+        )
     pygame.quit()
 
 
@@ -261,9 +275,17 @@ def _run_record(
     pygame,
     record_duration: float,
     record_frames: Optional[int],
+    *,
+    record_until_content_done: bool = False,
+    record_max_sec: float = 3600.0,
 ) -> None:
-    """녹화 모드: 오프스크린 버퍼만 렌더링 후 인코딩, 창 없음. 타임라인 기준 오디오 이벤트 수집 후 사후 mux."""
+    """녹화 모드: 오프스크린 버퍼만 렌더링 후 인코딩, 창 없음. 타임라인 기준 오디오 이벤트 수집 후 사후 mux.
+
+    debug 루프와 동일하게 매 프레임 `event.get`·QUIT/ESC·`handle_events`를 처리한다.
+    장면 진행은 녹화 타임라인과 맞추기 위해 update에는 고정 dt(1/fps)를 쓴다.
+    """
     pygame.display.set_mode((1, 1))  # 최소 디스플레이 (폰트 등 동작용)
+    pygame.display.set_caption(studio.get_title())
     buffer = pygame.Surface((config.width, config.height))
     recorder = SimpleRecordingManager()
     prefix = studio.get_recording_prefix() or "rec"
@@ -279,28 +301,65 @@ def _run_record(
         if record_frames is not None
         else int(record_duration * config.fps)
     )
+    if record_until_content_done:
+        loop_limit = max(1, int(float(record_max_sec) * config.fps))
+    else:
+        loop_limit = max(1, target_frames)
 
+    frames_written = 0
+    stopped_by_content = False
     try:
-        for frame_index in range(target_frames):
-            config.dt_sec = 1.0 / config.fps
+        for frame_index in range(loop_limit):
+            config.actual_fps = clock.get_fps()
+
+            events = list(pygame.event.get())
+            stop = False
+            for e in events:
+                if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
+                    stop = True
+                    break
+            if stop:
+                break
+            if not studio.handle_events(events, config):
+                break
+
             config.recording_time_sec = frame_index / config.fps
-            studio.handle_events([], config)
+            config.dt_sec = 1.0 / config.fps
             studio.update(config)
             studio.draw(buffer, config)
             if np is not None:
                 buf = pygame.surfarray.array3d(buffer)
                 frame = np.transpose(buf, (1, 0, 2))
                 recorder.submit_frame(frame)
+                frames_written += 1
+            pygame.display.flip()
             clock.tick(config.fps)
+            if record_until_content_done and studio.should_stop_recording():
+                stopped_by_content = True
+                break
+        else:
+            if record_until_content_done and not stopped_by_content:
+                print(
+                    "[!] record_max_sec 상한에 도달했습니다. 콘텐츠가 끝나기 전에 끊겼다면 --record-max-sec 을 늘리세요.",
+                )
     finally:
+        try:
+            end_tl = (frames_written / float(config.fps)) if frames_written > 0 else 0.0
+            fin = getattr(studio, "finalize_recording_audio_segments", None)
+            if callable(fin):
+                fin(timeline_end_sec=end_tl)
+        except Exception:
+            pass
         recorder.stop()
         config.recording_log_event = None
         config.recording_time_sec = 0.0
 
-    print("[rec] 녹화 완료:", target_frames, "프레임")
+    print("[rec] 녹화 완료:", frames_written, "프레임")
+    if record_until_content_done and stopped_by_content:
+        print("[rec] 콘텐츠 종료 조건(마지막 아이템·마지막 장면까지)으로 루프를 마쳤습니다.")
     video_path = recorder.get_last_video_path()
-    duration_sec = target_frames / config.fps
-    if video_path is not None and recording_events:
+    duration_sec = frames_written / config.fps if frames_written > 0 else 0.0
+    if video_path is not None and recording_events and duration_sec > 0:
         print("[audio] 녹화 오디오 분리: 이벤트", len(recording_events), "개 -> WAV 생성 후 mux")
         _mux_recorded_audio(video_path, recording_events, config.fps, duration_sec)
     elif video_path is not None and not recording_events:
@@ -377,6 +436,20 @@ def main() -> None:
         metavar="N",
         help="녹화 모드에서 녹화할 프레임 수. 지정 시 --record-duration 무시.",
     )
+    parser.add_argument(
+        "--record-until-content-done",
+        action="store_true",
+        help=(
+            "녹화: studio.should_stop_recording()이 True가 될 때까지 진행(회화=마지막 아이템·마지막 장면 끝). "
+            "최대 길이는 --record-max-sec."
+        ),
+    )
+    parser.add_argument(
+        "--record-max-sec",
+        type=float,
+        default=3600.0,
+        help="--record-until-content-done 일 때 녹화 루프 상한(초). 기본 3600.",
+    )
 
     def _font_sizes_arg(s: str) -> Any:
         try:
@@ -416,6 +489,8 @@ def main() -> None:
         record_duration=args.record_duration,
         record_frames=args.record_frames,
         conversation_render=_conversation_render_from_cli_args(args),
+        record_until_content_done=bool(getattr(args, "record_until_content_done", False)),
+        record_max_sec=float(getattr(args, "record_max_sec", 3600.0)),
     )
 
 

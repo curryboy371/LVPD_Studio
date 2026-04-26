@@ -43,3 +43,7 @@ class VocabularyStudio:
     def get_recording_prefix(self) -> Optional[str]:
         """녹화 파일 접두사 미사용."""
         return None
+
+    def should_stop_recording(self) -> bool:
+        """콘텐츠 종료 기준 미정의: until-done 녹화 시 상한 시간으로만 종료된다."""
+        return False

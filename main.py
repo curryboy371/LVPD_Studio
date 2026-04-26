@@ -1,7 +1,7 @@
 """
 단일 진입점. 명령별 실행:
 
-  python main.py studio  → 스튜디오 화면만 (디버그)
+  python main.py studio  → 스튜디오 (기본: 화면 디버그). --mode record 로 오프스크린 녹화
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
 
 테이블 CSV 생성은 배치 파일에서만 실행 (create_all_csv.bat → run_create_new_tables_csv.py).
@@ -241,7 +241,7 @@ def generate_content_table(content_label: str = "new tables") -> "LoadedContent"
 
 
 def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """스튜디오(디버깅) 모드: 신규 테이블 CSV 로드 후 화면만 출력 (녹화 없음)."""
+    """스튜디오: 신규 테이블 CSV 로드 후 `studio.runner.run` (debug 또는 record)."""
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
         DEFAULT_SUB_SENTENCES_CSV,
@@ -254,7 +254,11 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         get_table_rows,
     )
     from data.table_manager import set_table
-    from studio.runner import run, _create_studio
+    from studio.runner import (
+        run,
+        _create_studio,
+        _conversation_render_from_cli_args,
+    )
 
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
@@ -266,7 +270,15 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         logger.error("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 에 base_sentences.csv 등이 있는지 확인하세요.")
         sys.exit(1)
     studio = _create_studio("conversation", "", content=content)
-    run(studio, mode="debug")
+    run(
+        studio,
+        mode=args.mode,
+        record_duration=args.record_duration,
+        record_frames=args.record_frames,
+        conversation_render=_conversation_render_from_cli_args(args),
+        record_until_content_done=bool(args.record_until_content_done),
+        record_max_sec=float(args.record_max_sec),
+    )
 
 
 def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -314,8 +326,61 @@ def _cmd_batch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
 
 
 def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
-    p = subparsers.add_parser("studio", help="스튜디오 화면만 보기 (녹화 없음)")
+    from studio.runner import _parse_conversation_font_sizes
+
+    p = subparsers.add_parser(
+        "studio",
+        help="스튜디오: 화면(debug) 또는 오프스크린 녹화(record). CSV 로드는 runner와 동일.",
+    )
     p.set_defaults(func=_cmd_studio)
+    p.add_argument(
+        "--mode",
+        type=str,
+        default="debug",
+        choices=("debug", "record"),
+        help="debug=창 출력만, record=오프스크린 MP4( release/ )",
+    )
+    p.add_argument(
+        "--record-duration",
+        type=float,
+        default=10.0,
+        help="record 모드: 녹화 시간(초). --record-frames 지정 시 무시.",
+    )
+    p.add_argument(
+        "--record-frames",
+        type=int,
+        default=None,
+        metavar="N",
+        help="record 모드: 프레임 수. 지정 시 --record-duration 무시.",
+    )
+    p.add_argument(
+        "--record-until-content-done",
+        action="store_true",
+        help="record: 마지막 아이템·마지막 장면까지 끝나면 종료. 상한은 --record-max-sec.",
+    )
+    p.add_argument(
+        "--record-max-sec",
+        type=float,
+        default=3600.0,
+        help="--record-until-content-done 시 루프 상한(초). 기본 3600.",
+    )
+
+    def _font_sizes_arg(s: str) -> object:
+        try:
+            return _parse_conversation_font_sizes(s)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from e
+
+    p.add_argument(
+        "--font-sizes",
+        type=_font_sizes_arg,
+        default=None,
+        metavar="A,B,C,D,E,F",
+        help=(
+            "conversation: 폰트 pt 6개: cn_big,cn,cn_step1_hanzi,cn_step1_pinyin,kr,kr_step1 "
+            "(예: 36,28,124,66,28,56)"
+        ),
+    )
 
 
 def _add_batch_parser(subparsers: argparse._SubParsersAction) -> None:

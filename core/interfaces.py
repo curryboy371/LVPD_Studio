@@ -49,6 +49,10 @@ class IStudio(ABC):
         """R 키 등으로 녹화 시작/중지 요청 시 러너가 주입한 콜백. 기본 구현은 무시."""
         pass
 
+    def should_stop_recording(self) -> bool:
+        """record 모드에서 콘텐츠 재생이 끝났을 때 True면 러너가 루프를 종료한다. 기본 False."""
+        return False
+
 
 class IVideoRenderer(ABC):
     """비디오/프레임 렌더링을 담당하는 추상 인터페이스."""

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import pygame
@@ -80,6 +81,8 @@ class ConversationStudio:
         self._last_config: Any = None
         # `PlaybackManager.next_item()` 등으로 item만 바뀐 경우에도 extract 오디오·경로를 맞추기 위한 동기화용
         self._last_applied_item_index: Optional[int] = None
+        # record mux: VideoSegmentStart/End — sidecar mp3 추출 재생이 붙은 구간만 True
+        self._recording_video_segment_open: bool = False
 
         # 첫 아이템의 미디어 소스 적용
         if self._data_list:
@@ -289,6 +292,35 @@ class ConversationStudio:
         try:
             if self._video_audio.has_pending():
                 self._video_audio._apply_pending()
+                log = getattr(config, "recording_log_event", None) if config is not None else None
+                if (
+                    log is not None
+                    and self._manager is not None
+                    and not self._recording_video_segment_open
+                ):
+                    item = self._manager.current_item()
+                    vpath = self._resolve_video_path(str(item.get("video_path") or ""))
+                    if vpath and os.path.exists(vpath):
+                        from studio.recording_events import VideoSegmentStart, recording_log_event
+
+                        mp3_path = str(Path(vpath).with_suffix(".mp3"))
+                        mux_src = mp3_path if os.path.exists(mp3_path) else vpath
+                        tl = float(getattr(config, "recording_time_sec", 0.0) or 0.0)
+                        # 동명 mp3는 보통 구간 0부터 전체 음원 → 비디오 PTS로 자르면 무음에 가깝게 됨.
+                        src_pts = (
+                            0.0
+                            if mux_src.lower().endswith(".mp3")
+                            else float(self._video_player.get_pts())
+                        )
+                        recording_log_event(
+                            log,
+                            VideoSegmentStart(
+                                timeline_sec=tl,
+                                video_path=mux_src,
+                                video_pts_sec=src_pts,
+                            ),
+                        )
+                        self._recording_video_segment_open = True
         except Exception:
             pass
 
@@ -298,6 +330,8 @@ class ConversationStudio:
             cur = int(self._manager.state.item_index)
             if self._last_applied_item_index != cur:
                 self._apply_media_for_index(cur)
+
+        self._maybe_recording_start_video_segment_no_sidecar_mp3(config)
 
     def draw(self, screen: Any, config: Any) -> None:
         """배경 채우기 후 현재 Step 화면을 그리고 일시정지·디버그 오버레이를 덧씌운다."""
@@ -326,14 +360,68 @@ class ConversationStudio:
         vid = item.get("id", 0)
         return f"REC_{vid}"
 
+    def should_stop_recording(self) -> bool:
+        """마지막 아이템·마지막 장면(PRACTICE 등)까지 끝나면 녹화 루프를 멈춘다."""
+        if self._manager is None:
+            return False
+        return self._manager.is_full_run_complete()
+
+    def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
+        """record 루프 종료 직전: 열린 비디오 오디오 구간을 VideoSegmentEnd로 닫는다."""
+        self._recording_emit_video_segment_end(timeline_sec=float(timeline_end_sec))
+
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
+
+    def _recording_emit_video_segment_end(self, *, timeline_sec: float) -> None:
+        cfg = self._last_config
+        log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+        if not log or not self._recording_video_segment_open:
+            return
+        try:
+            from studio.recording_events import VideoSegmentEnd, recording_log_event
+
+            recording_log_event(log, VideoSegmentEnd(timeline_sec=float(timeline_sec)))
+        except Exception:
+            pass
+        self._recording_video_segment_open = False
+
+    def _maybe_recording_start_video_segment_no_sidecar_mp3(self, config: Any) -> None:
+        """동일 이름 mp3가 없을 때는 즉시 영상 파일에서 오디오 구간을 mux 로그에 남긴다."""
+        log = getattr(config, "recording_log_event", None) if config is not None else None
+        if not log or self._manager is None or self._recording_video_segment_open:
+            return
+        item = self._manager.current_item()
+        vpath = self._resolve_video_path(str(item.get("video_path") or ""))
+        if not vpath or not os.path.exists(vpath):
+            return
+        mp3_path = str(Path(vpath).with_suffix(".mp3"))
+        if os.path.exists(mp3_path):
+            return
+        try:
+            from studio.recording_events import VideoSegmentStart, recording_log_event
+
+            tl = float(getattr(config, "recording_time_sec", 0.0) or 0.0)
+            pts = float(self._video_player.get_pts())
+            recording_log_event(
+                log,
+                VideoSegmentStart(timeline_sec=tl, video_path=vpath, video_pts_sec=pts),
+            )
+            self._recording_video_segment_open = True
+        except Exception:
+            pass
 
     def _apply_media_for_index(self, index: int) -> None:
         """지정 인덱스 아이템의 비디오 경로·구간을 플레이어와 동기 추출 오디오에 반영한다."""
         if not self._data_list or index < 0 or index >= len(self._data_list):
             return
+        cfg = self._last_config
+        log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+        if log is not None and self._recording_video_segment_open and cfg is not None:
+            tl = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+            self._recording_emit_video_segment_end(timeline_sec=tl)
+
         item = self._data_list[index]
         path = self._resolve_video_path(str(item.get("video_path") or ""))
         st = float(item.get("start_time", 0.0) or 0.0)

@@ -87,6 +87,21 @@ class PlaybackManager:
         idx = max(0, min(len(self._items) - 1, self.state.item_index))
         return self._items[idx]
 
+    def is_full_run_complete(self) -> bool:
+        """마지막 아이템에서 시퀀스 마지막 장면까지 재생이 끝난 뒤인지(녹화 종료 판별용)."""
+        if not self._items:
+            return True
+        last_idx = len(self._items) - 1
+        if int(self.state.item_index) != last_idx:
+            return False
+        last_kind = self._scene_sequence[-1]
+        if self.state.scene_kind != last_kind:
+            return False
+        scene = self._scenes.get(last_kind)
+        if scene is None:
+            return False
+        return bool(scene.is_done) and not bool(scene.transition_signal)
+
     def update(self, ctx: FrameContext) -> None:
         self._video_player.tick(ctx.dt_sec)
 

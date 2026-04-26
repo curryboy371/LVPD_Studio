@@ -1,6 +1,7 @@
 """
 녹화 이벤트 로그로 오디오 WAV를 생성하고 비디오와 mux.
 """
+import logging
 import os
 import subprocess
 import sys
@@ -13,6 +14,8 @@ from studio.recording_events import (
     VideoSegmentEnd,
     VideoSegmentStart,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_audio_and_mux(
@@ -45,7 +48,13 @@ def build_audio_and_mux(
         # 출력: video_path와 같은 디렉터리, 확장자 앞에 _with_audio
         out_path = video_path.parent / f"{video_path.stem}_with_audio{video_path.suffix}"
         mux_video_audio(str(video_path), str(audio_wav), str(out_path))
-        print("⏹️ 오디오 mux 완료:", out_path)
+        try:
+            os.replace(str(out_path), str(video_path))
+        except OSError as e:
+            logger.warning("녹화 원본 MP4 교체 실패(_with_audio만 남음): %s", e)
+            print("[audio] mux 완료(원본 유지):", out_path)
+            return
+        print("[audio] 녹화 MP4에 오디오 반영(원본 파일 갱신):", video_path)
 
 
 def _build_audio_from_events(
@@ -145,18 +154,27 @@ def _build_audio_from_events(
         delay_ms = int(start_sec * 1000)
         # 비디오는 src_start부터 dur만큼 추출. atrim=start:end (초)
         atrim = f"atrim={src_start}:{src_start + dur}"
+        # MP4 등은 0번이 비디오일 수 있어 :a 로 오디오만 선택한다.
+        # 삽입·sidecar 음원은 상대적으로 작을 수 있어 소폭 게인.
         filter_parts.append(
-            f"[{idx + 1}]{atrim},adelay={delay_ms}|{delay_ms},apad=whole_len={int(duration_sec * sr)}[a{idx}]"
+            f"[{idx + 1}:a]{atrim},volume=10dB,adelay={delay_ms}|{delay_ms},"
+            f"apad=whole_len={int(duration_sec * sr)}[a{idx}]"
         )
-    # [0][a0][a1]...amix=inputs=N
+    # [0][a0][a1]...amix → aformat 체인으로 [aout]까지 연결
     n_seg = len(segments_to_mix)
     mix_inputs = "[0]" + "".join(f"[a{i}]" for i in range(n_seg))
-    filter_parts.append(f"{mix_inputs}amix=inputs={n_seg + 1}:duration=longest[aout]")
-    filter_parts.append("[aout]aformat=sample_fmts=s16:channel_layouts=stereo")
+    # normalize=0: 무음 베이스+음성 합성 시 음성이 1/N로 죽지 않게 한다.
+    filter_parts.append(
+        f"{mix_inputs}amix=inputs={n_seg + 1}:duration=longest:normalize=0[mixraw]"
+    )
+    filter_parts.append("[mixraw]aformat=sample_fmts=s16:channel_layouts=stereo[aout]")
     filter_str = ";".join(filter_parts)
 
     cmd = [ffmpeg_cmd, "-y"] + inputs + ["-filter_complex", filter_str, "-map", "[aout]", "-ac", str(ch), "-ar", str(sr), str(output_wav)]
-    subprocess.run(cmd, capture_output=True, timeout=60, creationflags=creationflags)
+    r = subprocess.run(cmd, capture_output=True, timeout=120, creationflags=creationflags)
+    if r.returncode != 0 or not output_wav.exists():
+        err = (r.stderr or b"").decode("utf-8", errors="replace")[:1200]
+        logger.warning("recorded_audio_mux FFmpeg 실패(rc=%s): %s", r.returncode, err)
 
     try:
         if base_silence.exists():
