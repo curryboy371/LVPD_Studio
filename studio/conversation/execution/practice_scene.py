@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import Enum, auto
+from typing import Callable
 
 import pygame
 
@@ -15,6 +16,7 @@ from ..core.types import (
     build_sentence_render_data_with_tone_icons,
 )
 from ..core.conversation_step import IConversationStep
+from ..tools.playback_bar import PlaybackBarRenderer
 from utils.pinyin_processor import get_pinyin_processor
 
 
@@ -40,6 +42,7 @@ class PracticeScene(IConversationStep):
         drawer,
         video_player,
         style: SentenceStyleConfig,
+        play_voice: Callable[..., None] | None = None,
         title_text: str = "연습",
         title_fade_in_sec: float = 1.0,
         content_hold_sec: float = 3.0,
@@ -48,6 +51,7 @@ class PracticeScene(IConversationStep):
         super().__init__()
         self.drawer = drawer
         self.video_player = video_player
+        self.play_voice = play_voice
         self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
@@ -64,10 +68,12 @@ class PracticeScene(IConversationStep):
         # SHOW_SUB_CONTENT 단계에서 sub 문장 간 자동 전환 대기 시간(초).
         self._sub_content_hold_sec = 3.0
         self._sub_content_wait_remaining_sec = 0.0
+        self._sub_content_wait_total_sec = 0.0
         self._sub_variants: list[dict] = []
         self._sub_variant_index = 0
         self._content_visible = False
         self._current_sub_variant = None
+        self._playback_bar = PlaybackBarRenderer()
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self.drawer.hide_now(self._title_channel)
@@ -95,6 +101,7 @@ class PracticeScene(IConversationStep):
             self._sub_variant_index = 0
             self._current_sub_variant = self._sub_variants[0] if self._sub_variants else None
             self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
+            self._sub_content_wait_total_sec = self._sub_content_hold_sec
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
             self._set_stage(self.Stage.TITLE)
@@ -116,7 +123,9 @@ class PracticeScene(IConversationStep):
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
             if self._content_wait_remaining_sec <= 0.0:
                 self._set_stage(self.Stage.SHOW_SUB_CONTENT)
-                self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
+                wait_total = self._start_current_sub_variant_audio_and_get_wait()
+                self._sub_content_wait_total_sec = max(0.0, float(wait_total))
+                self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
             return
 
         # 임시 규칙: sub 문장이 여러 개인 경우 3초마다 다음 sub 문장으로 자동 전환한다.
@@ -128,7 +137,9 @@ class PracticeScene(IConversationStep):
                 if next_index < len(self._sub_variants):
                     self._sub_variant_index = next_index
                     self._current_sub_variant = self._sub_variants[self._sub_variant_index]
-                    self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
+                    wait_total = self._start_current_sub_variant_audio_and_get_wait()
+                    self._sub_content_wait_total_sec = max(0.0, float(wait_total))
+                    self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
         return
 
     def _pick_sub_variants(self, item: ConversationItemLike) -> list[dict]:
@@ -145,6 +156,29 @@ class PracticeScene(IConversationStep):
                 continue
             valid.append(variant)
         return valid
+
+    def _start_current_sub_variant_audio_and_get_wait(self) -> float:
+        """현재 sub 변형의 alt_sound_path를 재생하고, 길이의 2배 대기 시간을 반환한다."""
+        variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
+        sound_path = str(variant.get("alt_sound_path") or "").strip()
+        if not sound_path:
+            return self._sub_content_hold_sec
+
+        if self.play_voice is not None:
+            try:
+                self.play_voice(sound_path, item=variant)
+            except Exception:
+                pass
+
+        try:
+            if pygame.mixer.get_init() is None:
+                pygame.mixer.init()
+            sound_len_sec = float(pygame.mixer.Sound(sound_path).get_length() or 0.0)
+            if sound_len_sec > 0.0:
+                return sound_len_sec * 2.0
+        except Exception:
+            pass
+        return self._sub_content_hold_sec
 
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """비디오 위에 LEARNING과 동일 세로 배치(중앙·타이틀 밴드 여유)의 문장과 첫 단어(있으면)를 표시한다."""
@@ -201,6 +235,7 @@ class PracticeScene(IConversationStep):
                 base_item=item,
                 render_item=render_item,
             )
+            self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
             return
 
         draw_style = self._style
@@ -323,3 +358,30 @@ class PracticeScene(IConversationStep):
         if alpha < 255:
             target_surf.set_alpha(alpha)
         screen.blit(target_surf, (x_line + prefix_w, y_hanzi))
+
+    def _draw_sub_content_playback_bar(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        item: ConversationItemLike,
+    ) -> None:
+        """SHOW_SUB_CONTENT 단계에서만 재생바와 시간 텍스트를 렌더한다."""
+        _ = item
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        current_sec = max(0.0, total_sec - remaining_sec)
+        if total_sec <= 1e-6:
+            total_sec = max(0.1, float(self._sub_content_hold_sec))
+            current_sec = 0.0
+        else:
+            current_sec = min(current_sec, total_sec)
+
+        self._playback_bar.draw(
+            screen,
+            frame_width=ctx.width,
+            frame_height=ctx.height,
+            current_sec=current_sec,
+            total_sec=total_sec,
+            show_time_text=False,
+        )

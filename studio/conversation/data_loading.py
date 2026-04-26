@@ -402,6 +402,9 @@ def _attach_sub_variants_to_base_rows(
             alt_word = words_by_id.get(alt_word_id, "").strip()
             if not alt_word:
                 continue
+            alt_sound_path = str(v.get("alt_sound_path") or "").strip()
+            if alt_sound_path and not os.path.isabs(alt_sound_path):
+                alt_sound_path = str(_REPO_ROOT / alt_sound_path.replace("\\", "/"))
             replaced_sentence = _replace_slot_in_raw_sentence(
                 raw_sentence,
                 target_slot_order=slot_order,
@@ -416,7 +419,7 @@ def _attach_sub_variants_to_base_rows(
                     "alt_word": alt_word,
                     "replaced_sentence": replaced_sentence,
                     "alt_translation": str(v.get("alt_translation") or "").strip(),
-                    "alt_sound_path": str(v.get("alt_sound_path") or "").strip(),
+                    "alt_sound_path": alt_sound_path,
                 }
             )
         if sub_variants:
