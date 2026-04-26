@@ -371,31 +371,41 @@ def _load_sentence_word_map_csv(csv_path: str) -> dict[int, list[int]]:
 
 
 def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
-    """sub_sentences.csv를 읽어 base_id별 활용 변형 목록으로 정리한다."""
     path = Path(csv_path)
     if not path.exists():
         return {}
+        
     grouped: dict[int, list[dict]] = {}
+    
     with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
-        for row in reader:
+        for i, row in enumerate(reader):
             try:
-                base_id = int(float(row.get("base_id") or 0))
-                if not base_id:
+                # 공백 제거 후 안전하게 float -> int 변환
+                raw_base_id = str(row.get("base_id") or "").strip()
+                if not raw_base_id:
                     continue
-                grouped.setdefault(base_id, []).append(
-                    {
-                        "id": int(float(row.get("id") or 0)),
-                        "target_slot_order": int(float(row.get("target_slot_order") or 0)),
-                        "alt_word_id": int(float(row.get("alt_word_id") or 0)),
-                        "alt_translation": str(row.get("alt_translation") or "").strip(),
-                        "alt_sound_path": str(row.get("alt_sound_path") or "").strip(),
-                    }
-                )
-            except Exception:
+                
+                base_id = int(float(raw_base_id))
+                
+                item = {
+                    "id": int(float(str(row.get("id") or 0).strip())),
+                    "target_slot_order": int(float(str(row.get("target_slot_order") or 0).strip())),
+                    "alt_word_id": int(float(str(row.get("alt_word_id") or 0).strip())),
+                    "alt_translation": str(row.get("alt_translation") or "").strip(),
+                    "alt_sound_path": str(row.get("alt_sound_path") or "").strip(),
+                }
+                
+                grouped.setdefault(base_id, []).append(item)
+                
+            except (ValueError, TypeError) as e:
+                print(f"CSV {i+1}행 데이터 오류 (base_id: {row.get('base_id')}): {e}")
                 continue
+
+    # 정렬 로직
     for base_id in grouped:
-        grouped[base_id].sort(key=lambda x: (int(x.get("target_slot_order", 0)), int(x.get("id", 0))))
+        grouped[base_id].sort(key=lambda x: (x["target_slot_order"], x["id"]))
+        
     return grouped
 
 
