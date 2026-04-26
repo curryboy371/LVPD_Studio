@@ -233,7 +233,9 @@ class PracticeScene(IConversationStep):
 
         try:
             if pygame.mixer.get_init() is None:
-                pygame.mixer.init()
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             sound_len_sec = float(pygame.mixer.Sound(sound_path).get_length() or 0.0)
             if sound_len_sec > 0.0:
                 self._sub_content_sound_sec = sound_len_sec

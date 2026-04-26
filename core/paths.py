@@ -41,6 +41,18 @@ RENDER_FPS = 24
 # FFmpeg 실행 파일 (env 미사용)
 FFMPEG_CMD = "ffmpeg"
 
+# pygame mixer·비디오 장면 사이드카 MP3→WAV·녹화 mux 무음 베이스와 동일(48k)으로 맞춰 이중 리샘플을 줄인다.
+STUDIO_AUDIO_SAMPLE_RATE = 48000
+
+# 녹화본에 붙는 최종 AAC(이중 인코딩 시 여유를 두려면 256k 권장)
+STUDIO_MUX_AUDIO_BITRATE = "256k"
+
+# 녹화 mux: MP4 등 내장 오디오만 선형 게인(1.0=유지). 동명 MP3·삽입음은 게인 없음(디버그 재생 레벨과 맞춤).
+STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN = 0.5
+
+# utils/video_audio_extract: 비디오→동명 MP3 시 libmp3lame -q:a (0=최고 VBR)
+STUDIO_VIDEO_EXTRACT_MP3_LAME_Q = 0
+
 
 def get_repo_root() -> Path:
     return _REPO_ROOT

@@ -273,23 +273,32 @@ class VideoAudioPlayer:
             return
 
         def _extract() -> None:
+            from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
             fd, wav = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
-            cmd = [
-                FFMPEG_CMD, "-y", "-i", audio_path,
-                "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            sr = str(int(STUDIO_AUDIO_SAMPLE_RATE))
+            base = [FFMPEG_CMD, "-y", "-i", audio_path, "-vn"]
+            hq = base + [
+                "-af", "aresample=resampler=soxr",
+                "-acodec", "pcm_s16le", "-ar", sr, "-ac", "2",
                 wav,
             ]
+            fb = base + ["-acodec", "pcm_s16le", "-ar", sr, "-ac", "2", wav]
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+            r = None
             try:
-                r = subprocess.run(cmd, capture_output=True, timeout=60, creationflags=creationflags)
+                for cmd in (hq, fb):
+                    r = subprocess.run(cmd, capture_output=True, timeout=60, creationflags=creationflags)
+                    if r.returncode == 0 and os.path.exists(wav) and os.path.getsize(wav) > 0:
+                        break
             except Exception:
                 try:
                     os.remove(wav)
                 except OSError:
                     pass
                 return
-            if r.returncode != 0 or not os.path.exists(wav):
+            if r is None or r.returncode != 0 or not os.path.exists(wav):
                 try:
                     os.remove(wav)
                 except OSError:

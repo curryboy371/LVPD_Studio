@@ -9,7 +9,11 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from core.paths import FFMPEG_CMD
+from core.paths import (
+    FFMPEG_CMD,
+    STUDIO_AUDIO_SAMPLE_RATE,
+    STUDIO_VIDEO_EXTRACT_MP3_LAME_Q,
+)
 
 # 추출 대상 비디오 확장자
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv", ".wmv")
@@ -39,27 +43,39 @@ def extract_audio_to_mp3(
     creationflags = (
         getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     )
-    cmd = [
-        ffmpeg_cmd,
-        "-y" if overwrite else "-n",
-        "-i",
-        str(video_path),
-        "-vn",
-        "-acodec",
-        "libmp3lame",
-        "-q:a",
-        "2",
-        str(out_path),
+    lame_q = str(int(max(0, min(9, int(STUDIO_VIDEO_EXTRACT_MP3_LAME_Q)))))
+    sr = str(int(STUDIO_AUDIO_SAMPLE_RATE))
+    yflag = "-y" if overwrite else "-n"
+    base_in = [ffmpeg_cmd, yflag, "-i", str(video_path), "-vn"]
+    # 1) soxr로 스튜디오 샘플레이트·스테레오 맞춘 뒤 LAME 최고 VBR
+    # 2) soxr 미지원 등 실패 시 동일 q만 적용(기존과 호환)
+    attempts = [
+        base_in
+        + [
+            "-af",
+            "aresample=resampler=soxr",
+            "-ar",
+            sr,
+            "-ac",
+            "2",
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            lame_q,
+            str(out_path),
+        ],
+        base_in + ["-c:a", "libmp3lame", "-q:a", lame_q, str(out_path)],
     ]
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=300,
-            creationflags=creationflags,
-        )
-        if result.returncode == 0 and out_path.exists():
-            return out_path
+        for cmd in attempts:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=300,
+                creationflags=creationflags,
+            )
+            if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+                return out_path
     except Exception:
         pass
     return None

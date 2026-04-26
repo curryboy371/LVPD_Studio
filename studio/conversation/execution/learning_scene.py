@@ -167,7 +167,9 @@ class LearningScene(FSMConversationStep):
 
         try:
             if pygame.mixer.get_init() is None:
-                pygame.mixer.init()
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             sound_len = float(pygame.mixer.Sound(path).get_length())
             self._current_play_total_sec = max(0.0, sound_len)
             return sound_len

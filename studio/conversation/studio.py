@@ -132,7 +132,9 @@ class ConversationStudio:
                 return
             try:
                 if pygame.mixer.get_init() is None:
-                    pygame.mixer.init()
+                    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                    pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             except Exception:
                 return
             try:

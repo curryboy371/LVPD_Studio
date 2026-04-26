@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from core.paths import FFMPEG_CMD
+from core.paths import FFMPEG_CMD, STUDIO_MUX_AUDIO_BITRATE
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def mux_video_audio(
         "-i", str(audio_path),
         "-c:v", "copy",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", STUDIO_MUX_AUDIO_BITRATE,
         "-shortest",
         str(output_path),
     ]

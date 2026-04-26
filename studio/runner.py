@@ -217,8 +217,11 @@ def run(
     """
     if mode == "record":
         os.environ["SDL_VIDEODRIVER"] = "dummy"
+    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
     import pygame
 
+    pygame.mixer.pre_init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
     pygame.init()
     config = StudioConfig(STUDIO_WIDTH, STUDIO_HEIGHT, STUDIO_FPS)
     if conversation_render is not None:

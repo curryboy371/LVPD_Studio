@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import List
 
+from core.paths import STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN
 from studio.recording_events import (
     InsertSound,
     RecordingEvent,
@@ -16,6 +17,96 @@ from studio.recording_events import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 녹화 mux 시 이 확장자는 멀티플렉스 영상(내장 AAC 등)으로 간주.
+_EMBEDDED_VIDEO_AUDIO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".wmv")
+
+
+def _is_embedded_video_audio_path(path: str) -> bool:
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in _EMBEDDED_VIDEO_AUDIO_EXTS)
+
+
+def _mux_segment_audio_role(path: str) -> str:
+    """내장 영상 구간은 embedded, 동명 mp3·wav 등은 sidecar."""
+    return "embedded" if _is_embedded_video_audio_path(path) else "sidecar"
+
+
+def _mux_volume_prefix(role: str) -> str:
+    """embedded만 STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN. sidecar(MP3 등)·삽입음은 부스트 없음(디버그 재생과 레벨 맞춤, 클리핑 방지)."""
+    if role == "embedded":
+        g = max(0.0, min(2.0, float(STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN)))
+        return f"volume={g},"
+    return ""
+
+
+def _preextract_embedded_audio_to_wav(
+    ffmpeg_cmd: str,
+    video_path: str,
+    src_start: float,
+    dur: float,
+    out_wav: Path,
+    sample_rate: int,
+    creationflags: int,
+) -> bool:
+    """필터 그래프에서 AAC에 바로 atrim 하는 대신, 구간만 PCM으로 뽑아 디코드 품질을 올린다."""
+    ss = max(0.0, float(src_start))
+    t = max(0.02, float(dur))
+    base = [
+        ffmpeg_cmd,
+        "-y",
+        "-i",
+        video_path,
+        "-ss",
+        str(ss),
+        "-t",
+        str(t),
+        "-vn",
+        "-map",
+        "0:a:0",
+    ]
+    hq = base + [
+        "-af",
+        "aresample=resampler=soxr",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_s16le",
+        str(out_wav),
+    ]
+    fb = base + [
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_s16le",
+        str(out_wav),
+    ]
+    last_err = ""
+    for cmd in (hq, fb):
+        try:
+            r = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=120,
+                creationflags=creationflags,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            last_err = str(e)
+            continue
+        last_err = (r.stderr or b"").decode("utf-8", errors="replace")[:400]
+        if r.returncode == 0 and out_wav.exists() and out_wav.stat().st_size > 44:
+            return True
+    logger.warning("내장 오디오 구간 추출 실패(필터 경로로 폴백): %s — %s", video_path, last_err)
+    try:
+        if out_wav.exists():
+            out_wav.unlink()
+    except OSError:
+        pass
+    return False
 
 
 def build_audio_and_mux(
@@ -93,8 +184,8 @@ def _build_audio_from_events(
     # - 그 다음 amerge/amix로 타임라인에 맞춰 합성. 더 단순하게: concat demuxer로 여러 조각을 이어붙이기.
     # 더 단순: 무음 위에 adelay+volume으로 각 소스를 올린 뒤 amix. adelay는 밀리초 단위.
     # adelay=delay_ms|delay_ms (stereo)
-    # (path, output_start_sec, duration_sec, source_start_sec) — 비디오는 source_start_sec부터 추출, insert는 0
-    segments_to_mix: List[tuple[str, float, float, float]] = []
+    # (path, output_start_sec, duration_sec, source_start_sec, audio_role)
+    segments_to_mix: List[tuple[str, float, float, float, str]] = []
     current_video_path: str | None = None
     current_video_start_pts: float = 0.0
     segment_start_timeline: float = 0.0
@@ -108,27 +199,33 @@ def _build_audio_from_events(
             if current_video_path and os.path.exists(current_video_path):
                 dur = ev.timeline_sec - segment_start_timeline
                 if dur > 0.01:
-                    segments_to_mix.append((
-                        current_video_path,
-                        segment_start_timeline,
-                        dur,
-                        current_video_start_pts,
-                    ))
+                    segments_to_mix.append(
+                        (
+                            current_video_path,
+                            segment_start_timeline,
+                            dur,
+                            current_video_start_pts,
+                            _mux_segment_audio_role(current_video_path),
+                        )
+                    )
             current_video_path = None
         elif isinstance(ev, InsertSound):
             if os.path.exists(ev.path) and ev.duration_sec > 0:
-                segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0))
+                segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0, "sidecar"))
 
     # 마지막 세그먼트: 녹화 끝까지 재생 중이었으면
     if current_video_path and os.path.exists(current_video_path):
         dur = duration_sec - segment_start_timeline
         if dur > 0.01:
-            segments_to_mix.append((
-                current_video_path,
-                segment_start_timeline,
-                dur,
-                current_video_start_pts,
-            ))
+            segments_to_mix.append(
+                (
+                    current_video_path,
+                    segment_start_timeline,
+                    dur,
+                    current_video_start_pts,
+                    _mux_segment_audio_role(current_video_path),
+                )
+            )
 
     if not segments_to_mix:
         # 무음만 복사
@@ -141,6 +238,22 @@ def _build_audio_from_events(
                 pass
         return
 
+    # 내장 영상 오디오: 필터에서 AAC+atrim 대신 구간 PCM으로 선추출(디코드·리샘플 품질)
+    resolved: List[tuple[str, float, float, float, str]] = []
+    for idx, row in enumerate(segments_to_mix):
+        path, start_sec, dur, src_start, role = row
+        if _is_embedded_video_audio_path(path):
+            seg_wav = output_wav.parent / f"preseg_{idx}.wav"
+            if _preextract_embedded_audio_to_wav(
+                ffmpeg_cmd, path, src_start, dur, seg_wav, sr, creationflags
+            ):
+                resolved.append((str(seg_wav), start_sec, dur, 0.0, "embedded"))
+            else:
+                resolved.append(row)
+        else:
+            resolved.append(row)
+    segments_to_mix = resolved
+
     # FFmpeg으로 무음 + 각 세그먼트를 해당 시점에 mix
     # 입력: [0] silence base, [1] segment0, [2] segment1, ...
     # filter: [0] as is; [1] adelay=start0*1000|start0*1000,atrim=0:duration0,volume=1; ... then amix=inputs=N
@@ -149,16 +262,16 @@ def _build_audio_from_events(
     # amix = mix multiple inputs with same duration.所以我们用 apad 把每个输入 pad 到 duration_sec 然后 adelay 再 amix.
     inputs = ["-i", str(base_silence)]
     filter_parts = []
-    for idx, (path, start_sec, dur, src_start) in enumerate(segments_to_mix):
+    whole_len = max(1, int(round(duration_sec * sr)))
+    for idx, (path, start_sec, dur, src_start, role) in enumerate(segments_to_mix):
         inputs.extend(["-i", path])
         delay_ms = int(start_sec * 1000)
-        # 비디오는 src_start부터 dur만큼 추출. atrim=start:end (초)
+        # 선추출 WAV는 이미 구간만 담음 → atrim=0:dur. 컨테이너 직입력은 src_start~
         atrim = f"atrim={src_start}:{src_start + dur}"
-        # MP4 등은 0번이 비디오일 수 있어 :a 로 오디오만 선택한다.
-        # 삽입·sidecar 음원은 상대적으로 작을 수 있어 소폭 게인.
+        gain = _mux_volume_prefix(role)
         filter_parts.append(
-            f"[{idx + 1}:a]{atrim},volume=10dB,adelay={delay_ms}|{delay_ms},"
-            f"apad=whole_len={int(duration_sec * sr)}[a{idx}]"
+            f"[{idx + 1}:a]{atrim},{gain}adelay={delay_ms}|{delay_ms},"
+            f"apad=whole_len={whole_len}[a{idx}]"
         )
     # [0][a0][a1]...amix → aformat 체인으로 [aout]까지 연결
     n_seg = len(segments_to_mix)
