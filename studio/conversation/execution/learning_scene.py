@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from enum import Enum, auto
+from pathlib import Path
 from typing import Any
 
 import pygame
@@ -11,6 +12,7 @@ import pygame
 from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
 from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
+from ..tools.playback_bar import PlaybackBarRenderer
 
 
 class LearningScene(FSMConversationStep):
@@ -67,6 +69,9 @@ class LearningScene(FSMConversationStep):
         self.hold_sec = float(hold_sec)
         self.title_text = title_text
         self.title_fade_in_sec = float(title_fade_in_sec)
+        self._playback_bar = PlaybackBarRenderer()
+        self._listen_icon_surface = self._load_listen_icon_surface()
+        self._current_play_total_sec = 0.0
 
         # SceneKind 간 전환 연출(내부 Stage FSM 전환과 무관)
         self.scene_transition_mode = SceneTransitionMode.CUT
@@ -101,7 +106,6 @@ class LearningScene(FSMConversationStep):
             ),
             S.PLAY_L1: StageConfig(
                 on_enter=lambda s=S.PLAY_L1: self._enter_play(s),
-                transition_condition=self._audio_done_condition,
                 next_stage=S.WAIT_AFTER_L1,
             ),
             S.WAIT_AFTER_L1: StageConfig(
@@ -110,7 +114,6 @@ class LearningScene(FSMConversationStep):
             ),
             S.PLAY_L2: StageConfig(
                 on_enter=lambda s=S.PLAY_L2: self._enter_play(s),
-                transition_condition=self._audio_done_condition,
                 next_stage=S.WAIT_AFTER_L2,
             ),
             S.WAIT_AFTER_L2: StageConfig(
@@ -129,8 +132,7 @@ class LearningScene(FSMConversationStep):
     # ------------------------
     def _audio_done_condition(self) -> bool:
         """오디오 종료 조건."""
-        if not self.wait_for_sound_end:
-            return True
+        # PLAY_L1/PLAY_L2는 설정과 무관하게 오디오 길이(timer)만큼 항상 대기한다.
         return self.timer <= 0
 
     # ------------------------
@@ -155,8 +157,11 @@ class LearningScene(FSMConversationStep):
         try:
             if pygame.mixer.get_init() is None:
                 pygame.mixer.init()
-            return float(pygame.mixer.Sound(path).get_length())
+            sound_len = float(pygame.mixer.Sound(path).get_length())
+            self._current_play_total_sec = max(0.0, sound_len)
+            return sound_len
         except Exception:
+            self._current_play_total_sec = 0.0
             return 0.0
 
     def _enter_wait(self) -> float:
@@ -223,3 +228,46 @@ class LearningScene(FSMConversationStep):
             channel=self.title_channel,
             style=self.style,
         )
+        self._draw_play_listen_overlay(screen, ctx=ctx)
+
+    def _load_listen_icon_surface(self) -> pygame.Surface | None:
+        """학습 듣기 단계에서 사용할 listen 아이콘을 로드한다."""
+        root = Path(__file__).resolve().parents[3]
+        candidates = (
+            root / "resource" / "image" / "icon" / "listen.png",
+            root / "resource" / "images" / "icon" / "listen.png",
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                surface = pygame.image.load(str(path))
+                return pygame.transform.smoothscale(surface, (318, 318))
+            except Exception:
+                continue
+        return None
+
+    def _draw_play_listen_overlay(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
+        """PLAY_L1/PLAY_L2 단계에서 재생바와 listen 아이콘을 출력한다."""
+        if self.stage not in (self.Stage.PLAY_L1, self.Stage.PLAY_L2):
+            return
+        total_sec = max(0.0, float(self._current_play_total_sec))
+        if total_sec <= 1e-6:
+            return
+        remaining_sec = max(0.0, float(self.timer))
+        current_sec = min(total_sec, max(0.0, total_sec - remaining_sec))
+        self._playback_bar.draw(
+            screen,
+            frame_width=ctx.width,
+            frame_height=ctx.height,
+            current_sec=current_sec,
+            total_sec=total_sec,
+            show_time_text=False,
+        )
+        if self._listen_icon_surface is None:
+            return
+        margin_left = 24
+        margin_bottom = 20
+        x = margin_left
+        y = int(ctx.height) - int(self._listen_icon_surface.get_height()) - margin_bottom
+        screen.blit(self._listen_icon_surface, (x, y))
