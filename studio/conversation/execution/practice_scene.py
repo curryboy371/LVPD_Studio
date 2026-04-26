@@ -404,8 +404,18 @@ class PracticeScene(IConversationStep):
             current_sec=bar_current_sec,
             total_sec=bar_total_sec,
             show_time_text=False,
+            progress_color=self._resolve_playback_bar_color(is_listen_phase=is_listen_phase),
         )
         self._draw_mode_icon(screen, ctx=ctx, is_listen_phase=is_listen_phase)
+
+    def _resolve_playback_bar_color(self, *, is_listen_phase: bool) -> tuple[int, int, int]:
+        """현재 재생 모드에 맞는 재생바 색상을 반환한다."""
+        color_table = {
+            "listen": (46, 204, 113),
+            "speak": (255, 159, 67),
+        }
+        mode = "listen" if is_listen_phase else "speak"
+        return color_table[mode]
 
     def _load_mode_icon_surface(self, filename: str) -> pygame.Surface | None:
         """재생 모드 아이콘을 로드하고 공통 크기로 축소한다."""

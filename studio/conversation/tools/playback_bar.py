@@ -106,6 +106,7 @@ class PlaybackBarRenderer:
         total_sec: float | None = None,
         progress: float | None = None,
         show_time_text: bool = True,
+        progress_color: tuple[int, int, int] | None = None,
     ) -> float:
         """Draw playback bar and return normalized progress.
 
@@ -122,7 +123,8 @@ class PlaybackBarRenderer:
         fill_width = int(round(bar_rect.width * normalized))
         if fill_width > 0:
             fill_rect = pygame.Rect(bar_rect.left, bar_rect.top, fill_width, bar_rect.height)
-            pygame.draw.rect(surface, self.style.progress_color, fill_rect, border_radius=radius)
+            fill_color = progress_color if progress_color is not None else self.style.progress_color
+            pygame.draw.rect(surface, fill_color, fill_rect, border_radius=radius)
 
         if self.style.border_width_px > 0:
             pygame.draw.rect(

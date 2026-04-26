@@ -14,6 +14,8 @@ from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
 from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
 from ..tools.playback_bar import PlaybackBarRenderer
 
+LISTEN_BAR_COLOR = (46, 204, 113)
+
 
 class LearningScene(FSMConversationStep):
     """학습 장면(중앙 문장). 내부 진행은 `Stage` FSM."""
@@ -263,6 +265,7 @@ class LearningScene(FSMConversationStep):
             current_sec=current_sec,
             total_sec=total_sec,
             show_time_text=False,
+            progress_color=LISTEN_BAR_COLOR,
         )
         if self._listen_icon_surface is None:
             return
