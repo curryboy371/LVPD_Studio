@@ -272,14 +272,19 @@ class LearningScene(FSMConversationStep):
         return None
 
     def _draw_play_listen_overlay(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
-        """PLAY_L1/PLAY_L2 단계에서 재생바와 listen 아이콘을 출력한다."""
-        if self.stage not in (self.Stage.PLAY_L1, self.Stage.PLAY_L2):
+        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘을 동일하게 유지한다."""
+        play = (self.Stage.PLAY_L1, self.Stage.PLAY_L2)
+        wait_after = (self.Stage.WAIT_AFTER_L1, self.Stage.WAIT_AFTER_L2)
+        if self.stage not in play + wait_after:
             return
         total_sec = max(0.0, float(self._current_play_total_sec))
         if total_sec <= 1e-6:
             return
-        remaining_sec = max(0.0, float(self.timer))
-        current_sec = min(total_sec, max(0.0, total_sec - remaining_sec))
+        if self.stage in play:
+            remaining_sec = max(0.0, float(self.timer))
+            current_sec = min(total_sec, max(0.0, total_sec - remaining_sec))
+        else:
+            current_sec = total_sec
         self._playback_bar.draw(
             screen,
             frame_width=ctx.width,
