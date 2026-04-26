@@ -1,7 +1,7 @@
 """
 단일 진입점. 명령별 실행:
 
-  python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). --mode record 로 오프스크린 녹화
+  python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). 기본 topic은 fruit store. --mode record 로 오프스크린 녹화
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
 
 테이블 CSV 생성은 배치 파일에서만 실행 (create_all_csv.bat → run_create_new_tables_csv.py).
@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# `python main.py studio` / F5: `--topic` 생략 시 사용. CSV의 topic·vocabulary_word_rows.topic과 동일한 문자열이어야 한다.
+DEFAULT_STUDIO_TOPIC = "fruit_store"
 
 # =============================================================================
 # 배치 파이프라인: 영상 길이·렌더·mux
@@ -399,11 +402,11 @@ def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--topic",
         type=str,
-        default="",
+        default=DEFAULT_STUDIO_TOPIC,
         metavar="TOPIC",
         help=(
             "회화+단어 디버그: topic이 일치하는 회화 항목·vocabulary_word_rows만 사용. "
-            "여러 개는 쉼표 또는 |. 비우면 전체(단어 목록은 재생 항목의 topic으로 테이블 조회)."
+            f"기본값: {DEFAULT_STUDIO_TOPIC!r}. 여러 개는 쉼표 또는 |."
         ),
     )
 

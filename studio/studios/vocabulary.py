@@ -29,11 +29,16 @@ logger = logging.getLogger(__name__)
 
 # --- 레이아웃 (뷰포트 비율) ---
 _LEFT_PANEL_RATIO = 0.20
-_RIGHT_UPPER_RATIO = 0.40  # 메인 영역(헤더 제외) 높이 중 상단 단어 정보 비율
+_RIGHT_UPPER_RATIO = 0.55  # 우측 메인 높이 중 상단(단어 정보) 비율 — 클수록 연상/획순 슬롯은 더 아래·세로 비중 감소
 _LIST_ROW_H = 56
 _LIST_SCROLL_STEP = 48
-_HEADER_H = 72
+_HEADER_H = 48  # 제목 한 줄만 (조작 안내 문구 없음)
 _LOWER_GAP = 10  # 하단 좌·우 슬롯 사이
+# 하단 슬롯 가로 비율: 연상 이미지(왼) : 획순 애니메이션(오) — 오른쪽이 더 넓게
+_LOWER_SLOT_WIDTH_RATIO_IMG = 3
+_LOWER_SLOT_WIDTH_RATIO_STROKE = 7
+_LOWER_SLOTS_TOP_PAD = 22  # 구분선 아래 ~슬롯 시작까지 여백 (슬롯 y를 더 내림)
+_LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
 
 
 def _resolve_conversation_render_settings(config: Any) -> ConversationRenderSettings:
@@ -285,14 +290,9 @@ class VocabularyStudio:
 
         w, h = int(config.width), int(config.height)
         title = self._font_title.render("단어 정리", True, (230, 230, 235))
-        screen.blit(title, (24, 20))
-
-        hint = self._font_hint.render(
-            "SPACE/Enter: 완료 · ↑↓/k j: 단어 · 휠: 목록 스크롤",
-            True,
-            (140, 140, 150),
-        )
-        screen.blit(hint, (24, 48))
+        title_x = (w - title.get_width()) // 2
+        title_y = max(0, (_HEADER_H - title.get_height()) // 2)
+        screen.blit(title, (title_x, title_y))
 
         main_top = _HEADER_H
         main_h = max(1, h - main_top)
@@ -378,10 +378,13 @@ class VocabularyStudio:
         line_kv("품사 (POS)", pos)
 
         # --- 하단: 연상 이미지 | 획순 슬롯 ---
-        slot_y = lower_top + 8
-        slot_h = max(80, lower_h - 16)
-        half_gap = _LOWER_GAP // 2
-        img_slot_w = (right_w - 40 - _LOWER_GAP) // 2
+        slot_y = lower_top + _LOWER_SLOTS_TOP_PAD
+        slot_h = max(1, lower_h - _LOWER_SLOTS_TOP_PAD - _LOWER_SLOTS_BOTTOM_PAD)
+        # 우측 패널 좌우 20px 여백, 가운데 `_LOWER_GAP`, 남은 폭을 비율 상수대로 분할
+        _rsum = _LOWER_SLOT_WIDTH_RATIO_IMG + _LOWER_SLOT_WIDTH_RATIO_STROKE
+        lower_inner_w = max(1, right_w - 40 - _LOWER_GAP)
+        img_slot_w = (lower_inner_w * _LOWER_SLOT_WIDTH_RATIO_IMG) // _rsum
+        stroke_slot_w = lower_inner_w - img_slot_w
         img_slot_x = right_x + 20
         stroke_slot_x = img_slot_x + img_slot_w + _LOWER_GAP
 
@@ -392,7 +395,7 @@ class VocabularyStudio:
             screen.blit(t, (rect.x + 10, rect.y + 8))
 
         img_rect = pygame.Rect(img_slot_x, slot_y, img_slot_w, slot_h)
-        stroke_rect = pygame.Rect(stroke_slot_x, slot_y, img_slot_w, slot_h)
+        stroke_rect = pygame.Rect(stroke_slot_x, slot_y, stroke_slot_w, slot_h)
 
         draw_slot_frame(img_rect, "연상 이미지")
         draw_slot_frame(stroke_rect, "획순 애니메이션 (준비 중)")
