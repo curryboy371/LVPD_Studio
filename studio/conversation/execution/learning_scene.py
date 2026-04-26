@@ -187,7 +187,20 @@ class LearningScene(FSMConversationStep):
     # Item Sync
     # ------------------------
     def _item_key(self, item: ConversationItemLike):
-        return (item.get("id"), item.get("start_time"), item.get("end_time"))
+        """PracticeScene._playback_item_key와 동일 규칙으로 topic·id·index·구간을 맞춘다."""
+        topic_key = str(item.get("topic") or "").strip().lower()
+        raw_id = item.get("id")
+        try:
+            id_key = int(float(str(raw_id).strip())) if raw_id not in (None, "") else None
+        except (TypeError, ValueError):
+            id_key = raw_id
+        try:
+            idx_key = int(item.get("index", -1))
+        except (TypeError, ValueError):
+            idx_key = -1
+        st = float(item.get("start_time", 0.0) or 0.0)
+        et = float(item.get("end_time", -1.0) or -1.0)
+        return (topic_key, id_key, idx_key, st, et)
 
     def sync_item(self, item):
         key = self._item_key(item)

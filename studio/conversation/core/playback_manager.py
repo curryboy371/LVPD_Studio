@@ -48,6 +48,7 @@ class PlaybackManager:
         scene_sequence: Sequence[SceneKind] | None = None,
         last_scene_sequence_policy: LastSceneSequencePolicy = LastSceneSequencePolicy.STAY,
     ) -> None:
+        # `build_data_list`에서 topic·id 순으로 이미 정렬된 목록을 기대한다(다음 항목은 index+1).
         self._items = list(items)
         self._scenes: dict[SceneKind, IConversationStep] = dict(scenes)
         self._video_player = video_player
@@ -65,6 +66,18 @@ class PlaybackManager:
 
         if self._items:
             self._apply_item_to_video(self.current_item())
+
+    def _flush_stale_step_state(self) -> None:
+        """항목 인덱스가 바뀔 때 LEARNING/PRACTICE 슬롯의 잔류 FSM·sub_variants를 비운다.
+
+        `next_item()`이 VIDEO만 `_reset_scene`하면, PRACTICE는 이전 항목의
+        `_active_item_key`·SHOW_SUB_CONTENT가 남아 다음 base와 키가 우연히 같을 때
+        잘못된 sub 순서가 반복될 수 있다.
+        """
+        for kind in (SceneKind.LEARNING, SceneKind.PRACTICE):
+            sc = self._scenes.get(kind)
+            if sc is not None:
+                sc.reset(clear_background=True)
 
     # ---------------------------------------------------------
     # Public APIs
@@ -284,57 +297,30 @@ class PlaybackManager:
     def _handle_last_scene(self, scene: IConversationStep) -> None:
         scene.transition_signal = False
         if self._last_scene_policy == LastSceneSequencePolicy.ADVANCE_ITEM:
-            self.next_item()
+            # 마지막 항목 PRACTICE까지 끝나면 next_item()을 호출하면 index가 그대로라 VIDEO부터 같은 항목이 무한 반복된다.
+            cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
+            if cur < len(self._items) - 1:
+                self.next_item()
         else:
             scene.is_done = False # 다시 머무름
 
     def next_item(self) -> None:
-        """다음 아이템으로 이동하고 시퀀스 첫 장면으로 돌린다. `common_bg` 잔상은 `_reset_scene`으로 유지."""
+        """다음 아이템으로 이동하고 시퀀스 첫 장면(VIDEO)으로 돌린다.
+
+        재생 목록은 `build_data_list`에서 topic·id 순으로 정렬된다.
+        마지막 항목에서는 인덱스를 바꾸지 않는다(자동 종료 후 무한 반복·SPACE 무동작).
+        """
         if not self._items:
             return
-        next_index = self._find_next_item_index_same_topic_then_fallback()
-        self.state.item_index = max(0, min(len(self._items) - 1, next_index))
+        cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
+        if cur >= len(self._items) - 1:
+            return
+        self.state.item_index = cur + 1
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
         self.state.scene_kind = self._scene_sequence[0]
+        self._flush_stale_step_state()
         self._reset_scene(self.state.scene_kind)
-
-    def _find_next_item_index_same_topic_then_fallback(self) -> int:
-        """현재 item 기준으로 같은 topic의 다음 id를 우선 탐색한다.
-
-        - 우선순위 1: 같은 topic && id가 현재보다 큰 항목 중 id 최소값
-        - 우선순위 2: 기존 동작(index + 1)
-        """
-        current_idx = max(0, min(len(self._items) - 1, int(self.state.item_index)))
-        current = self._items[current_idx] if self._items else {}
-        current_topic = str(current.get("topic") or "").strip()
-        current_id = self._to_int_or_none(current.get("id"))
-
-        if current_topic and current_id is not None:
-            best_idx: int | None = None
-            best_id: int | None = None
-            for idx, item in enumerate(self._items):
-                item_topic = str(item.get("topic") or "").strip()
-                if item_topic != current_topic:
-                    continue
-                item_id = self._to_int_or_none(item.get("id"))
-                if item_id is None or item_id <= current_id:
-                    continue
-                if best_id is None or item_id < best_id:
-                    best_id = item_id
-                    best_idx = idx
-            if best_idx is not None:
-                return best_idx
-
-        return min(current_idx + 1, len(self._items) - 1)
-
-    @staticmethod
-    def _to_int_or_none(value: Any) -> int | None:
-        """id 비교를 위해 값을 int로 안전 변환한다."""
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
 
     def prev_item(self) -> None:
         if not self._items:
@@ -343,6 +329,7 @@ class PlaybackManager:
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
         self.state.scene_kind = self._scene_sequence[0]
+        self._flush_stale_step_state()
         self._reset_scene(self.state.scene_kind)
 
     def toggle_pause(self) -> None:

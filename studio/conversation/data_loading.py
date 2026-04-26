@@ -41,6 +41,17 @@ def _raw_sentence_to_words(raw: str) -> list[str]:
     return [str(x).strip() for x in re.findall(r"\{([^}]*)\}", raw) if str(x).strip()]
 
 
+def _copy_sub_variants_list(raw: Any) -> list[dict]:
+    """항목 간 sub_variants 리스트·딕셔너리 공유로 이전 base 변형이 섞이지 않게 복사한다."""
+    if not isinstance(raw, list) or not raw:
+        return []
+    out: list[dict] = []
+    for v in raw:
+        if isinstance(v, dict):
+            out.append(dict(v))
+    return out
+
+
 def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     """테이블 행 하나를 재생용 base 항목 딕셔너리로 변환."""
     topic = (row.get("topic") or "").strip()
@@ -113,7 +124,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         "index": index,
         "type": "base",
         "slot_index": 0,
-        "sub_variants": list(row.get("sub_variants") or []),
+        "sub_variants": _copy_sub_variants_list(row.get("sub_variants")),
     }
 
 
@@ -130,6 +141,34 @@ def _data_list_from_csv_rows(rows: list[dict], *, repo: Path) -> list[dict]:
         row = dict(row)
         # csv loader가 id/topic/video_path/start_time/end_time을 제공한다고 가정
         out.append(_row_to_base_item(row, i, repo))
+    return out
+
+
+def _sort_data_list_for_playback(data_list: list[dict]) -> list[dict]:
+    """topic → 숫자 id 순으로 재생 목록을 고정한다.
+
+    CSV 행 순서와 무관하게 id 1 전체(VIDEO→LEARNING→PRACTICE→sub…) 후 id 2가 오도록 한다.
+    """
+    if len(data_list) <= 1:
+        return data_list
+
+    def sort_key(idx_item: tuple[int, dict]) -> tuple[str, int, int]:
+        i, row = idx_item
+        topic = str(row.get("topic") or "").strip().lower()
+        raw_id = row.get("id")
+        try:
+            idv = int(float(str(raw_id).strip())) if raw_id not in (None, "") else 10**9
+        except (TypeError, ValueError):
+            idv = 10**9
+        return (topic, idv, i)
+
+    order = sorted(range(len(data_list)), key=lambda j: sort_key((j, data_list[j])))
+    out = []
+    for new_index, j in enumerate(order):
+        row = dict(data_list[j])
+        row["index"] = new_index
+        row["sub_variants"] = _copy_sub_variants_list(row.get("sub_variants"))
+        out.append(row)
     return out
 
 
@@ -393,6 +432,7 @@ def _attach_sub_variants_to_base_rows(
             sid = 0
         variants = sub_rows_by_base_id.get(sid) or []
         if not variants:
+            row.pop("sub_variants", None)
             continue
         raw_sentence = str(row.get("raw_sentence") or "").strip()
         sub_variants: list[dict] = []
@@ -480,7 +520,7 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
         content: 기존 호환용(이번 리팩터링에서는 사용하지 않음).
 
     Returns:
-        render에 필요한 최소 키를 포함한 dict 리스트.
+        render에 필요한 최소 키를 포함한 dict 리스트(topic·숫자 id 오름차순, index 재부여).
     """
     _ = content
 
@@ -491,6 +531,8 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
         rows = _load_conversation_csv(csv_path)
         # conversation CSV 경로를 쓰더라도, sub_sentences.csv 기반 활용 문장 정보를
         # 붙여야 PRACTICE의 SHOW_SUB_CONTENT 단계로 정상 전환된다.
+        words_by_id: dict[int, str] = {}
+        sub_rows_by_base_id: dict[int, list[dict]] = {}
         try:
             from core.paths import (
                 DEFAULT_BASE_SENTENCES_CSV,
@@ -527,17 +569,21 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
                     row["raw_sentence"] = raw_sentence_by_id.get(sid, "")
                 if sid and not str(row.get("words") or "").strip():
                     row["words"] = words_by_id_map.get(sid, "")
-
-            rows = _attach_sub_variants_to_base_rows(
-                rows,
-                words_by_id=words_by_id,
-                sub_rows_by_base_id=sub_rows_by_base_id,
-            )
         except Exception:
             # 활용 데이터 보강 실패 시에도 base 재생은 유지한다.
             pass
+        # base당 1행으로 id를 확정한 뒤에 sub_variants를 붙인다(merge 전 attach 시 sid/행 불일치 방지).
         rows = _normalize_table_rows_one_per_base(rows)
-        return _data_list_from_csv_rows(rows, repo=repo)
+        try:
+            if words_by_id and sub_rows_by_base_id:
+                rows = _attach_sub_variants_to_base_rows(
+                    rows,
+                    words_by_id=words_by_id,
+                    sub_rows_by_base_id=sub_rows_by_base_id,
+                )
+        except Exception:
+            pass
+        return _sort_data_list_for_playback(_data_list_from_csv_rows(rows, repo=repo))
 
     # 2) 기본 CSV: resource/csv/base_sentences.csv 직접 로드
     try:
@@ -570,7 +616,7 @@ def build_data_list(csv_path: str, content: Any = None) -> list[dict]:
             sub_rows_by_base_id=sub_rows_by_base_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)
-        return _data_list_from_csv_rows(base_rows, repo=repo)
+        return _sort_data_list_for_playback(_data_list_from_csv_rows(base_rows, repo=repo))
     except Exception as e:
         logging.getLogger(__name__).debug("base_sentences CSV direct load failed: %s", e, exc_info=True)
     return []

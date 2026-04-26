@@ -88,10 +88,49 @@ class PracticeScene(IConversationStep):
         super().reset(clear_background=clear_background)
         if clear_background:
             self._active_item_key = None
+            self._set_stage(self.Stage.TITLE)
+            self._content_visible = False
+            self._title_wait_remaining_sec = 0.0
+            self._content_wait_remaining_sec = 0.0
+            self._sub_variants = []
+            self._sub_variant_index = 0
+            self._current_sub_variant = None
+            self._sub_content_wait_remaining_sec = 0.0
+            self._sub_content_wait_total_sec = 0.0
+            self._sub_content_sound_sec = 0.0
+            self.drawer.hide_now(self._title_channel)
+            self.drawer.hide_now(self._sentence_channel)
+
+    def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
+        """항목만 바뀌고 슬롯 리셋이 빠진 경우에도 이전 base의 sub가 남지 않게 한다."""
+        key = self._playback_item_key(item)
+        if self.is_done and self._active_item_key is not None and key != self._active_item_key:
+            self.is_done = False
+            self.transition_signal = False
+        if self.is_done:
+            return
+        self.on_update(ctx, item=item)
 
     def _set_stage(self, stage: "PracticeScene.Stage") -> None:
         """연습 장면 내부 Stage를 전환한다."""
         self.stage = stage
+
+    @staticmethod
+    def _playback_item_key(item: ConversationItemLike) -> tuple:
+        """아이템 전환 판별용 키. topic·id·index·구간으로 구분한다(동일 id 다른 topic 등)."""
+        topic_key = str(item.get("topic") or "").strip().lower()
+        raw_id = item.get("id")
+        try:
+            id_key = int(float(str(raw_id).strip())) if raw_id not in (None, "") else None
+        except (TypeError, ValueError):
+            id_key = raw_id
+        try:
+            idx_key = int(item.get("index", -1))
+        except (TypeError, ValueError):
+            idx_key = -1
+        st = float(item.get("start_time", 0.0) or 0.0)
+        et = float(item.get("end_time", -1.0) or -1.0)
+        return (topic_key, id_key, idx_key, st, et)
 
     def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """아이템이 바뀌면 제목을 먼저 fade in 하고, 끝난 뒤 문장/단어를 노출한다."""
@@ -99,7 +138,7 @@ class PracticeScene(IConversationStep):
         dt = float(ctx.dt_sec)
         self.drawer.fade_tick(dt)
 
-        key = (item.get("id"), item.get("start_time"), item.get("end_time"))
+        key = self._playback_item_key(item)
         if key != self._active_item_key:
             self._active_item_key = key
             # 새 아이템 진입 시에는 본문을 숨기고 제목 페이드부터 진행한다.
@@ -175,7 +214,7 @@ class PracticeScene(IConversationStep):
             replaced = str(variant.get("replaced_sentence") or "").strip()
             if not replaced:
                 continue
-            valid.append(variant)
+            valid.append(dict(variant))
         return valid
 
     def _start_current_sub_variant_audio_and_get_wait(self) -> float:
