@@ -8,6 +8,8 @@ import pygame
 
 def draw_paused_and_debug(studio: Any, screen: Any, config: Any) -> None:
     """일시정지 라벨 및 디버그 오버레이."""
+    if not getattr(config, "show_debug_overlay", True):
+        return
     if studio._video_player.is_paused():
         if studio._paused_label is None:
             font_kr = studio._font_kr or pygame.font.Font(None, 36)

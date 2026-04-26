@@ -55,6 +55,8 @@ class StudioConfig:
         self.bg_color = (20, 20, 25)
         self.dt_sec: float = 1.0 / float(fps)
         self.actual_fps: float = 0.0
+        # False면 ConversationStudio 등에서 FPS/PTS 등 화면 디버그 오버레이를 그리지 않음(녹화 모드용).
+        self.show_debug_overlay: bool = True
 
     def get_pos(self, rx: float, ry: float) -> tuple[int, int]:
         """0.0~1.0 비율 좌표를 절대 좌표로."""
@@ -298,6 +300,7 @@ def _run_record(
     recording_events: list = []
     config.recording_time_sec = 0.0
     config.recording_log_event = lambda ev: recording_events.append(ev)
+    config.show_debug_overlay = False
 
     target_frames = (
         record_frames
@@ -356,6 +359,7 @@ def _run_record(
         recorder.stop()
         config.recording_log_event = None
         config.recording_time_sec = 0.0
+        config.show_debug_overlay = True
 
     print("[rec] 녹화 완료:", frames_written, "프레임")
     if record_until_content_done and stopped_by_content:

@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple
 
 from utils.pinyin_processor import get_pinyin_processor
 
@@ -402,6 +402,40 @@ def _replace_slot_in_raw_sentence(raw_sentence: str, *, target_slot_order: int, 
     return _raw_sentence_to_display(replaced_raw)
 
 
+def _display_alt_hanzi_span(
+    raw_sentence: str, *, target_slot_order: int, alt_word: str
+) -> Optional[Tuple[int, int]]:
+    """`raw_sentence` 슬롯 중 `target_slot_order`번을 `alt_word`로 바꾼 display 문장에서 그 한자 구간 [시작, 길이).
+
+    `_replace_slot_in_raw_sentence`가 만든 `replaced_sentence`와 같은 좌표계.
+    """
+    w = (alt_word or "").strip()
+    if not raw_sentence or target_slot_order < 0 or not w:
+        return None
+    slot_i = -1
+    display_pos = 0
+    i = 0
+    n = len(raw_sentence)
+    while i < n:
+        if raw_sentence[i] == "{":
+            end = raw_sentence.find("}", i + 1)
+            if end < 0:
+                return None
+            slot_i += 1
+            inner = raw_sentence[i + 1 : end]
+            if slot_i == target_slot_order:
+                return display_pos, len(w)
+            display_pos += len(inner)
+            i = end + 1
+        else:
+            j = i
+            while j < n and raw_sentence[j] != "{":
+                j += 1
+            display_pos += j - i
+            i = j
+    return None
+
+
 def _attach_sub_variants_to_base_rows(
     base_rows: list[dict],
     *,
@@ -438,16 +472,21 @@ def _attach_sub_variants_to_base_rows(
             )
             if not replaced_sentence:
                 continue
-            sub_variants.append(
-                {
-                    "target_slot_order": slot_order,
-                    "alt_word_id": alt_word_id,
-                    "alt_word": alt_word,
-                    "replaced_sentence": replaced_sentence,
-                    "alt_translation": str(v.get("alt_translation") or "").strip(),
-                    "alt_sound_path": alt_sound_path,
-                }
+            span = _display_alt_hanzi_span(
+                raw_sentence, target_slot_order=slot_order, alt_word=alt_word
             )
+            variant_dict: dict[str, Any] = {
+                "target_slot_order": slot_order,
+                "alt_word_id": alt_word_id,
+                "alt_word": alt_word,
+                "replaced_sentence": replaced_sentence,
+                "alt_translation": str(v.get("alt_translation") or "").strip(),
+                "alt_sound_path": alt_sound_path,
+            }
+            if span is not None:
+                variant_dict["alt_hanzi_start"] = int(span[0])
+                variant_dict["alt_hanzi_len"] = int(span[1])
+            sub_variants.append(variant_dict)
         if sub_variants:
             # LearningScene의 전용 Stage에서 바로 사용할 공통 키.
             row["sub_variants"] = sub_variants

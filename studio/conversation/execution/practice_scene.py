@@ -292,7 +292,7 @@ class PracticeScene(IConversationStep):
             }
 
         # SHOW_SUB_CONTENT에서는 기본 한자색을 흰색으로 그리고,
-        # 변경된 단어(alt_word)만 노란색으로 오버레이한다.
+        # 슬롯에 들어간 alt_word 구간만 연습색(AMBER)으로 오버레이한다.
         if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
             self._draw_sub_sentence_with_highlight(
                 screen,
@@ -333,7 +333,9 @@ class PracticeScene(IConversationStep):
     ) -> None:
         """SHOW_SUB_CONTENT용 한자 하이라이트 렌더.
 
-        기본 한자 줄은 흰색으로 그리고, 교체된 단어(alt_word)만 기존 연습 색상(노란색)으로 덮어쓴다.
+        기본 한자 줄은 흰색으로 그리고, `target_slot_order`에 넣은 `alt_word` 구간만
+        기존 연습 색상(AMBER)으로 덮어쓴다. `alt_hanzi_start`/`alt_hanzi_len`이 있으면
+        슬롯 좌표를 쓰고, 없으면 `alt_word`의 첫 부분 문자열 매칭으로 폴백한다.
         """
         white_style = replace(
             self._style,
@@ -350,11 +352,7 @@ class PracticeScene(IConversationStep):
 
         replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
         alt_word = str(self._current_sub_variant.get("alt_word") or "").strip()
-        base_sentence = ""
-        base_sentences = base_item.get("sentence") or []
-        if base_sentences:
-            base_sentence = str(base_sentences[0]).strip()
-        if not replaced_sentence or not alt_word or replaced_sentence == base_sentence:
+        if not replaced_sentence or not alt_word:
             return
 
         data = build_sentence_render_data_with_tone_icons(render_item)
@@ -371,8 +369,23 @@ class PracticeScene(IConversationStep):
         hanzi_text = (data.sentence or "")[: white_style.text.max_hanzi]
         if not hanzi_text:
             return
-        idx = hanzi_text.find(alt_word)
-        if idx < 0:
+
+        idx: int
+        span_len: int
+        start_raw = self._current_sub_variant.get("alt_hanzi_start")
+        len_raw = self._current_sub_variant.get("alt_hanzi_len")
+        if isinstance(start_raw, int) and isinstance(len_raw, int) and len_raw > 0:
+            idx = start_raw
+            span_len = len_raw
+        else:
+            idx = hanzi_text.find(alt_word)
+            if idx < 0:
+                return
+            span_len = len(alt_word)
+        if idx < 0 or idx >= len(hanzi_text):
+            return
+        span_len = min(span_len, len(hanzi_text) - idx)
+        if span_len <= 0:
             return
 
         # 별도 폰트를 만들지 않고, _sentence_channel이 쓰는 메인 한자 폰트 체계를 그대로 사용한다.
@@ -396,7 +409,7 @@ class PracticeScene(IConversationStep):
         x_line = max(white_style.layout.min_margin_x, center_x - full_w // 2)
 
         prefix = hanzi_text[:idx]
-        target = hanzi_text[idx : idx + len(alt_word)]
+        target = hanzi_text[idx : idx + span_len]
         if not target:
             return
         if prefix:
