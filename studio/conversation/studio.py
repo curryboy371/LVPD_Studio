@@ -323,6 +323,8 @@ class ConversationStudio:
                             ),
                         )
                         self._recording_video_segment_open = True
+                # 추출이 끝난 직후 짧은 구간이면 이미 비디오만 끝난 상태일 수 있음 → 오디오도 즉시 멈춤
+                self._sync_video_audio_pause_at_segment_end()
         except Exception:
             pass
 
@@ -334,6 +336,8 @@ class ConversationStudio:
                 self._apply_media_for_index(cur)
 
         self._maybe_recording_start_video_segment_no_sidecar_mp3(config)
+
+        self._sync_video_audio_pause_at_segment_end()
 
     def draw(self, screen: Any, config: Any) -> None:
         """배경 채우기 후 현재 Step 화면을 그리고 일시정지·디버그 오버레이를 덧씌운다."""
@@ -411,6 +415,16 @@ class ConversationStudio:
                 VideoSegmentStart(timeline_sec=tl, video_path=vpath, video_pts_sec=pts),
             )
             self._recording_video_segment_open = True
+        except Exception:
+            pass
+
+    def _sync_video_audio_pause_at_segment_end(self) -> None:
+        """비디오 PTS가 end_time(또는 파일 끝)에 도달해 멈춘 경우 사이드카 MP3 재생도 일시정지한다."""
+        try:
+            end_sec = float(self._video_player.get_effective_end_sec())
+            pts = float(self._video_player.get_pts())
+            if self._video_player.is_paused() and pts >= end_sec - 1e-3:
+                self._video_audio.pause()
         except Exception:
             pass
 
