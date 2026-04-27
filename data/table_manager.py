@@ -36,6 +36,48 @@ _vocabulary_word_rows: list[VocabularyWordRow] | None = None
 _table: list[dict[str, Any]] | None = None
 
 
+def _build_stem_index(base_dir: Path, pattern: str) -> dict[str, str]:
+    """디렉터리 하위를 재귀 순회해 stem(확장자 제외 파일명) -> 상대경로 인덱스를 만든다."""
+    if not base_dir.exists():
+        return {}
+
+    repo_root = base_dir.parents[1]
+    index: dict[str, str] = {}
+    for fp in base_dir.rglob(pattern):
+        if not fp.is_file():
+            continue
+        key = fp.stem.strip()
+        if not key or key in index:
+            continue
+        try:
+            index[key] = str(fp.relative_to(repo_root)).replace("\\", "/")
+        except ValueError:
+            continue
+    return index
+
+
+def _resolve_media_path_from_name(
+    raw_value: str,
+    stem_index: dict[str, str],
+) -> str:
+    """CSV 값이 파일명이면 인덱스로 실제 경로를 찾아 반환한다."""
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    if "/" in value or "\\" in value:
+        return value.replace("\\", "/")
+
+    as_path = Path(value)
+    if as_path.suffix:
+        return value.replace("\\", "/")
+
+    hit = stem_index.get(value)
+    if hit:
+        return hit
+
+    return value
+
+
 def _str(val: Any) -> str:
     if val is None:
         return ""
@@ -55,6 +97,15 @@ def _to_float(val: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return max(0.0, x)
+
+
+def _normalize_pipe_list(val: Any) -> str:
+    """'a| b | |c' -> 'a|b|c' 형태로 정규화한다."""
+    raw = _str(val)
+    if not raw:
+        return ""
+    items = [x.strip() for x in raw.split("|") if x.strip()]
+    return "|".join(items)
 
 
 # ---------------------------------------------------------------------------
@@ -130,26 +181,34 @@ def load_words_table_from_csv(
     encoding: str = "utf-8-sig",
 ) -> list[Word]:
     """words.csv를 읽어 Word 리스트로 반환하고 저장소에 저장."""
+    from core.paths import get_repo_root
+
     path = Path(csv_path)
     if not path.exists():
         logger.warning("words CSV 없음: %s", path)
         set_words([])
         return []
 
+    repo_root = get_repo_root()
+    image_index = _build_stem_index(repo_root / "resource" / "image", "*")
+    sound_index = _build_stem_index(repo_root / "resource" / "sound", "*.mp3")
+
     out: list[Word] = []
     with open(path, encoding=encoding, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
+                img_raw = _str(row.get("img_path"))
+                sound_raw = _str(row.get("sound_path"))
                 out.append(
                     Word(
                         id=_to_int(row.get("id"), 0),
                         word=_str(row.get("word")),
                         pinyin=_str(row.get("pinyin")),
-                        pos=_str(row.get("pos")),
-                        meaning=_str(row.get("meaning")),
-                        img_path=_str(row.get("img_path")),
-                        sound_path=_str(row.get("sound_path")),
+                        pos=_normalize_pipe_list(row.get("pos")),
+                        meaning=_normalize_pipe_list(row.get("meaning")),
+                        img_path=_resolve_media_path_from_name(img_raw, image_index),
+                        sound_path=_resolve_media_path_from_name(sound_raw, sound_index),
                     )
                 )
             except Exception as e:

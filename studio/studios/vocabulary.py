@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,6 +24,7 @@ from studio.conversation.tools.fonts import (
     RED,
     WHITE,
 )
+from utils.pinyin_processor import get_pinyin_processor
 from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_korean
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,25 @@ _LOWER_SLOT_WIDTH_RATIO_IMG = 3
 _LOWER_SLOT_WIDTH_RATIO_STROKE = 7
 _LOWER_SLOTS_TOP_PAD = 22  # 구분선 아래 ~슬롯 시작까지 여백 (슬롯 y를 더 내림)
 _LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
+_AUTO_HOLD_SEC = 1.0
+_GAUGE_H = 18
+_GAUGE_PAD_TOP = 10
+
+# 품사 색상 테이블 (정확 매칭 우선, 미매칭은 기본 회색)
+_POS_COLOR_TABLE: dict[str, tuple[int, int, int]] = {
+    "명사": (120, 185, 255),
+    "동사": (255, 160, 105),
+    "형용사": (165, 230, 155),
+    "부사": (200, 170, 255),
+    "대명사": (255, 205, 120),
+    "수사": (120, 220, 210),
+    "양사": (250, 170, 210),
+    "조사": (185, 185, 195),
+    "감탄사": (255, 145, 170),
+    "접속사": (170, 190, 255),
+    "개사": (215, 205, 150),
+}
+_POS_DEFAULT_COLOR: tuple[int, int, int] = GRAY_MUTED
 
 
 def _resolve_conversation_render_settings(config: Any) -> ConversationRenderSettings:
@@ -118,12 +139,25 @@ class VocabularyStudio:
         self._font_cn_hero: Optional[pygame.font.Font] = None
         self._font_cn: Optional[pygame.font.Font] = None
         self._font_kr: Optional[pygame.font.Font] = None
+        self._font_cn_detail: Optional[pygame.font.Font] = None
+        self._font_cn_hero_detail: Optional[pygame.font.Font] = None
+        self._font_kr_detail: Optional[pygame.font.Font] = None
+        self._font_kr_pos_detail: Optional[pygame.font.Font] = None
         self._font_hint: Optional[pygame.font.Font] = None
         self._font_title: Optional[pygame.font.Font] = None
         self._recording_done: bool = False
         self._list_scroll_px: int = 0
         self._selected_index: int = 0
         self._image_cache: dict[tuple[int, str], pygame.Surface] = {}
+        self._sound_len_cache: dict[str, float] = {}
+        self._auto_started: bool = False
+        self._auto_phase: str = "play_sound"
+        self._auto_phase_elapsed: float = 0.0
+        self._auto_phase_duration: float = 0.0
+        self._auto_cycle_index: int = 0
+        self._auto_sound_path: str = ""
+        self._auto_sound_len: float = 0.0
+        self._auto_rest_gauge_color: tuple[int, int, int] = (90, 220, 120)
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
@@ -132,16 +166,32 @@ class VocabularyStudio:
         settings = _resolve_conversation_render_settings(config)
         fs = settings.font_sizes
 
-        self._font_cn_big = load_font_chinese(fs.cn_big, WHITE)
+        # 회화 모드와 동일한 폰트 로더/기본 크기를 사용한다.
+        cn_big_size = fs.cn_big
+        cn_size = fs.cn
+        kr_size = fs.kr
+
+        self._font_cn_big = load_font_chinese(cn_big_size, WHITE)
         hero_size = min(160, max(72, int(round(fs.cn_big * 1.35))))
         self._font_cn_hero = load_font_chinese(hero_size, WHITE) or self._font_cn_big
-        self._font_cn = load_font_chinese(fs.cn, RED)
-        self._font_kr = load_font_korean(fs.kr, GRAY_MUTED)
+        self._font_cn = load_font_chinese(cn_size, RED)
+        self._font_kr = load_font_korean(kr_size, GRAY_MUTED)
+
+        # 단어장 상세(병음/한자/뜻/품사) 전용 폰트: 회화 모드와 분리된 대형 렌더
+        detail_scale = 2.0
+        cn_detail_size = max(24, int(round(cn_size * detail_scale)))
+        hero_detail_size = max(72, int(round(hero_size * detail_scale)))
+        kr_detail_size = max(24, int(round(kr_size * detail_scale)))
+        pos_detail_size = max(24, int(round(kr_size * detail_scale * 0.82)))
+        self._font_cn_detail = load_font_chinese(cn_detail_size, RED)
+        self._font_cn_hero_detail = load_font_chinese(hero_detail_size, WHITE)
+        self._font_kr_detail = load_font_korean(kr_detail_size, GRAY_MUTED)
+        self._font_kr_pos_detail = load_font_korean(pos_detail_size, GRAY_MUTED)
 
         if self._font_cn_big is None:
             from core.paths import DEFAULT_FONT_DIR, FONT_CN_FILENAME
 
-            self._font_cn_big = attach_font_fgcolor(pygame.font.Font(None, fs.cn_big), WHITE)
+            self._font_cn_big = attach_font_fgcolor(pygame.font.Font(None, cn_big_size), WHITE)
             self._font_cn_hero = attach_font_fgcolor(pygame.font.Font(None, hero_size), WHITE)
             logger.warning(
                 "단어장: 중국어 폰트 미로드 → 기본 폰트(중국어 네모 가능). %s → %s",
@@ -151,13 +201,25 @@ class VocabularyStudio:
         if self._font_cn_hero is None:
             self._font_cn_hero = self._font_cn_big
         if self._font_cn is None:
-            self._font_cn = attach_font_fgcolor(pygame.font.Font(None, fs.cn), RED)
+            self._font_cn = attach_font_fgcolor(pygame.font.Font(None, cn_size), RED)
         if self._font_kr is None:
-            self._font_kr = attach_font_fgcolor(pygame.font.Font(None, fs.kr), GRAY_MUTED)
-
+            self._font_kr = attach_font_fgcolor(pygame.font.Font(None, kr_size), GRAY_MUTED)
+        if self._font_cn_detail is None:
+            self._font_cn_detail = attach_font_fgcolor(pygame.font.Font(None, cn_detail_size), RED)
+        if self._font_cn_hero_detail is None:
+            self._font_cn_hero_detail = attach_font_fgcolor(
+                pygame.font.Font(None, hero_detail_size), WHITE
+            )
+        if self._font_kr_detail is None:
+            self._font_kr_detail = attach_font_fgcolor(pygame.font.Font(None, kr_detail_size), GRAY_MUTED)
+        if self._font_kr_pos_detail is None:
+            self._font_kr_pos_detail = attach_font_fgcolor(
+                pygame.font.Font(None, pos_detail_size), GRAY_MUTED
+            )
         hint_size = max(16, int(round(fs.kr * 0.82)))
         self._font_hint = load_font_korean(hint_size, (140, 140, 150)) or self._font_kr
-        self._font_title = load_font_korean(fs.kr, (230, 230, 235)) or self._font_kr
+        title_size = fs.kr
+        self._font_title = load_font_korean(title_size, (230, 230, 235)) or self._font_kr
 
     def get_title(self) -> str:
         return "LVPD Studio - 단어"
@@ -244,7 +306,8 @@ class VocabularyStudio:
         return True
 
     def update(self, config: Any = None) -> None:
-        _ = config
+        dt = float(getattr(config, "dt_sec", 0.0) or 0.0) if config is not None else 0.0
+        self._tick_auto_sequence(dt)
 
     def _hanzi_only(self, row: VocabularyWordRow) -> str:
         w = get_word(row.word_id)
@@ -253,13 +316,80 @@ class VocabularyStudio:
         return f"(id={row.word_id})"
 
     def _pronunciation_subline(self, row: VocabularyWordRow) -> str:
-        m = (row.pronunciation_mask or "").strip()
-        if m:
-            return m
         w = get_word(row.word_id)
-        if w is not None and (w.pinyin or "").strip():
+        if w is None:
+            return ""
+        mask_raw = (row.pronunciation_mask or "").strip()
+        hanzi = (w.word or "").strip()
+        if hanzi:
+            try:
+                pp = get_pinyin_processor()
+                if pp.available:
+                    lexical_list = pp.get_lexical_pinyin(hanzi)
+                    if lexical_list:
+                        # pronunciation_mask 규칙:
+                        # - 0: 해당 음절 성조 유지
+                        # - 1~5: 해당 음절 성조 강제(5=경성)
+                        # 마스크 길이가 짧으면 남은 음절은 유지한다.
+                        mask_tokens = [m for m in re.split(r"[\s,|]+", mask_raw) if m] if mask_raw else []
+                        if len(mask_tokens) == 1 and len(mask_tokens[0]) == len(lexical_list):
+                            mask_tokens = list(mask_tokens[0])
+                        adjusted: list[str] = []
+                        for i, syl in enumerate(lexical_list):
+                            base, tone = pp._split_tone(syl)  # 기존 모듈 파서 재사용
+                            if not base:
+                                adjusted.append(syl)
+                                continue
+                            cur_tone = int(tone) if tone is not None else 0
+                            if i < len(mask_tokens):
+                                tok = mask_tokens[i].strip()
+                                if tok.isdigit():
+                                    v = int(tok)
+                                    if v == 0:
+                                        pass
+                                    elif 1 <= v <= 5:
+                                        cur_tone = v
+                            adjusted_num = f"{base}{cur_tone}" if cur_tone > 0 else base
+                            adjusted.append(pp.tone3_to_mark(adjusted_num))
+                        generated = " ".join(adjusted).strip()
+                        if generated:
+                            return generated
+            except Exception:
+                pass
+        if (w.pinyin or "").strip():
             return (w.pinyin or "").strip()
         return ""
+
+    def _parse_pos_items(self, pos_raw: str) -> list[str]:
+        """품사 문자열을 다중 항목으로 분리한다. (|, ,, / 지원)"""
+        raw = (pos_raw or "").strip()
+        if not raw:
+            return []
+        parts = re.split(r"[|,/]+", raw)
+        out: list[str] = []
+        seen: set[str] = set()
+        for p in parts:
+            token = p.strip()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            out.append(token)
+        return out
+
+    def _parse_meaning_items(self, meaning_raw: str) -> list[str]:
+        """뜻 문자열을 `|` 기준으로 다중 항목 분리한다."""
+        raw = (meaning_raw or "").strip()
+        if not raw:
+            return []
+        parts = [p.strip() for p in raw.split("|") if p.strip()]
+        out: list[str] = []
+        seen: set[str] = set()
+        for p in parts:
+            if p in seen:
+                continue
+            seen.add(p)
+            out.append(p)
+        return out
 
     def _get_scaled_word_image(self, word_id: int, img_path: str) -> Optional[pygame.Surface]:
         key = (word_id, (img_path or "").strip())
@@ -276,6 +406,109 @@ class VocabularyStudio:
         self._image_cache[key] = surf
         return surf
 
+    def _resolve_sound_abs(self, sound_path: str) -> str:
+        raw = (sound_path or "").strip()
+        if not raw:
+            return ""
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p)
+        return str((get_repo_root().resolve() / raw).resolve())
+
+    def _get_sound_length_sec(self, sound_abs_path: str) -> float:
+        key = (sound_abs_path or "").strip()
+        if not key:
+            return 0.0
+        if key in self._sound_len_cache:
+            return self._sound_len_cache[key]
+        try:
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            length = float(pygame.mixer.Sound(key).get_length() or 0.0)
+        except Exception:
+            length = 0.0
+        self._sound_len_cache[key] = length
+        return length
+
+    def _play_sound_now(self, sound_abs_path: str) -> None:
+        key = (sound_abs_path or "").strip()
+        if not key:
+            return
+        try:
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            snd = pygame.mixer.Sound(key)
+            ch = pygame.mixer.Channel(7)
+            ch.play(snd)
+        except Exception as ex:
+            logger.debug("단어장 사운드 재생 실패: %s", ex)
+
+    def _begin_phase(self, phase: str, duration: float) -> None:
+        self._auto_phase = phase
+        self._auto_phase_duration = max(0.0, float(duration))
+        self._auto_phase_elapsed = 0.0
+        if phase == "play_sound" and self._auto_sound_path:
+            self._play_sound_now(self._auto_sound_path)
+
+    def _setup_current_word_cycle(self) -> None:
+        ordered = self._ordered_rows()
+        if not ordered:
+            return
+        self._clamp_selection(len(ordered))
+        cur = ordered[self._selected_index]
+        w = get_word(cur.word_id)
+        self._auto_sound_path = self._resolve_sound_abs((w.sound_path if w else "") or "")
+        self._auto_sound_len = self._get_sound_length_sec(self._auto_sound_path)
+        self._begin_phase("play_sound", self._auto_sound_len)
+
+    def _advance_to_next_word_or_done(self, rows_count: int) -> None:
+        if self._selected_index >= rows_count - 1:
+            self._recording_done = True
+            return
+        self._selected_index += 1
+        self._auto_cycle_index = 0
+        self._setup_current_word_cycle()
+
+    def _tick_auto_sequence(self, dt_sec: float) -> None:
+        ordered = self._ordered_rows()
+        n = len(ordered)
+        if n <= 0 or self._recording_done:
+            return
+        if not self._auto_started:
+            # 단어장은 항상 id 1(정렬 첫 행)부터 시작
+            self._selected_index = 0
+            self._auto_started = True
+            self._auto_cycle_index = 0
+            self._setup_current_word_cycle()
+            return
+
+        self._auto_phase_elapsed += max(0.0, float(dt_sec))
+        if self._auto_phase_elapsed < self._auto_phase_duration:
+            return
+
+        if self._auto_phase == "play_sound":
+            self._auto_rest_gauge_color = (90, 220, 120)
+            self._begin_phase("wait_1_after_play", _AUTO_HOLD_SEC)
+            return
+        if self._auto_phase == "wait_1_after_play":
+            self._begin_phase("wait_sound_len", self._auto_sound_len)
+            return
+        if self._auto_phase == "wait_sound_len":
+            self._auto_rest_gauge_color = (255, 170, 85)
+            self._begin_phase("wait_1_after_len", _AUTO_HOLD_SEC)
+            return
+        if self._auto_phase == "wait_1_after_len":
+            if self._auto_cycle_index < 1:
+                self._auto_cycle_index += 1
+                self._begin_phase("play_sound", self._auto_sound_len)
+                return
+            self._advance_to_next_word_or_done(n)
+            return
+
     def draw(self, screen: Any, config: Any) -> None:
         bg = getattr(config, "bg_color", (20, 20, 25))
         screen.fill(bg)
@@ -285,11 +518,15 @@ class VocabularyStudio:
         assert self._font_cn_hero is not None
         assert self._font_cn is not None
         assert self._font_kr is not None
+        assert self._font_cn_detail is not None
+        assert self._font_cn_hero_detail is not None
+        assert self._font_kr_detail is not None
+        assert self._font_kr_pos_detail is not None
         assert self._font_hint is not None
         assert self._font_title is not None
 
         w, h = int(config.width), int(config.height)
-        title = self._font_title.render("단어 정리", True, (230, 230, 235))
+        title = self._font_title.render("단어 정리", True, WHITE)
         title_x = (w - title.get_width()) // 2
         title_y = max(0, (_HEADER_H - title.get_height()) // 2)
         screen.blit(title, (title_x, title_y))
@@ -351,31 +588,107 @@ class VocabularyStudio:
         lower_h = main_h - upper_h
         pygame.draw.line(screen, (55, 55, 62), (right_x, lower_top), (w, lower_top), 1)
 
-        rx = right_rect.x + 20
-        ry = main_top + 12
-        hero_text = self._hanzi_only(cur)
-        hero_surf = self._font_cn_hero.render(hero_text, True, (245, 245, 248))
-        screen.blit(hero_surf, (rx, ry))
-        ry += hero_surf.get_height() + 12
-
         pinyin = self._pronunciation_subline(cur)
-        meaning = (word.meaning or "").strip() if word else ""
-        pos = (word.pos or "").strip() if word else ""
+        meaning_items = self._parse_meaning_items((word.meaning or "").strip() if word else "")
+        pos_items = self._parse_pos_items((word.pos or "").strip() if word else "")
+        hero_text = self._hanzi_only(cur)
 
-        def line_kv(label: str, value: str) -> None:
-            nonlocal ry
-            if not value:
-                return
-            lab = self._font_hint.render(label, True, (160, 160, 170))
-            screen.blit(lab, (rx, ry))
-            ry += lab.get_height() + 2
-            val_s = self._font_kr.render(value, True, (210, 210, 218))
-            screen.blit(val_s, (rx, ry))
-            ry += val_s.get_height() + 8
+        # 요청 UI: 병음(빨강) → 한자(흰색, 가장 크게) → 뜻(회색) → 품사(회색), 모두 가운데 정렬
+        # 품사는 전용 폰트(대형)로 렌더링한다.
+        center_x = right_rect.x + right_rect.width // 2
+        top_pad = 14
+        block_items: list[tuple[pygame.Surface, int]] = []
 
-        line_kv("병음 (Pinyin)", pinyin)
-        line_kv("뜻 (Korean)", meaning)
-        line_kv("품사 (POS)", pos)
+        def compose_inline_row(
+            items: list[tuple[str, tuple[int, int, int]]],
+            font: pygame.font.Font,
+            item_gap: int,
+        ) -> Optional[pygame.Surface]:
+            rendered = [font.render(text, True, color) for text, color in items if text]
+            if not rendered:
+                return None
+            if len(rendered) == 1:
+                return rendered[0]
+            total_w = sum(s.get_width() for s in rendered) + item_gap * (len(rendered) - 1)
+            row_h = max(s.get_height() for s in rendered)
+            row = pygame.Surface((max(1, total_w), max(1, row_h)), pygame.SRCALPHA)
+            x = 0
+            for idx, surf in enumerate(rendered):
+                y = (row_h - surf.get_height()) // 2
+                row.blit(surf, (x, y))
+                x += surf.get_width()
+                if idx < len(rendered) - 1:
+                    x += item_gap
+            return row
+
+        if pinyin:
+            block_items.append((self._font_cn_detail.render(pinyin, True, RED), 16))
+        block_items.append((self._font_cn_hero_detail.render(hero_text, True, WHITE), 24))
+        meaning_row = compose_inline_row(
+            [(meaning, GRAY_MUTED) for meaning in meaning_items],
+            self._font_kr_detail,
+            item_gap=36,
+        )
+        if meaning_row is not None:
+            block_items.append((meaning_row, 12))
+        pos_row = compose_inline_row(
+            [(pos, _POS_COLOR_TABLE.get(pos, _POS_DEFAULT_COLOR)) for pos in pos_items],
+            self._font_kr_pos_detail,
+            item_gap=36,
+        )
+        if pos_row is not None:
+            block_items.append((pos_row, 0))
+
+        total_h = 0
+        for idx, (surf, gap_after) in enumerate(block_items):
+            total_h += surf.get_height()
+            if idx < len(block_items) - 1:
+                total_h += gap_after
+        upper_center_y = main_top + (upper_h // 2)
+        start_y = max(main_top + top_pad, upper_center_y - total_h // 2)
+
+        draw_y = start_y
+        for idx, (surf, gap_after) in enumerate(block_items):
+            draw_x = center_x - (surf.get_width() // 2)
+            screen.blit(surf, (draw_x, draw_y))
+            draw_y += surf.get_height()
+            if idx < len(block_items) - 1:
+                draw_y += gap_after
+
+        # 품사 아래 진행 게이지:
+        # - 사운드 재생 구간: 녹색
+        # - 사운드 길이 대기 구간: 주황색
+        gauge_color: Optional[tuple[int, int, int]] = None
+        gauge_progress: Optional[float] = None
+        if self._auto_phase == "play_sound":
+            gauge_color = (90, 220, 120)
+            gauge_progress = (
+                min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
+                if self._auto_phase_duration > 0
+                else 0.0
+            )
+        elif self._auto_phase in ("wait_1_after_play", "wait_1_after_len"):
+            gauge_color = self._auto_rest_gauge_color
+            gauge_progress = 1.0
+        elif self._auto_phase == "wait_sound_len":
+            gauge_color = (255, 170, 85)
+            gauge_progress = (
+                min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
+                if self._auto_phase_duration > 0
+                else 0.0
+            )
+        if gauge_color is not None and gauge_progress is not None:
+            gauge_w = min(max(140, int(right_w * 0.62)), max(140, right_w - 60))
+            gauge_x = right_x + (right_w - gauge_w) // 2
+            gauge_y = int(draw_y + _GAUGE_PAD_TOP)
+            gauge_y = min(gauge_y, lower_top - _GAUGE_H - 8)
+            gauge_y = max(main_top + 6, gauge_y)
+            gauge_bg = pygame.Rect(gauge_x, gauge_y, gauge_w, _GAUGE_H)
+            pygame.draw.rect(screen, (55, 55, 62), gauge_bg, border_radius=8)
+            fill_w = int(gauge_w * min(1.0, max(0.0, gauge_progress)))
+            if fill_w > 0:
+                gauge_fg = pygame.Rect(gauge_x, gauge_y, fill_w, _GAUGE_H)
+                pygame.draw.rect(screen, gauge_color, gauge_fg, border_radius=8)
 
         # --- 하단: 연상 이미지 | 획순 슬롯 ---
         slot_y = lower_top + _LOWER_SLOTS_TOP_PAD
