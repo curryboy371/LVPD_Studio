@@ -61,10 +61,61 @@ async def _render_one_svg(
     size: int,
     fps: int,
     oversample: float = 1.0,
+    active_stroke_color: str = "#35A4FF",
+    done_stroke_color: str = "#8A93A0",
+    fill_color: str = "#5F6773",
+    show_guide: bool = False,
 ) -> None:
     svg_text = svg_path.read_text(encoding="utf-8")
     html = HTML_TEMPLATE.format(size=size, svg=svg_text)
     await page.set_content(html, wait_until="load")
+    await page.evaluate(
+        """
+        (opts) => {
+          // SVG 내부 keyframes 색상 치환:
+          // - 진행 중 획(blue 계열) -> active_stroke_color
+          // - 완료 획(black 계열) -> done_stroke_color
+          document.querySelectorAll("style").forEach((el) => {
+            const src = String(el.textContent || "");
+            let replaced = src;
+            replaced = replaced.replace(/stroke\\s*:\\s*blue\\s*;/gi, `stroke: ${opts.activeStrokeColor};`);
+            replaced = replaced.replace(/stroke\\s*:\\s*#00f(?:f)?\\s*;/gi, `stroke: ${opts.activeStrokeColor};`);
+            replaced = replaced.replace(/stroke\\s*:\\s*black\\s*;/gi, `stroke: ${opts.doneStrokeColor};`);
+            replaced = replaced.replace(/stroke\\s*:\\s*#000(?:000)?\\s*;/gi, `stroke: ${opts.doneStrokeColor};`);
+            if (replaced !== src) {
+              el.textContent = replaced;
+            }
+          });
+
+          const styleId = "lvpd-hanzi-render-style";
+          const old = document.getElementById(styleId);
+          if (old) old.remove();
+          const st = document.createElement("style");
+          st.id = styleId;
+          st.textContent = `
+            path[id^="make-me-a-hanzi-animation-"] {
+              stroke: ${opts.activeStrokeColor} !important;
+              fill: none !important;
+            }
+            path:not([id^="make-me-a-hanzi-animation-"]) {
+              fill: ${opts.fillColor} !important;
+            }
+          `;
+          document.head.appendChild(st);
+          if (!opts.showGuide) {
+            document.querySelectorAll("line").forEach((el) => {
+              el.style.display = "none";
+            });
+          }
+        }
+        """,
+        {
+            "activeStrokeColor": active_stroke_color,
+            "doneStrokeColor": done_stroke_color,
+            "fillColor": fill_color,
+            "showGuide": bool(show_guide),
+        },
+    )
     await page.evaluate(
         """
         () => {
@@ -167,6 +218,10 @@ async def _amain(args) -> None:
                 size=args.size,
                 fps=args.fps,
                 oversample=args.speed,
+                active_stroke_color=args.active_stroke_color,
+                done_stroke_color=args.done_stroke_color,
+                fill_color=args.fill_color,
+                show_guide=args.show_guide,
             )
             print(f"[ok] {svg_path.name} -> {out_dir}")
         await browser.close()
@@ -211,6 +266,29 @@ def main() -> None:
         "--all-svgs",
         action="store_true",
         help="words.csv 추출 대신 resource/svgs 전체를 렌더",
+    )
+    ap.add_argument(
+        "--active-stroke-color",
+        type=str,
+        default="#35A4FF",
+        help="진행 중 획 색상 (CSS color). 기본: #35A4FF",
+    )
+    ap.add_argument(
+        "--done-stroke-color",
+        type=str,
+        default="#8A93A0",
+        help="완료 획 색상 (CSS color). 기본: #8A93A0",
+    )
+    ap.add_argument(
+        "--fill-color",
+        type=str,
+        default="#5F6773",
+        help="한자 채움 색상 (CSS color). 기본: #5F6773",
+    )
+    ap.add_argument(
+        "--show-guide",
+        action="store_true",
+        help="십자/대각선 가이드 라인 표시",
     )
     args = ap.parse_args()
     asyncio.run(_amain(args))

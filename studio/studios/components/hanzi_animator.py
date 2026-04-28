@@ -46,6 +46,8 @@ class HanziAnimator:
         self._auto_render_attempted: set[int] = set()
 
     def set_text(self, text: str, play_speed: float = 1.0) -> None:
+        # 프레임 파일이 재생성됐을 수 있으므로 단어 전환 시 캐시를 비워 최신 PNG를 반영한다.
+        self._surface_cache.clear()
         self._text = (text or "").strip()
         self._play_speed = max(0.1, min(5.0, float(play_speed)))
         self._clips = []
@@ -150,18 +152,19 @@ class HanziAnimator:
     def draw(self, screen: pygame.Surface, rect: pygame.Rect) -> bool:
         if not self._clips or self._clip_index >= len(self._clips):
             return False
-        visible_count = min(self._MAX_VISIBLE_CHARS, len(self._clips))
-        if visible_count <= 0:
+        slot_count = self._MAX_VISIBLE_CHARS
+        draw_count = min(slot_count, len(self._clips))
+        if draw_count <= 0:
             return False
 
         pad_x = max(6, int(rect.width * 0.03))
         gap = max(4, int(rect.width * 0.015))
-        inner_w = max(1, rect.width - pad_x * 2 - gap * (visible_count - 1))
-        cell_w = max(1, inner_w // visible_count)
+        inner_w = max(1, rect.width - pad_x * 2 - gap * (slot_count - 1))
+        cell_w = max(1, inner_w // slot_count)
         cell_h = max(1, rect.height - 12)
         drawn = False
 
-        for i in range(visible_count):
+        for i in range(draw_count):
             clip = self._clips[i]
             if not clip.frame_paths:
                 continue
