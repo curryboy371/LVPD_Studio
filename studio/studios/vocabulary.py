@@ -42,7 +42,10 @@ _LOWER_SLOT_WIDTH_RATIO_IMG = 3
 _LOWER_SLOT_WIDTH_RATIO_STROKE = 7
 _LOWER_SLOTS_TOP_PAD = 22  # 구분선 아래 ~슬롯 시작까지 여백 (슬롯 y를 더 내림)
 _LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
-_AUTO_HOLD_SEC = 1.0
+_AUTO_SOUND_GAP_SEC = 1.5
+_AUTO_SOUND_REPEAT_COUNT = 2
+_AUTO_WAIT_SOUND_LEN_SCALE = 1.5
+_STROKE_FIXED_PLAY_SPEED = 1.15
 _GAUGE_H = 18
 _GAUGE_PAD_TOP = 10
 
@@ -158,9 +161,8 @@ class VocabularyStudio:
         self._auto_cycle_index: int = 0
         self._auto_sound_path: str = ""
         self._auto_sound_len: float = 0.0
-        self._auto_rest_gauge_color: tuple[int, int, int] = (90, 220, 120)
         self._hanzi_animator = HanziAnimator()
-        self._hanzi_anim_key: tuple[int, str, float] | None = None
+        self._hanzi_anim_key: tuple[int, str] | None = None
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
@@ -317,11 +319,11 @@ class VocabularyStudio:
             cur = ordered[self._selected_index]
             w = get_word(cur.word_id)
             hanzi = (w.word or "").strip() if w else ""
-            speed = float(getattr(w, "stroke_play_speed", 1.0) or 1.0) if w else 1.0
-            key = (cur.word_id, hanzi, speed)
+            key = (cur.word_id, hanzi)
             if self._hanzi_anim_key != key:
                 self._hanzi_anim_key = key
-                self._hanzi_animator.set_text(hanzi, play_speed=speed)
+                # 음성과 무관하게 사전 렌더된 프레임을 고정 배속으로 재생한다.
+                self._hanzi_animator.set_text(hanzi, play_speed=_STROKE_FIXED_PLAY_SPEED)
         else:
             if self._hanzi_anim_key is not None:
                 self._hanzi_anim_key = None
@@ -482,6 +484,7 @@ class VocabularyStudio:
         w = get_word(cur.word_id)
         self._auto_sound_path = self._resolve_sound_abs((w.sound_path if w else "") or "")
         self._auto_sound_len = self._get_sound_length_sec(self._auto_sound_path)
+        self._auto_cycle_index = 0
         self._begin_phase("play_sound", self._auto_sound_len)
 
     def _advance_to_next_word_or_done(self, rows_count: int) -> None:
@@ -489,7 +492,6 @@ class VocabularyStudio:
             self._recording_done = True
             return
         self._selected_index += 1
-        self._auto_cycle_index = 0
         self._setup_current_word_cycle()
 
     def _tick_auto_sequence(self, dt_sec: float) -> None:
@@ -501,27 +503,35 @@ class VocabularyStudio:
             # 단어장은 항상 id 1(정렬 첫 행)부터 시작
             self._selected_index = 0
             self._auto_started = True
-            self._auto_cycle_index = 0
             self._setup_current_word_cycle()
             return
 
-        self._auto_phase_elapsed += max(0.0, float(dt_sec))
-        if self._auto_phase_elapsed < self._auto_phase_duration:
+        if self._auto_phase == "play_sound":
+            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            if self._auto_phase_elapsed < self._auto_phase_duration:
+                return
+            self._begin_phase("wait_after_play", _AUTO_SOUND_GAP_SEC)
             return
 
-        if self._auto_phase == "play_sound":
-            self._auto_rest_gauge_color = (90, 220, 120)
-            self._begin_phase("wait_1_after_play", _AUTO_HOLD_SEC)
+        if self._auto_phase == "wait_after_play":
+            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            if self._auto_phase_elapsed >= self._auto_phase_duration:
+                self._begin_phase("wait_sound_len", self._auto_sound_len * _AUTO_WAIT_SOUND_LEN_SCALE)
+                return
             return
-        if self._auto_phase == "wait_1_after_play":
-            self._begin_phase("wait_sound_len", self._auto_sound_len)
-            return
+
         if self._auto_phase == "wait_sound_len":
-            self._auto_rest_gauge_color = (255, 170, 85)
-            self._begin_phase("wait_1_after_len", _AUTO_HOLD_SEC)
+            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            if self._auto_phase_elapsed < self._auto_phase_duration:
+                return
+            self._begin_phase("wait_after_len", _AUTO_SOUND_GAP_SEC)
             return
-        if self._auto_phase == "wait_1_after_len":
-            if self._auto_cycle_index < 1:
+
+        if self._auto_phase == "wait_after_len":
+            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            if self._auto_phase_elapsed < self._auto_phase_duration:
+                return
+            if self._auto_cycle_index + 1 < _AUTO_SOUND_REPEAT_COUNT:
                 self._auto_cycle_index += 1
                 self._begin_phase("play_sound", self._auto_sound_len)
                 return
@@ -674,29 +684,32 @@ class VocabularyStudio:
             if idx < len(block_items) - 1:
                 draw_y += gap_after
 
-        # 품사 아래 진행 게이지:
-        # - 사운드 재생 구간: 녹색
-        # - 사운드 길이 대기 구간: 주황색
+        # 진행 게이지:
+        # - 오디오 재생 구간: 파란색
+        # - 오디오 길이 대기 구간: 주황색
         gauge_color: Optional[tuple[int, int, int]] = None
-        gauge_progress: Optional[float] = None
+        gauge_progress: float = 0.0
         if self._auto_phase == "play_sound":
-            gauge_color = (90, 220, 120)
+            gauge_color = (90, 160, 255)
             gauge_progress = (
                 min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
                 if self._auto_phase_duration > 0
-                else 0.0
+                else 1.0
             )
-        elif self._auto_phase in ("wait_1_after_play", "wait_1_after_len"):
-            gauge_color = self._auto_rest_gauge_color
+        elif self._auto_phase == "wait_after_play":
+            gauge_color = (90, 160, 255)
             gauge_progress = 1.0
         elif self._auto_phase == "wait_sound_len":
             gauge_color = (255, 170, 85)
             gauge_progress = (
                 min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
                 if self._auto_phase_duration > 0
-                else 0.0
+                else 1.0
             )
-        if gauge_color is not None and gauge_progress is not None:
+        elif self._auto_phase == "wait_after_len":
+            gauge_color = (255, 170, 85)
+            gauge_progress = 1.0
+        if gauge_color is not None:
             gauge_w = min(max(140, int(right_w * 0.62)), max(140, right_w - 60))
             gauge_x = right_x + (right_w - gauge_w) // 2
             gauge_y = int(draw_y + _GAUGE_PAD_TOP)

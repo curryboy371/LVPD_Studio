@@ -132,6 +132,15 @@ class HanziAnimator:
     def has_data(self) -> bool:
         return bool(self._clips)
 
+    def is_playing(self) -> bool:
+        return self._playing
+
+    def total_duration_sec(self) -> float:
+        """当前文本（多字顺序播放）的总播放时长(秒)。"""
+        if not self._clips:
+            return 0.0
+        return sum(self._clip_duration(clip) for clip in self._clips)
+
     def update(self, dt_sec: float) -> None:
         if not self._playing or not self._clips:
             return
@@ -194,7 +203,7 @@ class HanziAnimator:
     def _clip_duration(self, clip: _SequenceClip) -> float:
         if clip.fps <= 1e-9 or not clip.frame_paths:
             return 0.0
-        return len(clip.frame_paths) / clip.fps
+        return len(clip.frame_paths) / max(1e-6, clip.fps * self._play_speed)
 
     def _load_clip(self, codepoint: int) -> _SequenceClip | None:
         base = self._frames_root / str(codepoint)
