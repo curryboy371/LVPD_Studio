@@ -159,6 +159,8 @@ class Word(BaseModel):
     meaning: str = Field(default="", description="뜻")
     img_path: str = Field(default="", description="이미지 경로")
     sound_path: str = Field(default="", description="단어 단독 발음 음원 (선택)")
+    stroke_anim_path: str = Field(default="", description="획순 애니메이션 리소스 경로(선택)")
+    stroke_play_speed: float = Field(default=1.0, ge=0.1, le=5.0, description="획순 재생 속도 배수(선택)")
 
 
 class SubSentence(BaseModel):

@@ -108,6 +108,14 @@ def _normalize_pipe_list(val: Any) -> str:
     return "|".join(items)
 
 
+def _to_float_in_range(val: Any, default: float, min_value: float, max_value: float) -> float:
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(max_value, x))
+
+
 # ---------------------------------------------------------------------------
 # Base sentences
 # ---------------------------------------------------------------------------
@@ -209,6 +217,13 @@ def load_words_table_from_csv(
                         meaning=_normalize_pipe_list(row.get("meaning")),
                         img_path=_resolve_media_path_from_name(img_raw, image_index),
                         sound_path=_resolve_media_path_from_name(sound_raw, sound_index),
+                        stroke_anim_path=_str(row.get("stroke_anim_path")),
+                        stroke_play_speed=_to_float_in_range(
+                            row.get("stroke_play_speed"),
+                            default=1.0,
+                            min_value=0.1,
+                            max_value=5.0,
+                        ),
                     )
                 )
             except Exception as e:

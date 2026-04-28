@@ -24,6 +24,7 @@ from studio.conversation.tools.fonts import (
     RED,
     WHITE,
 )
+from studio.studios.components.hanzi_animator import HanziAnimator
 from utils.pinyin_processor import get_pinyin_processor
 from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_korean
 
@@ -158,6 +159,8 @@ class VocabularyStudio:
         self._auto_sound_path: str = ""
         self._auto_sound_len: float = 0.0
         self._auto_rest_gauge_color: tuple[int, int, int] = (90, 220, 120)
+        self._hanzi_animator = HanziAnimator()
+        self._hanzi_anim_key: tuple[int, str, float] | None = None
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
@@ -308,6 +311,22 @@ class VocabularyStudio:
     def update(self, config: Any = None) -> None:
         dt = float(getattr(config, "dt_sec", 0.0) or 0.0) if config is not None else 0.0
         self._tick_auto_sequence(dt)
+        ordered = self._ordered_rows()
+        self._clamp_selection(len(ordered))
+        if ordered:
+            cur = ordered[self._selected_index]
+            w = get_word(cur.word_id)
+            hanzi = (w.word or "").strip() if w else ""
+            speed = float(getattr(w, "stroke_play_speed", 1.0) or 1.0) if w else 1.0
+            key = (cur.word_id, hanzi, speed)
+            if self._hanzi_anim_key != key:
+                self._hanzi_anim_key = key
+                self._hanzi_animator.set_text(hanzi, play_speed=speed)
+        else:
+            if self._hanzi_anim_key is not None:
+                self._hanzi_anim_key = None
+                self._hanzi_animator.reset()
+        self._hanzi_animator.update(dt)
 
     def _hanzi_only(self, row: VocabularyWordRow) -> str:
         w = get_word(row.word_id)
@@ -711,7 +730,7 @@ class VocabularyStudio:
         stroke_rect = pygame.Rect(stroke_slot_x, slot_y, stroke_slot_w, slot_h)
 
         draw_slot_frame(img_rect, "연상 이미지")
-        draw_slot_frame(stroke_rect, "획순 애니메이션 (준비 중)")
+        draw_slot_frame(stroke_rect, "획순 애니메이션")
 
         img_path = (word.img_path if word else "") or ""
         scaled: Optional[pygame.Surface] = None
@@ -736,15 +755,15 @@ class VocabularyStudio:
                 ),
             )
 
-        # 획순: Word 확장 필드(예: stroke_anim_path) 연동 예정 — 현재는 슬롯만 표시
-        ph2 = self._font_hint.render("리소스 연동 예정", True, (100, 100, 110))
-        screen.blit(
-            ph2,
-            (
-                stroke_rect.x + (stroke_rect.width - ph2.get_width()) // 2,
-                stroke_rect.y + stroke_rect.height // 2,
-            ),
-        )
+        if not self._hanzi_animator.draw(screen, stroke_rect):
+            ph2 = self._font_hint.render("획순 데이터 없음", True, (100, 100, 110))
+            screen.blit(
+                ph2,
+                (
+                    stroke_rect.x + (stroke_rect.width - ph2.get_width()) // 2,
+                    stroke_rect.y + stroke_rect.height // 2,
+                ),
+            )
 
     def get_recording_prefix(self) -> Optional[str]:
         return None

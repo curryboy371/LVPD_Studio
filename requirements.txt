@@ -14,3 +14,6 @@ g2pM
 
 # 비디오 재생
 ffpyplayer
+
+# SVG 사전 렌더(Chromium)
+playwright
