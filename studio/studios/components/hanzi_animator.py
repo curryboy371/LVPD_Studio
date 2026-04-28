@@ -129,6 +129,12 @@ class HanziAnimator:
     def reset(self) -> None:
         self.set_text("", play_speed=1.0)
 
+    def replay(self) -> None:
+        """현재 텍스트를 동일 배속으로 처음부터 다시 재생한다."""
+        if not self._text:
+            return
+        self.set_text(self._text, play_speed=self._play_speed)
+
     def has_data(self) -> bool:
         return bool(self._clips)
 
@@ -159,12 +165,14 @@ class HanziAnimator:
             self._playing = False
 
     def draw(self, screen: pygame.Surface, rect: pygame.Rect) -> bool:
-        if not self._clips or self._clip_index >= len(self._clips):
+        if not self._clips:
             return False
         slot_count = self._MAX_VISIBLE_CHARS
         draw_count = min(slot_count, len(self._clips))
         if draw_count <= 0:
             return False
+        done = self._clip_index >= len(self._clips)
+        active_clip_index = min(self._clip_index, len(self._clips) - 1)
 
         pad_x = max(6, int(rect.width * 0.03))
         gap = max(4, int(rect.width * 0.015))
@@ -178,13 +186,16 @@ class HanziAnimator:
             if not clip.frame_paths:
                 continue
 
-            if i < self._clip_index:
+            if i < active_clip_index:
                 # 완료된 글자는 마지막 프레임 고정 표시
                 frame_idx = len(clip.frame_paths) - 1
-            elif i == self._clip_index:
-                fps = max(1e-6, clip.fps * self._play_speed)
-                frame_idx = int(self._clip_elapsed * fps)
-                frame_idx = max(0, min(frame_idx, len(clip.frame_paths) - 1))
+            elif i == active_clip_index:
+                if done:
+                    frame_idx = len(clip.frame_paths) - 1
+                else:
+                    fps = max(1e-6, clip.fps * self._play_speed)
+                    frame_idx = int(self._clip_elapsed * fps)
+                    frame_idx = max(0, min(frame_idx, len(clip.frame_paths) - 1))
             else:
                 # 아직 시작 전 글자는 첫 프레임 표시
                 frame_idx = 0

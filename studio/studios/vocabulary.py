@@ -45,7 +45,8 @@ _LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
 _AUTO_SOUND_GAP_SEC = 1.5
 _AUTO_SOUND_REPEAT_COUNT = 2
 _AUTO_WAIT_SOUND_LEN_SCALE = 1.5
-_STROKE_FIXED_PLAY_SPEED = 1.15
+_AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
+_STROKE_FIXED_PLAY_SPEED = 1.0
 _GAUGE_H = 18
 _GAUGE_PAD_TOP = 10
 
@@ -161,6 +162,10 @@ class VocabularyStudio:
         self._auto_cycle_index: int = 0
         self._auto_sound_path: str = ""
         self._auto_sound_len: float = 0.0
+        self._auto_word_elapsed: float = 0.0
+        self._auto_word_target_duration: float = 0.0
+        self._auto_hanzi_replay_enabled: bool = False
+        self._auto_hanzi_replayed: bool = False
         self._hanzi_animator = HanziAnimator()
         self._hanzi_anim_key: tuple[int, str] | None = None
 
@@ -316,19 +321,21 @@ class VocabularyStudio:
         ordered = self._ordered_rows()
         self._clamp_selection(len(ordered))
         if ordered:
-            cur = ordered[self._selected_index]
-            w = get_word(cur.word_id)
-            hanzi = (w.word or "").strip() if w else ""
-            key = (cur.word_id, hanzi)
-            if self._hanzi_anim_key != key:
-                self._hanzi_anim_key = key
-                # 음성과 무관하게 사전 렌더된 프레임을 고정 배속으로 재생한다.
-                self._hanzi_animator.set_text(hanzi, play_speed=_STROKE_FIXED_PLAY_SPEED)
+            self._sync_hanzi_anim_for_selected_word()
         else:
             if self._hanzi_anim_key is not None:
                 self._hanzi_anim_key = None
                 self._hanzi_animator.reset()
         self._hanzi_animator.update(dt)
+        if (
+            ordered
+            and self._auto_hanzi_replay_enabled
+            and not self._auto_hanzi_replayed
+            and not self._hanzi_animator.is_playing()
+            and self._hanzi_animator.has_data()
+        ):
+            self._hanzi_animator.replay()
+            self._auto_hanzi_replayed = True
 
     def _hanzi_only(self, row: VocabularyWordRow) -> str:
         w = get_word(row.word_id)
@@ -475,16 +482,53 @@ class VocabularyStudio:
         if phase == "play_sound" and self._auto_sound_path:
             self._play_sound_now(self._auto_sound_path)
 
+    def _sync_hanzi_anim_for_selected_word(self) -> None:
+        ordered = self._ordered_rows()
+        if not ordered:
+            if self._hanzi_anim_key is not None:
+                self._hanzi_anim_key = None
+                self._hanzi_animator.reset()
+            return
+        self._clamp_selection(len(ordered))
+        cur = ordered[self._selected_index]
+        w = get_word(cur.word_id)
+        hanzi = (w.word or "").strip() if w else ""
+        key = (cur.word_id, hanzi)
+        if self._hanzi_anim_key != key:
+            self._hanzi_anim_key = key
+            self._hanzi_animator.set_text(hanzi, play_speed=_STROKE_FIXED_PLAY_SPEED)
+
     def _setup_current_word_cycle(self) -> None:
         ordered = self._ordered_rows()
         if not ordered:
             return
         self._clamp_selection(len(ordered))
+        self._sync_hanzi_anim_for_selected_word()
         cur = ordered[self._selected_index]
         w = get_word(cur.word_id)
         self._auto_sound_path = self._resolve_sound_abs((w.sound_path if w else "") or "")
         self._auto_sound_len = self._get_sound_length_sec(self._auto_sound_path)
         self._auto_cycle_index = 0
+        self._auto_word_elapsed = 0.0
+        sound_cycle_duration = (
+            self._auto_sound_len
+            + _AUTO_SOUND_GAP_SEC
+            + (self._auto_sound_len * _AUTO_WAIT_SOUND_LEN_SCALE)
+            + _AUTO_SOUND_GAP_SEC
+        )
+        sound_total_duration = sound_cycle_duration * _AUTO_SOUND_REPEAT_COUNT
+        hanzi_total_duration = self._hanzi_animator.total_duration_sec()
+        similarity_ratio = 0.0
+        if sound_cycle_duration > 1e-6 and hanzi_total_duration > 1e-6:
+            similarity_ratio = min(sound_cycle_duration, hanzi_total_duration) / max(
+                sound_cycle_duration, hanzi_total_duration
+            )
+        self._auto_hanzi_replay_enabled = similarity_ratio >= _AUTO_REPLAY_SIMILARITY_THRESHOLD
+        self._auto_hanzi_replayed = False
+        hanzi_target_duration = (
+            hanzi_total_duration * 2.0 if self._auto_hanzi_replay_enabled else hanzi_total_duration
+        )
+        self._auto_word_target_duration = max(sound_total_duration, hanzi_target_duration)
         self._begin_phase("play_sound", self._auto_sound_len)
 
     def _advance_to_next_word_or_done(self, rows_count: int) -> None:
@@ -497,6 +541,7 @@ class VocabularyStudio:
     def _tick_auto_sequence(self, dt_sec: float) -> None:
         ordered = self._ordered_rows()
         n = len(ordered)
+        dt = max(0.0, float(dt_sec))
         if n <= 0 or self._recording_done:
             return
         if not self._auto_started:
@@ -506,34 +551,47 @@ class VocabularyStudio:
             self._setup_current_word_cycle()
             return
 
+        self._auto_word_elapsed += dt
+
         if self._auto_phase == "play_sound":
-            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            self._auto_phase_elapsed += dt
             if self._auto_phase_elapsed < self._auto_phase_duration:
                 return
             self._begin_phase("wait_after_play", _AUTO_SOUND_GAP_SEC)
             return
 
         if self._auto_phase == "wait_after_play":
-            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            self._auto_phase_elapsed += dt
             if self._auto_phase_elapsed >= self._auto_phase_duration:
                 self._begin_phase("wait_sound_len", self._auto_sound_len * _AUTO_WAIT_SOUND_LEN_SCALE)
                 return
             return
 
         if self._auto_phase == "wait_sound_len":
-            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            self._auto_phase_elapsed += dt
             if self._auto_phase_elapsed < self._auto_phase_duration:
                 return
             self._begin_phase("wait_after_len", _AUTO_SOUND_GAP_SEC)
             return
 
         if self._auto_phase == "wait_after_len":
-            self._auto_phase_elapsed += max(0.0, float(dt_sec))
+            self._auto_phase_elapsed += dt
             if self._auto_phase_elapsed < self._auto_phase_duration:
                 return
             if self._auto_cycle_index + 1 < _AUTO_SOUND_REPEAT_COUNT:
                 self._auto_cycle_index += 1
                 self._begin_phase("play_sound", self._auto_sound_len)
+                return
+            remain = max(0.0, self._auto_word_target_duration - self._auto_word_elapsed)
+            if remain > 1e-6:
+                self._begin_phase("wait_sync_hold", remain)
+                return
+            self._advance_to_next_word_or_done(n)
+            return
+
+        if self._auto_phase == "wait_sync_hold":
+            self._auto_phase_elapsed += dt
+            if self._auto_phase_elapsed < self._auto_phase_duration:
                 return
             self._advance_to_next_word_or_done(n)
             return
@@ -690,14 +748,14 @@ class VocabularyStudio:
         gauge_color: Optional[tuple[int, int, int]] = None
         gauge_progress: float = 0.0
         if self._auto_phase == "play_sound":
-            gauge_color = (90, 160, 255)
+            gauge_color = (90, 220, 120)
             gauge_progress = (
                 min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
                 if self._auto_phase_duration > 0
                 else 1.0
             )
         elif self._auto_phase == "wait_after_play":
-            gauge_color = (90, 160, 255)
+            gauge_color = (90, 220, 120)
             gauge_progress = 1.0
         elif self._auto_phase == "wait_sound_len":
             gauge_color = (255, 170, 85)
@@ -707,6 +765,9 @@ class VocabularyStudio:
                 else 1.0
             )
         elif self._auto_phase == "wait_after_len":
+            gauge_color = (255, 170, 85)
+            gauge_progress = 1.0
+        elif self._auto_phase == "wait_sync_hold":
             gauge_color = (255, 170, 85)
             gauge_progress = 1.0
         if gauge_color is not None:
