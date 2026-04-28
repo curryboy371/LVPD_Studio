@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from enum import Enum, auto
 from pathlib import Path
+import random
 from typing import Callable
 
 import pygame
@@ -38,6 +39,7 @@ class PracticeScene(IConversationStep):
         SHOW_SUB_CONTENT = auto()
 
     _SPEAK_SOUND_LEN_SCALE = 1.3
+    _BG_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 
     def __init__(
         self,
@@ -46,6 +48,7 @@ class PracticeScene(IConversationStep):
         video_player,
         style: SentenceStyleConfig,
         play_voice: Callable[..., None] | None = None,
+        on_bg_sound_started: Callable[[str, float], None] | None = None,
         title_text: str = "연습",
         title_fade_in_sec: float = 1.0,
         content_hold_sec: float = 3.0,
@@ -55,6 +58,7 @@ class PracticeScene(IConversationStep):
         self.drawer = drawer
         self.video_player = video_player
         self.play_voice = play_voice
+        self.on_bg_sound_started = on_bg_sound_started
         self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
@@ -84,6 +88,13 @@ class PracticeScene(IConversationStep):
         self._playback_bar = PlaybackBarRenderer()
         self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
         self._speak_icon_surface = self._load_mode_icon_surface("speak.png")
+        self._bg_sounds = self._load_background_sounds()
+        self._bg_last_sound_index: int | None = None
+        self._bg_channel_index = 5
+        self._bg_channel: pygame.mixer.Channel | None = None
+        self._bg_fade_ms = 550
+        self._bg_volume = 0.7
+        self._bg_playing = False
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self.drawer.hide_now(self._title_channel)
@@ -104,6 +115,7 @@ class PracticeScene(IConversationStep):
             self._sub_content_wait_remaining_sec = 0.0
             self._sub_content_wait_total_sec = 0.0
             self._sub_content_sound_sec = 0.0
+            self._stop_background_sound()
             self.drawer.hide_now(self._title_channel)
             self.drawer.hide_now(self._sentence_channel)
 
@@ -165,6 +177,7 @@ class PracticeScene(IConversationStep):
 
         # Stage 기반으로 제목 페이드 완료 시점을 관리한다.
         if self.stage == self.Stage.TITLE:
+            self._stop_background_sound()
             if self._title_wait_remaining_sec > 0.0:
                 self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - dt)
             if self._title_wait_remaining_sec <= 0.0:
@@ -175,6 +188,7 @@ class PracticeScene(IConversationStep):
 
         # 기본 문장을 잠시 보여준 뒤, sub_sentences.csv 기반 변형이 있으면 다음 Stage로 넘긴다.
         if self.stage == self.Stage.SHOW_CONTENT:
+            self._stop_background_sound()
             if self._content_wait_remaining_sec > 0.0:
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
             if self._content_wait_remaining_sec <= 0.0:
@@ -191,6 +205,7 @@ class PracticeScene(IConversationStep):
 
         # SHOW_SUB_CONTENT 타이머는 sub 개수와 무관하게 항상 흐르게 유지한다.
         if self.stage == self.Stage.SHOW_SUB_CONTENT:
+            self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
                 self._sub_content_wait_remaining_sec = max(0.0, self._sub_content_wait_remaining_sec - dt)
             if self._sub_content_wait_remaining_sec <= 0.0:
@@ -204,6 +219,7 @@ class PracticeScene(IConversationStep):
                         self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
                         return
                 # 마지막 sub 변형까지 모두 끝나면 다음 SceneKind로 전환한다.
+                self._stop_background_sound()
                 self.complete()
                 self.allow_transition()
         return
@@ -530,6 +546,114 @@ class PracticeScene(IConversationStep):
             except Exception:
                 continue
         return None
+
+    def _load_background_sounds(self) -> list[tuple[str, pygame.mixer.Sound]]:
+        """회화 모드용 배경 사운드 묶음(bg)을 미리 로드한다."""
+        root = Path(__file__).resolve().parents[3]
+        bg_dir = root / "resource" / "sound" / "background"
+        if not bg_dir.exists() or not bg_dir.is_dir():
+            return []
+        sounds: list[tuple[str, pygame.mixer.Sound]] = []
+        for path in sorted(bg_dir.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in self._BG_SOUND_EXTS:
+                continue
+            try:
+                if pygame.mixer.get_init() is None:
+                    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                    pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+                sounds.append((str(path), pygame.mixer.Sound(str(path))))
+            except Exception:
+                continue
+        return sounds
+
+    def _sync_background_sound_for_sub_content(self) -> None:
+        """주황 게이지(말하기 채움 구간)에서만 랜덤 bg를 재생한다."""
+        if not self._is_speak_fill_phase():
+            self._stop_background_sound()
+            return
+        if self._bg_playing:
+            return
+        self._play_random_background_sound()
+
+    def _is_speak_fill_phase(self) -> bool:
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        if total_sec <= 1e-6:
+            return False
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        listen_sec = max(0.0, float(self._sub_content_sound_sec))
+        if listen_sec <= 1e-6:
+            return False
+        gap_sec = max(0.0, float(self._listen_to_speak_gap_sec))
+        after_speak_sec = max(0.0, float(self._speak_complete_hold_sec))
+        speak_sec = max(0.0, total_sec - listen_sec - gap_sec - after_speak_sec)
+        if speak_sec <= 1e-6:
+            return False
+        t_speak_start = listen_sec + gap_sec
+        t_speak_end = t_speak_start + speak_sec
+        return t_speak_start <= elapsed_sec < t_speak_end
+
+    def _speak_fill_remaining_sec(self) -> float:
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        if total_sec <= 1e-6:
+            return 0.0
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        listen_sec = max(0.0, float(self._sub_content_sound_sec))
+        if listen_sec <= 1e-6:
+            return 0.0
+        gap_sec = max(0.0, float(self._listen_to_speak_gap_sec))
+        after_speak_sec = max(0.0, float(self._speak_complete_hold_sec))
+        speak_sec = max(0.0, total_sec - listen_sec - gap_sec - after_speak_sec)
+        if speak_sec <= 1e-6:
+            return 0.0
+        t_speak_start = listen_sec + gap_sec
+        t_speak_end = t_speak_start + speak_sec
+        if elapsed_sec < t_speak_start or elapsed_sec >= t_speak_end:
+            return 0.0
+        return max(0.0, t_speak_end - elapsed_sec)
+
+    def _play_random_background_sound(self) -> None:
+        if not self._bg_sounds:
+            return
+        try:
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            if len(self._bg_sounds) == 1:
+                picked_index = 0
+            else:
+                candidates = [i for i in range(len(self._bg_sounds)) if i != self._bg_last_sound_index]
+                picked_index = random.choice(candidates) if candidates else 0
+            sound_path, sound = self._bg_sounds[picked_index]
+            channel = pygame.mixer.Channel(self._bg_channel_index)
+            channel.set_volume(float(self._bg_volume))
+            channel.play(sound, loops=-1, fade_ms=int(self._bg_fade_ms))
+            self._bg_channel = channel
+            self._bg_last_sound_index = picked_index
+            self._bg_playing = True
+            if self.on_bg_sound_started is not None:
+                try:
+                    self.on_bg_sound_started(sound_path, self._speak_fill_remaining_sec())
+                except Exception:
+                    pass
+        except Exception:
+            self._bg_channel = None
+            self._bg_playing = False
+
+    def _stop_background_sound(self) -> None:
+        channel = self._bg_channel
+        if channel is None:
+            self._bg_playing = False
+            return
+        try:
+            if channel.get_busy():
+                channel.fadeout(int(self._bg_fade_ms))
+        except Exception:
+            pass
+        self._bg_playing = False
 
     def _draw_mode_icon(self, screen: pygame.Surface, *, ctx: FrameContext, is_listen_phase: bool) -> None:
         """현재 재생 구간에 맞는 모드 아이콘을 좌하단에 표시한다."""

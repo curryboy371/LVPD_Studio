@@ -127,6 +127,20 @@ class ConversationStudio:
         )
         self._drawer = CommonDrawer(fonts=fonts)
 
+        def _record_insert_sound(path: str, *, snd: Any = None, duration_sec: float | None = None) -> None:
+            """record 모드면 InsertSound 이벤트를 남긴다."""
+            cfg = self._last_config
+            log = getattr(cfg, "recording_log_event", None)
+            if log is None:
+                return
+            try:
+                from studio.recording_events import InsertSound, recording_log_event
+                timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+                dur = float(duration_sec) if duration_sec is not None else float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
+                recording_log_event(log, InsertSound(timeline_sec=timeline_sec, path=path, duration_sec=dur))
+            except Exception:
+                return
+
         def _play_insert_voice(path: str, *, item: Any = None) -> None:
             """학습 단계 삽입 음성을 재생하고, 녹화 모드면 타임라인 이벤트로 남긴다."""
             _ = item
@@ -153,18 +167,13 @@ class ConversationStudio:
                 except Exception:
                     pass
 
-            # record 모드면 이벤트도 남김(사후 mux용)
-            cfg = self._last_config
-            log = getattr(cfg, "recording_log_event", None)
-            if log is None:
+            _record_insert_sound(path, snd=snd)
+
+        def _on_bg_sound_started(path: str, duration_sec: float) -> None:
+            """practice 주황 게이지 bg 사운드도 녹화 InsertSound에 포함한다."""
+            if not path:
                 return
-            try:
-                from studio.recording_events import InsertSound, recording_log_event
-                timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
-                dur = float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
-                recording_log_event(log, InsertSound(timeline_sec=timeline_sec, path=path, duration_sec=dur))
-            except Exception:
-                return
+            _record_insert_sound(path, duration_sec=max(0.0, float(duration_sec)))
 
         _adv = str(getattr(settings, "learning_voice_advance", "immediate") or "immediate").lower()
         _wait_for_sound_end = _adv in ("after_sound", "sound_length", "wait_sound")
@@ -187,6 +196,7 @@ class ConversationStudio:
             video_player=self._video_player,
             style=practice_style,
             play_voice=_play_insert_voice,
+            on_bg_sound_started=_on_bg_sound_started,
             title_text=str(getattr(settings, "practice_title_text", "연습") or "연습"),
             # LearningScene과 동일하게 제목 페이드 인 시간을 설정 가능하게 한다.
             title_fade_in_sec=float(getattr(settings, "practice_title_fade_in_sec", 1.0) or 1.0),
