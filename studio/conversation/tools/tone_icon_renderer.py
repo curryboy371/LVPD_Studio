@@ -14,6 +14,7 @@ from ..core.types import SentenceStyleConfig
 Align = Literal["center", "left", "right"]
 
 TONE_ICON_GAP_ABOVE_PX = 8
+TONE_ICON_SCALE = 0.5
 
 
 def split_pinyin_syllables(s: str) -> list[str]:
@@ -92,6 +93,23 @@ class ToneIconRenderer:
         except Exception:
             pass
 
+    @staticmethod
+    def _scaled_icon_surface(src: pygame.Surface) -> pygame.Surface:
+        """성조 아이콘 표시 크기를 통일 스케일로 조정한다."""
+        scale = float(TONE_ICON_SCALE)
+        if scale >= 0.999:
+            return src
+        sw, sh = src.get_size()
+        if sw <= 0 or sh <= 0:
+            return src
+        tw = max(1, int(round(sw * scale)))
+        th = max(1, int(round(sh * scale)))
+        if tw == sw and th == sh:
+            return src
+        if hasattr(pygame.transform, "smoothscale"):
+            return pygame.transform.smoothscale(src, (tw, th))
+        return pygame.transform.scale(src, (tw, th))
+
     def draw_above_pinyin(
         self,
         screen: pygame.Surface,
@@ -126,6 +144,7 @@ class ToneIconRenderer:
             surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
             if surf is None:
                 continue
+            surf = self._scaled_icon_surface(surf)
             cx = centers[i]
             iy = y_pinyin - TONE_ICON_GAP_ABOVE_PX - surf.get_height()
             ix = cx - surf.get_width() // 2

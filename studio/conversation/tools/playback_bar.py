@@ -30,7 +30,7 @@ VerticalAlign = Literal["top", "bottom"]
 class PlaybackBarStyle:
     """Visual style for playback bar and time label."""
 
-    bar_height_px: int = 10
+    bar_height_px: int = 34
     corner_radius_px: int = 5
     track_color: tuple[int, int, int] = (45, 45, 45)
     progress_color: tuple[int, int, int] = (46, 204, 113)
@@ -58,12 +58,12 @@ class PlaybackBarLayout:
         y_px: Optional absolute y coordinate for bar top.
     """
 
-    width_ratio: float = 0.72
+    width_ratio: float = 0.55
     fixed_width_px: Optional[int] = None
     align_x: HorizontalAlign = "center"
     align_y: VerticalAlign = "bottom"
     margin_x_px: int = 24
-    margin_y_px: int = 28
+    margin_y_px: int = 64
     x_px: Optional[int] = None
     y_px: Optional[int] = None
 

@@ -156,6 +156,7 @@ class CommonDrawer:
                 # 모듈 전역 LRU — 매 프레임 디스크 로드 없음
                 surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
                 if surf is not None:
+                    surf = ToneIconRenderer._scaled_icon_surface(surf)
                     max_icon_h = max(max_icon_h, int(surf.get_height()))
             if max_icon_h > 0:
                 extent_above = max_icon_h + TONE_ICON_GAP_ABOVE_PX

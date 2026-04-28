@@ -37,6 +37,8 @@ class PracticeScene(IConversationStep):
         SHOW_CONTENT = auto()
         SHOW_SUB_CONTENT = auto()
 
+    _SPEAK_SOUND_LEN_SCALE = 1.3
+
     def __init__(
         self,
         *,
@@ -245,8 +247,9 @@ class PracticeScene(IConversationStep):
             if sound_len_sec > 0.0:
                 self._sub_content_sound_sec = sound_len_sec
                 tail = max(0.0, float(self._speak_complete_hold_sec))
-                # 듣기 + 듣기후간격 + 말하기(음원 길이) + 말하기 후 간격
-                return sound_len_sec * 2.0 + max(0.0, gap) + tail
+                # 듣기 + 듣기후간격 + 말하기(원음 길이 * 배율) + 말하기 후 간격
+                speak_sec = sound_len_sec * float(self._SPEAK_SOUND_LEN_SCALE)
+                return sound_len_sec + max(0.0, gap) + speak_sec + tail
         except Exception:
             pass
         self._sub_content_sound_sec = 0.0

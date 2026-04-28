@@ -310,12 +310,9 @@ class ConversationStudio:
                         mp3_path = str(Path(vpath).with_suffix(".mp3"))
                         mux_src = mp3_path if os.path.exists(mp3_path) else vpath
                         tl = float(getattr(config, "recording_time_sec", 0.0) or 0.0)
-                        # 동명 mp3는 보통 구간 0부터 전체 음원 → 비디오 PTS로 자르면 무음에 가깝게 됨.
-                        src_pts = (
-                            0.0
-                            if mux_src.lower().endswith(".mp3")
-                            else float(self._video_player.get_pts())
-                        )
+                        # 녹화 mux에서도 디버그 재생과 동일하게 현재 비디오 PTS를 소스 시작점으로 사용한다.
+                        # (sidecar mp3도 start/end 구간이 일치하도록 맞춤)
+                        src_pts = float(self._video_player.get_pts())
                         recording_log_event(
                             log,
                             VideoSegmentStart(

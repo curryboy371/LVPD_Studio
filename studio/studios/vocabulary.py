@@ -26,7 +26,7 @@ from studio.conversation.tools.fonts import (
 )
 from studio.studios.components.hanzi_animator import HanziAnimator
 from utils.pinyin_processor import get_pinyin_processor
-from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_korean
+from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chinese_freetype, load_font_korean
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ _AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
 _STROKE_FIXED_PLAY_SPEED = 1.0
 _GAUGE_H = 18
 _GAUGE_PAD_TOP = 10
+_IMAGE_CORNER_RADIUS = 16
 
 # 품사 색상 테이블 (정확 매칭 우선, 미매칭은 기본 회색)
 _POS_COLOR_TABLE: dict[str, tuple[int, int, int]] = {
@@ -126,6 +127,20 @@ def _scale_surface_to_fit(surf: pygame.Surface, max_w: int, max_h: int) -> pygam
     return pygame.transform.scale(surf, (nw, nh))
 
 
+def _round_surface_corners(surf: pygame.Surface, radius: int) -> pygame.Surface:
+    sw, sh = surf.get_size()
+    if sw <= 0 or sh <= 0:
+        return surf
+    r = max(0, min(int(radius), min(sw, sh) // 2))
+    if r <= 0:
+        return surf
+    rounded = surf.copy()
+    mask = pygame.Surface((sw, sh), pygame.SRCALPHA)
+    pygame.draw.rect(mask, (255, 255, 255, 255), pygame.Rect(0, 0, sw, sh), border_radius=r)
+    rounded.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return rounded
+
+
 class VocabularyStudio:
     """좌측 한자 목록 + 우측 상세(병음·뜻·품사·이미지·획순 슬롯). SPACE로 학습 완료(녹화 until-done 시 종료)."""
 
@@ -145,6 +160,7 @@ class VocabularyStudio:
         self._font_cn: Optional[pygame.font.Font] = None
         self._font_kr: Optional[pygame.font.Font] = None
         self._font_cn_detail: Optional[pygame.font.Font] = None
+        self._font_cn_detail_ft: Any = None
         self._font_cn_hero_detail: Optional[pygame.font.Font] = None
         self._font_kr_detail: Optional[pygame.font.Font] = None
         self._font_kr_pos_detail: Optional[pygame.font.Font] = None
@@ -168,9 +184,11 @@ class VocabularyStudio:
         self._auto_hanzi_replayed: bool = False
         self._hanzi_animator = HanziAnimator()
         self._hanzi_anim_key: tuple[int, str] | None = None
+        self._last_config: Any = None
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
+        self._last_config = config
         if self._font_cn_big is not None:
             return
         settings = _resolve_conversation_render_settings(config)
@@ -187,12 +205,14 @@ class VocabularyStudio:
         self._font_cn = load_font_chinese(cn_size, RED)
         self._font_kr = load_font_korean(kr_size, GRAY_MUTED)
 
-        # 단어장 상세(병음/한자/뜻/품사) 전용 폰트: 회화 모드와 분리된 대형 렌더
+        # 단어장 상세(병음/한자/뜻/품사) 전용 폰트
         detail_scale = 2.0
-        cn_detail_size = max(24, int(round(cn_size * detail_scale)))
+        # 병음은 회화 모드와 동일한 크기/렌더 경로를 사용해 두 화면의 체감 굵기를 맞춘다.
+        cn_detail_size = fs.cn_step1_pinyin
         hero_detail_size = max(72, int(round(hero_size * detail_scale)))
         kr_detail_size = max(24, int(round(kr_size * detail_scale)))
         pos_detail_size = max(24, int(round(kr_size * detail_scale * 0.82)))
+        self._font_cn_detail_ft = load_font_chinese_freetype(cn_detail_size, RED)
         self._font_cn_detail = load_font_chinese(cn_detail_size, RED)
         self._font_cn_hero_detail = load_font_chinese(hero_detail_size, WHITE)
         self._font_kr_detail = load_font_korean(kr_detail_size, GRAY_MUTED)
@@ -273,49 +293,15 @@ class VocabularyStudio:
         panel_inner_h = max(1, main_h - 16)
 
         for e in events:
-            if e.type == pygame.MOUSEWHEEL:
-                delta = int(getattr(e, "y", 0) or 0)
-                if delta != 0 and n > 0:
-                    max_scroll = max(0, n * _LIST_ROW_H - panel_inner_h)
-                    self._list_scroll_px = max(
-                        0, min(max_scroll, self._list_scroll_px - delta * _LIST_SCROLL_STEP)
-                    )
-                continue
-
-            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-                w = int(getattr(config, "width", 0) or 0) if config is not None else 0
-                h = int(getattr(config, "height", 0) or 0) if config is not None else 0
-                if w <= 0 or h <= 0:
-                    continue
-                left_w = int(w * _LEFT_PANEL_RATIO)
-                mx, my = e.pos
-                if 0 <= mx < left_w and _HEADER_H <= my < h:
-                    rel_y = my - _HEADER_H - 8 + self._list_scroll_px
-                    if rel_y >= 0:
-                        hit = rel_y // _LIST_ROW_H
-                        if 0 <= hit < n:
-                            self._selected_index = hit
-                            self._scroll_selection_into_view(panel_inner_h)
-                continue
-
             if e.type != pygame.KEYDOWN:
                 continue
             if e.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER):
                 self._recording_done = True
                 continue
-            if e.key in (pygame.K_UP, pygame.K_k):
-                if n > 0:
-                    self._selected_index = max(0, self._selected_index - 1)
-                    self._scroll_selection_into_view(panel_inner_h)
-                continue
-            if e.key in (pygame.K_DOWN, pygame.K_j):
-                if n > 0:
-                    self._selected_index = min(n - 1, self._selected_index + 1)
-                    self._scroll_selection_into_view(panel_inner_h)
-                continue
         return True
 
     def update(self, config: Any = None) -> None:
+        self._last_config = config
         dt = float(getattr(config, "dt_sec", 0.0) or 0.0) if config is not None else 0.0
         self._tick_auto_sequence(dt)
         ordered = self._ordered_rows()
@@ -404,6 +390,20 @@ class VocabularyStudio:
             out.append(token)
         return out
 
+    def _render_pinyin_surface(self, text: str) -> Optional[pygame.Surface]:
+        content = (text or "").strip()
+        if not content:
+            return None
+        if self._font_cn_detail_ft is not None:
+            try:
+                surf, _ = self._font_cn_detail_ft.render(content, RED)
+                return surf
+            except Exception:
+                pass
+        if self._font_cn_detail is None:
+            return None
+        return self._font_cn_detail.render(content, True, RED)
+
     def _parse_meaning_items(self, meaning_raw: str) -> list[str]:
         """뜻 문자열을 `|` 기준으로 다중 항목 분리한다."""
         raw = (meaning_raw or "").strip()
@@ -472,8 +472,31 @@ class VocabularyStudio:
             snd = pygame.mixer.Sound(key)
             ch = pygame.mixer.Channel(7)
             ch.play(snd)
+            self._log_insert_sound_event(key, snd)
         except Exception as ex:
             logger.debug("단어장 사운드 재생 실패: %s", ex)
+
+    def _log_insert_sound_event(self, sound_abs_path: str, snd: Any) -> None:
+        """녹화 모드면 단어장 사운드 재생을 InsertSound 이벤트로 기록한다."""
+        cfg = self._last_config
+        log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+        if log is None:
+            return
+        try:
+            from studio.recording_events import InsertSound, recording_log_event
+
+            timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+            duration_sec = float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
+            recording_log_event(
+                log,
+                InsertSound(
+                    timeline_sec=timeline_sec,
+                    path=str(sound_abs_path),
+                    duration_sec=duration_sec,
+                ),
+            )
+        except Exception:
+            return
 
     def _begin_phase(self, phase: str, duration: float) -> None:
         self._auto_phase = phase
@@ -655,7 +678,13 @@ class VocabularyStudio:
             if y_base > main_top + main_h or y_base + row_h < main_top:
                 continue
             hanzi = self._hanzi_only(row)
-            surf = self._font_cn_big.render(hanzi, True, (220, 220, 225))
+            if i < self._selected_index:
+                text_color = (140, 140, 150)  # 지나간 단어: 회색
+            elif i == self._selected_index:
+                text_color = (110, 180, 255)  # 현재 단어: 파란색
+            else:
+                text_color = (220, 220, 225)  # 아직 안 지난 단어: 기본색
+            surf = self._font_cn_big.render(hanzi, True, text_color)
             cx = list_pad_x + left_w // 2
             ty = y_base + (row_h - surf.get_height()) // 2
             if i == self._selected_index:
@@ -709,7 +738,9 @@ class VocabularyStudio:
             return row
 
         if pinyin:
-            block_items.append((self._font_cn_detail.render(pinyin, True, RED), 16))
+            pinyin_surf = self._render_pinyin_surface(pinyin)
+            if pinyin_surf is not None:
+                block_items.append((pinyin_surf, 16))
         block_items.append((self._font_cn_hero_detail.render(hero_text, True, WHITE), 24))
         meaning_row = compose_inline_row(
             [(meaning, GRAY_MUTED) for meaning in meaning_items],
@@ -794,30 +825,30 @@ class VocabularyStudio:
         img_slot_x = right_x + 20
         stroke_slot_x = img_slot_x + img_slot_w + _LOWER_GAP
 
-        def draw_slot_frame(rect: pygame.Rect, title: str) -> None:
+        def draw_slot_frame(rect: pygame.Rect) -> None:
             pygame.draw.rect(screen, (32, 32, 38), rect, border_radius=6)
             pygame.draw.rect(screen, (70, 70, 78), rect, 1, border_radius=6)
-            t = self._font_hint.render(title, True, (120, 120, 130))
-            screen.blit(t, (rect.x + 10, rect.y + 8))
 
         img_rect = pygame.Rect(img_slot_x, slot_y, img_slot_w, slot_h)
         stroke_rect = pygame.Rect(stroke_slot_x, slot_y, stroke_slot_w, slot_h)
 
-        draw_slot_frame(img_rect, "연상 이미지")
-        draw_slot_frame(stroke_rect, "획순 애니메이션")
+        draw_slot_frame(img_rect)
+        draw_slot_frame(stroke_rect)
 
         img_path = (word.img_path if word else "") or ""
         scaled: Optional[pygame.Surface] = None
         if word and img_path:
             raw = self._get_scaled_word_image(word.id, img_path)
             if raw is not None:
-                iw = img_rect.width - 20
-                ih = img_rect.height - 36
+                image_inner_pad = 16
+                iw = img_rect.width - (image_inner_pad * 2)
+                ih = img_rect.height - (image_inner_pad * 2)
                 scaled = _scale_surface_to_fit(raw, max(1, iw), max(1, ih))
 
         if scaled is not None:
+            scaled = _round_surface_corners(scaled, _IMAGE_CORNER_RADIUS)
             ix = img_rect.x + (img_rect.width - scaled.get_width()) // 2
-            iy = img_rect.y + (img_rect.height - scaled.get_height()) // 2 + 6
+            iy = img_rect.y + (img_rect.height - scaled.get_height()) // 2
             screen.blit(scaled, (ix, iy))
         else:
             ph = self._font_hint.render("이미지 없음 또는 로드 실패", True, (100, 100, 110))
