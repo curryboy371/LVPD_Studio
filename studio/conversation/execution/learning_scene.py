@@ -52,7 +52,7 @@ class LearningScene(FSMConversationStep):
         style: SentenceStyleConfig,
         hold_sec: float = 2.0,
         play_voice: Callable[..., None] | None = None,
-        title_text: str = "학습",
+        title_text: str = "문장 이해하기",
         title_fade_in_sec: float = 1.0,
         layer_channel_prefix: str = "learning",
         stage_audio_keys: dict["LearningScene.Stage", str] | None = None,

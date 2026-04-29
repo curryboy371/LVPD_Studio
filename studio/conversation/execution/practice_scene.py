@@ -49,7 +49,7 @@ class PracticeScene(IConversationStep):
         style: SentenceStyleConfig,
         play_voice: Callable[..., None] | None = None,
         on_bg_sound_started: Callable[[str, float], None] | None = None,
-        title_text: str = "연습",
+        title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
         content_hold_sec: float = 3.0,
     ) -> None:
@@ -63,7 +63,7 @@ class PracticeScene(IConversationStep):
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
         self._style = style
-        self.title_text = str(title_text or "연습")
+        self.title_text = str(title_text or "듣고 따라해보기")
         self.title_fade_in_sec = float(title_fade_in_sec)
         # SHOW_CONTENT 단계에서 sub 문장으로 넘어가기 전 대기 시간(초).
         self.content_hold_sec = float(content_hold_sec)

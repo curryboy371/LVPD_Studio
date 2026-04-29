@@ -186,7 +186,9 @@ class ConversationStudio:
             style=learn_style,
             hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
             play_voice=_play_insert_voice,
-            title_text=str(getattr(settings, "learning_title_text", "학습") or "학습"),
+            title_text=str(
+                getattr(settings, "learning_title_text", "문장 이해하기") or "문장 이해하기"
+            ),
             layer_channel_prefix=str(
                 getattr(settings, "learning_layer_channel_prefix", None) or "learning"
             ),
@@ -199,7 +201,9 @@ class ConversationStudio:
             style=practice_style,
             play_voice=_play_insert_voice,
             on_bg_sound_started=_on_bg_sound_started,
-            title_text=str(getattr(settings, "practice_title_text", "연습") or "연습"),
+            title_text=str(
+                getattr(settings, "practice_title_text", "듣고 따라해보기") or "듣고 따라해보기"
+            ),
             # LearningScene과 동일하게 제목 페이드 인 시간을 설정 가능하게 한다.
             title_fade_in_sec=float(getattr(settings, "practice_title_fade_in_sec", 1.0) or 1.0),
         )
