@@ -85,6 +85,8 @@ class ConversationStudio:
         self._last_applied_item_index: Optional[int] = None
         # record mux: VideoSegmentStart/End — sidecar mp3 추출 재생이 붙은 구간만 True
         self._recording_video_segment_open: bool = False
+        # 같은 item에서 비디오 구간 끝(end_time)에 도달해 segment를 닫은 뒤 재시작되는 것을 막는다.
+        self._recording_video_segment_closed_for_item: bool = False
 
         # 첫 아이템의 미디어 소스 적용
         if self._data_list:
@@ -311,6 +313,7 @@ class ConversationStudio:
                     log is not None
                     and self._manager is not None
                     and not self._recording_video_segment_open
+                    and not self._recording_video_segment_closed_for_item
                 ):
                     item = self._manager.current_item()
                     vpath = self._resolve_video_path(str(item.get("video_path") or ""))
@@ -425,11 +428,17 @@ class ConversationStudio:
         except Exception:
             pass
         self._recording_video_segment_open = False
+        self._recording_video_segment_closed_for_item = True
 
     def _maybe_recording_start_video_segment_no_sidecar_mp3(self, config: Any) -> None:
         """동일 이름 mp3가 없을 때는 즉시 영상 파일에서 오디오 구간을 mux 로그에 남긴다."""
         log = getattr(config, "recording_log_event", None) if config is not None else None
-        if not log or self._manager is None or self._recording_video_segment_open:
+        if (
+            not log
+            or self._manager is None
+            or self._recording_video_segment_open
+            or self._recording_video_segment_closed_for_item
+        ):
             return
         item = self._manager.current_item()
         vpath = self._resolve_video_path(str(item.get("video_path") or ""))
@@ -458,6 +467,11 @@ class ConversationStudio:
             pts = float(self._video_player.get_pts())
             if self._video_player.is_paused() and pts >= end_sec - 1e-3:
                 self._video_audio.pause()
+                cfg = self._last_config
+                log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+                if log is not None and self._recording_video_segment_open:
+                    timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+                    self._recording_emit_video_segment_end(timeline_sec=timeline_sec)
         except Exception:
             pass
 
@@ -479,6 +493,7 @@ class ConversationStudio:
         self._video_player.set_source(path, st, et)
         self._video_audio.set_source(path, st)
         self._last_applied_item_index = int(index)
+        self._recording_video_segment_closed_for_item = False
 
     def _resolve_video_path(self, path: str) -> str:
         """상대 경로는 repo 루트 기준으로 해석."""

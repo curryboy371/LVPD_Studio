@@ -92,8 +92,8 @@ class PracticeScene(IConversationStep):
         self._bg_last_sound_index: int | None = None
         self._bg_channel_index = 5
         self._bg_channel: pygame.mixer.Channel | None = None
-        self._bg_fade_ms = 550
-        self._bg_volume = 0.7
+        self._bg_fade_ms = 1000
+        self._bg_volume = 0.45
         self._bg_playing = False
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
@@ -568,15 +568,15 @@ class PracticeScene(IConversationStep):
         return sounds
 
     def _sync_background_sound_for_sub_content(self) -> None:
-        """주황 게이지(말하기 채움 구간)에서만 랜덤 bg를 재생한다."""
-        if not self._is_speak_fill_phase():
+        """말하기(주황) + 말하기 완료 후 대기 구간까지 bg를 유지 재생한다."""
+        if not self._is_bg_active_phase():
             self._stop_background_sound()
             return
         if self._bg_playing:
             return
         self._play_random_background_sound()
 
-    def _is_speak_fill_phase(self) -> bool:
+    def _is_bg_active_phase(self) -> bool:
         total_sec = max(0.0, float(self._sub_content_wait_total_sec))
         if total_sec <= 1e-6:
             return False
@@ -591,10 +591,10 @@ class PracticeScene(IConversationStep):
         if speak_sec <= 1e-6:
             return False
         t_speak_start = listen_sec + gap_sec
-        t_speak_end = t_speak_start + speak_sec
-        return t_speak_start <= elapsed_sec < t_speak_end
+        t_bg_end = t_speak_start + speak_sec + after_speak_sec
+        return t_speak_start <= elapsed_sec < t_bg_end
 
-    def _speak_fill_remaining_sec(self) -> float:
+    def _bg_active_remaining_sec(self) -> float:
         total_sec = max(0.0, float(self._sub_content_wait_total_sec))
         if total_sec <= 1e-6:
             return 0.0
@@ -609,10 +609,10 @@ class PracticeScene(IConversationStep):
         if speak_sec <= 1e-6:
             return 0.0
         t_speak_start = listen_sec + gap_sec
-        t_speak_end = t_speak_start + speak_sec
-        if elapsed_sec < t_speak_start or elapsed_sec >= t_speak_end:
+        t_bg_end = t_speak_start + speak_sec + after_speak_sec
+        if elapsed_sec < t_speak_start or elapsed_sec >= t_bg_end:
             return 0.0
-        return max(0.0, t_speak_end - elapsed_sec)
+        return max(0.0, t_bg_end - elapsed_sec)
 
     def _play_random_background_sound(self) -> None:
         if not self._bg_sounds:
@@ -636,7 +636,7 @@ class PracticeScene(IConversationStep):
             self._bg_playing = True
             if self.on_bg_sound_started is not None:
                 try:
-                    self.on_bg_sound_started(sound_path, self._speak_fill_remaining_sec())
+                    self.on_bg_sound_started(sound_path, self._bg_active_remaining_sec())
                 except Exception:
                     pass
         except Exception:

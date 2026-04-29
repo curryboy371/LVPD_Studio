@@ -40,6 +40,11 @@ def _mux_volume_prefix(role: str) -> str:
     return ""
 
 
+def _is_background_insert_path(path: str) -> bool:
+    norm = str(path or "").replace("\\", "/").lower()
+    return "/resource/sound/background/" in norm
+
+
 def _preextract_embedded_audio_to_wav(
     ffmpeg_cmd: str,
     video_path: str,
@@ -211,7 +216,8 @@ def _build_audio_from_events(
             current_video_path = None
         elif isinstance(ev, InsertSound):
             if os.path.exists(ev.path) and ev.duration_sec > 0:
-                segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0, "sidecar"))
+                role = "bg_insert" if _is_background_insert_path(ev.path) else "sidecar"
+                segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0, role))
 
     # 마지막 세그먼트: 녹화 끝까지 재생 중이었으면
     if current_video_path and os.path.exists(current_video_path):
@@ -269,8 +275,13 @@ def _build_audio_from_events(
         # 선추출 WAV는 이미 구간만 담음 → atrim=0:dur. 컨테이너 직입력은 src_start~
         atrim = f"atrim={src_start}:{src_start + dur}"
         gain = _mux_volume_prefix(role)
+        fade = ""
+        if role == "bg_insert":
+            fade_sec = min(1.0, max(0.1, dur * 0.45))
+            out_start = max(0.0, dur - fade_sec)
+            fade = f"afade=t=in:st=0:d={fade_sec},afade=t=out:st={out_start}:d={fade_sec},"
         filter_parts.append(
-            f"[{idx + 1}:a]{atrim},{gain}adelay={delay_ms}|{delay_ms},"
+            f"[{idx + 1}:a]{atrim},{gain}{fade}adelay={delay_ms}|{delay_ms},"
             f"apad=whole_len={whole_len}[a{idx}]"
         )
     # [0][a0][a1]...amix → aformat 체인으로 [aout]까지 연결
