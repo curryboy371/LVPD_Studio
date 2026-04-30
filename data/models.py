@@ -168,7 +168,7 @@ class SubSentence(BaseModel):
 
     id: int = Field(..., description="기본키")
     base_id: int = Field(..., description="base_sentence.id")
-    target_slot_order: int = Field(default=0, ge=0, description="대상 슬롯 순서")
+    target_slot_order: int = Field(default=0, ge=-1, description="대상 슬롯 순서(-1은 문장 맨앞)")
     alt_word_id: int = Field(..., description="대체 단어 word.id")
     alt_translation: str = Field(default="", description="대체 번역")
     alt_sound_path: str = Field(default="", description="대체 음성 경로")

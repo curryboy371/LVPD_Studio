@@ -368,20 +368,6 @@ class PracticeScene(IConversationStep):
             self._style,
             colors=replace(self._style.colors, hanzi_color=(255, 255, 255)),
         )
-        self.drawer.draw_item_sentence(
-            screen,
-            render_item,
-            ctx=ctx,
-            channel=self._sentence_channel,
-            style=white_style,
-            title_clearance=(self.title_text, 0.12, 12),
-        )
-
-        replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
-        alt_word = str(self._current_sub_variant.get("alt_word") or "").strip()
-        if not replaced_sentence or not alt_word:
-            return
-
         data = build_sentence_render_data_with_tone_icons(render_item)
         y_base = self.drawer.layout_sentence_y_base(
             ctx,
@@ -393,27 +379,57 @@ class PracticeScene(IConversationStep):
             bottom_margin_px=48,
             title_clearance=(self.title_text, 0.12, 12),
         )
+        # SHOW_SUB_CONTENT에서는 한자 줄을 별도 수동 렌더링하므로,
+        # drawer에는 병음/번역만 그리게 한다(겹침/잔상 방지).
+        self.drawer.draw_sentence(
+            screen,
+            replace(data, sentence=""),
+            channel=self._sentence_channel,
+            center_x=int(ctx.width) // 2,
+            y_base=y_base,
+            style=white_style,
+        )
+
+        replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
+        alt_word = str(self._current_sub_variant.get("alt_word") or "").strip()
+        if not replaced_sentence or not alt_word:
+            return
+
         hanzi_text = (data.sentence or "")[: white_style.text.max_hanzi]
         if not hanzi_text:
             return
 
-        idx: int
-        span_len: int
-        start_raw = self._current_sub_variant.get("alt_hanzi_start")
-        len_raw = self._current_sub_variant.get("alt_hanzi_len")
-        if isinstance(start_raw, int) and isinstance(len_raw, int) and len_raw > 0:
-            idx = start_raw
-            span_len = len_raw
-        else:
-            idx = hanzi_text.find(alt_word)
-            if idx < 0:
+        spans_raw = self._current_sub_variant.get("alt_hanzi_spans")
+        spans: list[tuple[int, int]] = []
+        if isinstance(spans_raw, list):
+            for s in spans_raw:
+                if not isinstance(s, dict):
+                    continue
+                st = s.get("start")
+                ln = s.get("len")
+                if not isinstance(st, int) or not isinstance(ln, int):
+                    continue
+                if st < 0 or st >= len(hanzi_text) or ln <= 0:
+                    continue
+                spans.append((st, min(ln, len(hanzi_text) - st)))
+        if not spans:
+            # 하위 호환: 기존 단일 span 필드를 우선 사용하고, 없으면 alt_word 문자열 검색으로 폴백한다.
+            start_raw = self._current_sub_variant.get("alt_hanzi_start")
+            len_raw = self._current_sub_variant.get("alt_hanzi_len")
+            if isinstance(start_raw, int) and isinstance(len_raw, int) and len_raw > 0:
+                idx = start_raw
+                span_len = len_raw
+            else:
+                idx = hanzi_text.find(alt_word)
+                if idx < 0:
+                    return
+                span_len = len(alt_word)
+            if idx < 0 or idx >= len(hanzi_text):
                 return
-            span_len = len(alt_word)
-        if idx < 0 or idx >= len(hanzi_text):
-            return
-        span_len = min(span_len, len(hanzi_text) - idx)
-        if span_len <= 0:
-            return
+            span_len = min(span_len, len(hanzi_text) - idx)
+            if span_len <= 0:
+                return
+            spans.append((idx, span_len))
 
         # 별도 폰트를 만들지 않고, _sentence_channel이 쓰는 메인 한자 폰트 체계를 그대로 사용한다.
         fonts = getattr(self.drawer, "_fonts", None)
@@ -425,44 +441,79 @@ class PracticeScene(IConversationStep):
 
         y_hanzi = y_base + (white_style.layout.line_gap_px if (data.pinyin or "").strip() else 0)
         center_x = int(ctx.width) // 2
-        full_surf, _ = self.drawer._get_cached_text_pair(
-            cache_hanzi,
-            hanzi_ft,
-            hanzi_pg,
-            hanzi_text,
-            white_style.colors.hanzi_color,
-        )
-        full_w = int(full_surf.get_width())
-        x_line = max(white_style.layout.min_margin_x, center_x - full_w // 2)
+        # 오버레이(흰색 전체 + 노란색 덧그리기) 대신,
+        # 문장을 색 구간으로 쪼개 "한 번만" 그려서 겹침 테두리를 제거한다.
+        color_flags = [False] * len(hanzi_text)
+        for idx, span_len in spans:
+            end_i = min(len(hanzi_text), max(idx, 0) + max(span_len, 0))
+            for i in range(max(0, idx), end_i):
+                color_flags[i] = True
 
-        prefix = hanzi_text[:idx]
-        target = hanzi_text[idx : idx + span_len]
-        if not target:
+        segments: list[tuple[str, tuple[int, int, int]]] = []
+        cur_text = ""
+        cur_is_yellow: bool | None = None
+        for i, ch in enumerate(hanzi_text):
+            is_yellow = color_flags[i]
+            if cur_is_yellow is None:
+                cur_is_yellow = is_yellow
+                cur_text = ch
+                continue
+            if is_yellow == cur_is_yellow:
+                cur_text += ch
+                continue
+            segments.append(
+                (
+                    cur_text,
+                    self._style.colors.hanzi_color if cur_is_yellow else white_style.colors.hanzi_color,
+                )
+            )
+            cur_text = ch
+            cur_is_yellow = is_yellow
+        if cur_text:
+            segments.append(
+                (
+                    cur_text,
+                    self._style.colors.hanzi_color if cur_is_yellow else white_style.colors.hanzi_color,
+                )
+            )
+
+        if not segments:
             return
-        if prefix:
-            prefix_surf, _ = self.drawer._get_cached_text_pair(
+
+        seg_surfs: list[pygame.Surface] = []
+        total_w = 0
+        for seg_text, seg_color in segments:
+            surf, _ = self.drawer._get_cached_text_pair(
                 cache_hanzi,
                 hanzi_ft,
                 hanzi_pg,
-                prefix,
-                white_style.colors.hanzi_color,
+                seg_text,
+                seg_color,
             )
-            prefix_w = int(prefix_surf.get_width())
-        else:
-            prefix_w = 0
-        target_surf, _ = self.drawer._get_cached_text_pair(
-            cache_hanzi,
-            hanzi_ft,
-            hanzi_pg,
-            target,
-            self._style.colors.hanzi_color,
-        )
+            seg_surfs.append(surf)
+            total_w += int(surf.get_width())
+
+        full_w = int(total_w)
+        x_line = max(white_style.layout.min_margin_x, center_x - full_w // 2)
+
         alpha = int(max(0, min(255, self.drawer.fade_alpha(self._sentence_channel))))
         if alpha <= 0:
             return
-        if alpha < 255:
-            target_surf.set_alpha(alpha)
-        screen.blit(target_surf, (x_line + prefix_w, y_hanzi))
+        cur_x = x_line
+        for surf in seg_surfs:
+            if alpha >= 255:
+                screen.blit(surf, (cur_x, y_hanzi))
+            else:
+                old_alpha = surf.get_alpha()
+                surf.set_alpha(alpha)
+                try:
+                    screen.blit(surf, (cur_x, y_hanzi))
+                finally:
+                    if old_alpha is None:
+                        surf.set_alpha(None)
+                    else:
+                        surf.set_alpha(old_alpha)
+            cur_x += int(surf.get_width())
 
     def _draw_sub_content_playback_bar(
         self,

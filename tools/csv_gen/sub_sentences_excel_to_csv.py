@@ -31,6 +31,14 @@ def _normalize(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_multi_pipe(value: Any) -> str:
+    """다중 값 입력의 구분자를 파이프(|)로 통일한다."""
+    text = _normalize(value)
+    if not text:
+        return ""
+    return "|".join(part.strip() for part in text.replace(",", "|").split("|") if part.strip())
+
+
 def _to_int(val: Any, default: int = 0) -> int:
     try:
         return int(float(val))
@@ -62,8 +70,9 @@ def sub_sentences_excel_to_csv(
         final_rows.append({
             "id": _to_int(row.get("id"), 0),
             "base_id": _to_int(row.get("base_id"), 0),
-            "target_slot_order": _to_int(row.get("target_slot_order"), 0),
-            "alt_word_id": _to_int(row.get("alt_word_id"), 0),
+            # 다중 치환 구분자를 파이프(|)로 통일해 CSV 저장한다.
+            "target_slot_order": _normalize_multi_pipe(row.get("target_slot_order")),
+            "alt_word_id": _normalize_multi_pipe(row.get("alt_word_id")),
             "alt_translation": _normalize(row.get("alt_translation", "")),
             "alt_sound_path": _normalize(row.get("alt_sound_path", "")),
         })

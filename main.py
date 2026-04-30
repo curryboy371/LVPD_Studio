@@ -44,7 +44,7 @@ def _get_video_duration_sec(file_path: str | Path) -> float:
     if not path.exists():
         return 0.0
     try:
-        result = subprocess.run(
+    result = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1", str(path),

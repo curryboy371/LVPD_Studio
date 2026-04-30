@@ -9,11 +9,13 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, Union
 
 from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
+
+_SLOT_APPEND = "__append__"
 
 
 def _parse_time_sec(val: Any, default: float = 0.0) -> float:
@@ -369,10 +371,19 @@ def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
                 
                 base_id = int(float(raw_base_id))
                 
+                target_slot_orders = _parse_target_slot_orders(row.get("target_slot_order"))
+                alt_word_ids = _parse_alt_word_ids(row.get("alt_word_id"))
+                if not target_slot_orders or not alt_word_ids:
+                    continue
+
                 item = {
                     "id": int(float(str(row.get("id") or 0).strip())),
-                    "target_slot_order": int(float(str(row.get("target_slot_order") or 0).strip())),
-                    "alt_word_id": int(float(str(row.get("alt_word_id") or 0).strip())),
+                    # 하위 호환: 단일 슬롯/단어를 쓰는 기존 코드도 동작하게 첫 값을 유지한다.
+                    "target_slot_order": target_slot_orders[0],
+                    "alt_word_id": alt_word_ids[0],
+                    # 신규: 다중 치환 지원.
+                    "target_slot_orders": target_slot_orders,
+                    "alt_word_ids": alt_word_ids,
                     "alt_translation": str(row.get("alt_translation") or "").strip(),
                     "alt_sound_path": str(row.get("alt_sound_path") or "").strip(),
                 }
@@ -383,9 +394,9 @@ def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
                 print(f"CSV {i+1}행 데이터 오류 (base_id: {row.get('base_id')}): {e}")
                 continue
 
-    # 정렬 로직
+    # PRACTICE 순서는 sub_sentences.id 오름차순으로 고정한다.
     for base_id in grouped:
-        grouped[base_id].sort(key=lambda x: (x["target_slot_order"], x["id"]))
+        grouped[base_id].sort(key=lambda x: x["id"])
         
     return grouped
 
@@ -405,6 +416,115 @@ def _replace_slot_in_raw_sentence(raw_sentence: str, *, target_slot_order: int, 
 
     replaced_raw = re.sub(r"\{([^}]*)\}", _slot_repl, raw_sentence)
     return _raw_sentence_to_display(replaced_raw)
+
+
+def _split_csv_multi_value(raw: Any) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    # 다중 값 표준 구분자는 파이프(|)로 통일한다.
+    chunks = text.split("|")
+    return [c.strip() for c in chunks if c is not None and c.strip()]
+
+
+def _parse_target_slot_orders(raw: Any) -> list[Union[int, str]]:
+    out: list[Union[int, str]] = []
+    for token in _split_csv_multi_value(raw):
+        t = token.strip().lower()
+        if t in ("-1", "front", "start", "prefix", "맨앞", "앞"):
+            out.append(-1)
+            continue
+        if t in ("end", "last", "suffix", "맨끝", "끝"):
+            out.append(_SLOT_APPEND)
+            continue
+        try:
+            out.append(int(float(token)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _parse_alt_word_ids(raw: Any) -> list[int]:
+    out: list[int] = []
+    for token in _split_csv_multi_value(raw):
+        try:
+            out.append(int(float(token)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _zip_slot_orders_and_alt_word_ids(
+    *,
+    target_slot_orders: list[Union[int, str]],
+    alt_word_ids: list[int],
+) -> list[tuple[Union[int, str], int]]:
+    if not target_slot_orders or not alt_word_ids:
+        return []
+    if len(target_slot_orders) == len(alt_word_ids):
+        return list(zip(target_slot_orders, alt_word_ids))
+    if len(target_slot_orders) == 1:
+        return [(target_slot_orders[0], wid) for wid in alt_word_ids]
+    if len(alt_word_ids) == 1:
+        return [(slot, alt_word_ids[0]) for slot in target_slot_orders]
+    n = min(len(target_slot_orders), len(alt_word_ids))
+    return list(zip(target_slot_orders[:n], alt_word_ids[:n]))
+
+
+def _replace_multiple_slots_in_raw_sentence(
+    raw_sentence: str,
+    *,
+    replacements: list[tuple[Union[int, str], str]],
+) -> str:
+    """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다."""
+    if not raw_sentence:
+        return ""
+
+    slot_words = _raw_sentence_to_words(raw_sentence)
+    if not slot_words:
+        return ""
+
+    # 슬롯 밖 텍스트(문장부호 포함)를 보존한다.
+    literals: list[str] = []
+    cursor = 0
+    for m in re.finditer(r"\{([^}]*)\}", raw_sentence):
+        literals.append(raw_sentence[cursor : m.start()])
+        cursor = m.end()
+    literals.append(raw_sentence[cursor:])
+    if len(literals) != len(slot_words) + 1:
+        return _raw_sentence_to_display(raw_sentence)
+
+    merged_slots = list(slot_words)
+    prefix_words: list[str] = []
+    suffix_words: list[str] = []
+
+    for slot_order, new_word in replacements:
+        w = str(new_word or "").strip()
+        if not w:
+            continue
+        if slot_order == _SLOT_APPEND:
+            suffix_words.append(w)
+            continue
+        try:
+            slot_i = int(slot_order)
+        except (TypeError, ValueError):
+            continue
+        if slot_i == -1:
+            prefix_words.append(w)
+        elif 0 <= slot_i < len(merged_slots):
+            merged_slots[slot_i] = w
+        else:
+            # 기존 슬롯 인덱스를 벗어나면 문장 끝에 붙인다.
+            suffix_words.append(w)
+
+    parts: list[str] = []
+    parts.extend(prefix_words)
+    for i, slot_word in enumerate(merged_slots):
+        parts.append(literals[i])
+        parts.append(slot_word)
+    parts.append(literals[-1])
+    parts.extend(suffix_words)
+    return "".join(parts).strip()
 
 
 def _display_alt_hanzi_span(
@@ -441,6 +561,33 @@ def _display_alt_hanzi_span(
     return None
 
 
+def _find_word_span_in_display_sentence(display_sentence: str, word: str) -> Optional[Tuple[int, int]]:
+    target = str(word or "").strip()
+    text = str(display_sentence or "")
+    if not text or not target:
+        return None
+    pos = text.find(target)
+    if pos < 0:
+        return None
+    return pos, len(target)
+
+
+def _find_word_span_in_display_sentence_from(
+    display_sentence: str,
+    word: str,
+    *,
+    start_pos: int = 0,
+) -> Optional[Tuple[int, int]]:
+    target = str(word or "").strip()
+    text = str(display_sentence or "")
+    if not text or not target:
+        return None
+    pos = text.find(target, max(0, int(start_pos)))
+    if pos < 0:
+        return None
+    return pos, len(target)
+
+
 def _attach_sub_variants_to_base_rows(
     base_rows: list[dict],
     *,
@@ -462,35 +609,101 @@ def _attach_sub_variants_to_base_rows(
         raw_sentence = str(row.get("raw_sentence") or "").strip()
         sub_variants: list[dict] = []
         for v in variants:
-            alt_word_id = int(v.get("alt_word_id", 0))
-            slot_order = int(v.get("target_slot_order", 0))
-            alt_word = words_by_id.get(alt_word_id, "").strip()
-            if not alt_word:
+            raw_slot_orders = v.get("target_slot_orders")
+            if isinstance(raw_slot_orders, list) and raw_slot_orders:
+                slot_orders = list(raw_slot_orders)
+            else:
+                slot_orders = [v.get("target_slot_order", 0)]
+            raw_alt_word_ids = v.get("alt_word_ids")
+            if isinstance(raw_alt_word_ids, list) and raw_alt_word_ids:
+                alt_word_ids = [int(x) for x in raw_alt_word_ids]
+            else:
+                alt_word_ids = [int(v.get("alt_word_id", 0))]
+            replacement_specs = _zip_slot_orders_and_alt_word_ids(
+                target_slot_orders=slot_orders,
+                alt_word_ids=alt_word_ids,
+            )
+            if not replacement_specs:
                 continue
+
+            resolved_replacements: list[tuple[Union[int, str], int, str]] = []
+            for slot_order, alt_word_id in replacement_specs:
+                alt_word = words_by_id.get(int(alt_word_id), "").strip()
+                if not alt_word:
+                    continue
+                resolved_replacements.append((slot_order, int(alt_word_id), alt_word))
+            if not resolved_replacements:
+                continue
+            # 요청한 다중 치환은 "전부 성공"해야 한다.
+            # 일부만 해석되면 원문 슬롯이 남아 보이므로 해당 변형을 스킵한다.
+            if len(resolved_replacements) != len(replacement_specs):
+                continue
+
             alt_sound_path = str(v.get("alt_sound_path") or "").strip()
             if alt_sound_path and not os.path.isabs(alt_sound_path):
                 alt_sound_path = str(_REPO_ROOT / alt_sound_path.replace("\\", "/"))
-            replaced_sentence = _replace_slot_in_raw_sentence(
+
+            replaced_sentence = _replace_multiple_slots_in_raw_sentence(
                 raw_sentence,
-                target_slot_order=slot_order,
-                new_word=alt_word,
+                replacements=[(slot_order, alt_word) for slot_order, _wid, alt_word in resolved_replacements],
             )
             if not replaced_sentence:
                 continue
-            span = _display_alt_hanzi_span(
-                raw_sentence, target_slot_order=slot_order, alt_word=alt_word
-            )
+
+            primary_slot_order, primary_alt_word_id, primary_alt_word = resolved_replacements[0]
+            if (
+                isinstance(primary_slot_order, int)
+                and primary_slot_order >= 0
+                and primary_slot_order != -1
+            ):
+                span = _display_alt_hanzi_span(
+                    raw_sentence,
+                    target_slot_order=primary_slot_order,
+                    alt_word=primary_alt_word,
+                )
+            else:
+                span = _find_word_span_in_display_sentence(replaced_sentence, primary_alt_word)
+
             variant_dict: dict[str, Any] = {
-                "target_slot_order": slot_order,
-                "alt_word_id": alt_word_id,
-                "alt_word": alt_word,
+                "target_slot_order": primary_slot_order,
+                "alt_word_id": primary_alt_word_id,
+                "alt_word": primary_alt_word,
+                "target_slot_orders": [slot for slot, _wid, _w in resolved_replacements],
+                "alt_word_ids": [wid for _slot, wid, _w in resolved_replacements],
+                "alt_words": [w for _slot, _wid, w in resolved_replacements],
                 "replaced_sentence": replaced_sentence,
                 "alt_translation": str(v.get("alt_translation") or "").strip(),
                 "alt_sound_path": alt_sound_path,
             }
+            # 추가/치환된 단어를 모두 하이라이트할 수 있도록 span 목록을 저장한다.
+            spans: list[dict[str, int]] = []
+            search_pos = 0
+            for slot_order, _wid, alt_word in resolved_replacements:
+                cur_span: Optional[Tuple[int, int]] = None
+                if isinstance(slot_order, int) and slot_order >= 0:
+                    cur_span = _display_alt_hanzi_span(
+                        raw_sentence,
+                        target_slot_order=slot_order,
+                        alt_word=alt_word,
+                    )
+                if cur_span is None:
+                    cur_span = _find_word_span_in_display_sentence_from(
+                        replaced_sentence,
+                        alt_word,
+                        start_pos=search_pos,
+                    )
+                if cur_span is None:
+                    continue
+                start_i, len_i = int(cur_span[0]), int(cur_span[1])
+                if len_i <= 0:
+                    continue
+                spans.append({"start": start_i, "len": len_i})
+                search_pos = max(search_pos, start_i + len_i)
             if span is not None:
                 variant_dict["alt_hanzi_start"] = int(span[0])
                 variant_dict["alt_hanzi_len"] = int(span[1])
+            if spans:
+                variant_dict["alt_hanzi_spans"] = spans
             sub_variants.append(variant_dict)
         if sub_variants:
             # LearningScene의 전용 Stage에서 바로 사용할 공통 키.
