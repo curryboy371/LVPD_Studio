@@ -94,6 +94,8 @@ class PracticeScene(IConversationStep):
         self._title_image_surface = self._load_title_image_surface("문장_연습하기.png")
         if self._title_image_surface is None:
             raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_연습하기.png")
+        # 문장 이해하기 타이틀의 실제 렌더 크기를 기준으로 연습 타이틀 크기를 맞추기 위해 보관한다.
+        self._title_reference_surface = self._load_title_image_surface("문장_이해하기.png")
         self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
         self._speak_icon_surface = self._load_mode_icon_surface("speak.png")
         self._bg_sounds = self._load_background_sounds()
@@ -707,15 +709,42 @@ class PracticeScene(IConversationStep):
         sw, sh = int(surf.get_width()), int(surf.get_height())
         if sw <= 0 or sh <= 0:
             return
-        scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
-        tw = max(1, int(round(sw * scale)))
-        th = max(1, int(round(sh * scale)))
+        tw, th = self._resolve_learning_title_target_size(
+            max_w=max_w,
+            max_h=max_h,
+            fallback_w=sw,
+            fallback_h=sh,
+        )
+        # 요청: 연습 타이틀은 기준 대비 세로 높이만 소폭 키운다.
+        th = max(1, int(round(th * 1.08)))
         draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
         if alpha < 255:
             draw.set_alpha(alpha)
         x = max(self._style.layout.min_margin_x, margin_left)
         y = max(0, margin_top)
         screen.blit(draw, (x, y))
+
+    def _resolve_learning_title_target_size(
+        self,
+        *,
+        max_w: int,
+        max_h: int,
+        fallback_w: int,
+        fallback_h: int,
+    ) -> tuple[int, int]:
+        """문장 이해하기 기준 렌더 크기를 계산한다. 실패 시 현재 타이틀 크기로 폴백한다."""
+        ref = self._title_reference_surface
+        if ref is None:
+            scale = min(float(max_w) / float(fallback_w), float(max_h) / float(fallback_h), 1.0)
+            return max(1, int(round(fallback_w * scale))), max(1, int(round(fallback_h * scale)))
+        rw, rh = int(ref.get_width()), int(ref.get_height())
+        if rw <= 0 or rh <= 0:
+            scale = min(float(max_w) / float(fallback_w), float(max_h) / float(fallback_h), 1.0)
+            return max(1, int(round(fallback_w * scale))), max(1, int(round(fallback_h * scale)))
+        ref_scale = min(float(max_w) / float(rw), float(max_h) / float(rh), 1.0)
+        target_w = max(1, int(round(rw * ref_scale)))
+        target_h = max(1, int(round(rh * ref_scale)))
+        return target_w, target_h
 
     def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
         box = self._tip_box_surface

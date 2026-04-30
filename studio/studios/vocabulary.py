@@ -168,6 +168,7 @@ class VocabularyStudio:
         self._font_hint: Optional[pygame.font.Font] = None
         self._font_title: Optional[pygame.font.Font] = None
         self._title_image_surface: Optional[pygame.Surface] = None
+        self._conversation_title_reference_surface: Optional[pygame.Surface] = None
         self._recording_done: bool = False
         self._list_scroll_px: int = 0
         self._selected_index: int = 0
@@ -258,6 +259,7 @@ class VocabularyStudio:
         title_size = fs.kr
         self._font_title = load_font_korean(title_size, (230, 230, 235)) or self._font_kr
         self._title_image_surface = self._load_title_image_surface("단어_공부하기.png")
+        self._conversation_title_reference_surface = self._load_title_image_surface("문장_이해하기.png")
 
     def _load_title_image_surface(self, filename: str) -> Optional[pygame.Surface]:
         root = Path(__file__).resolve().parents[2]
@@ -688,11 +690,24 @@ class VocabularyStudio:
             margin_top = 18
             sw, sh = int(title_img.get_width()), int(title_img.get_height())
             if sw > 0 and sh > 0:
-                max_w = int(w * 0.42)
-                max_h = 86
-                scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
-                tw = max(1, int(round(sw * scale)))
-                th = max(1, int(round(sh * scale)))
+                # 회화 타이틀("문장 이해하기")의 실제 렌더 크기를 기준으로 맞춘다.
+                max_w = int(w * 0.54)
+                max_h = 114
+                ref = self._conversation_title_reference_surface
+                if ref is not None:
+                    rw, rh = int(ref.get_width()), int(ref.get_height())
+                else:
+                    rw, rh = 0, 0
+                if rw > 0 and rh > 0:
+                    ref_scale = min(float(max_w) / float(rw), float(max_h) / float(rh), 1.0)
+                    tw = max(1, int(round(rw * ref_scale)))
+                    th = max(1, int(round(rh * ref_scale)))
+                else:
+                    scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
+                    tw = max(1, int(round(sw * scale)))
+                    th = max(1, int(round(sh * scale)))
+                # 요청: 단어 모드 타이틀은 세로 높이만 소폭 줄인다.
+                th = max(1, int(round(th * 0.70)))
                 draw = (
                     pygame.transform.smoothscale(title_img, (tw, th))
                     if (tw != sw or th != sh)
