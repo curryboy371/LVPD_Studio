@@ -9,7 +9,7 @@ from typing import Any
 
 import pygame
 
-from utils.fonts import load_font_korean
+from utils.fonts import load_font_chinese, load_font_korean
 
 from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
@@ -76,7 +76,9 @@ class LearningScene(FSMConversationStep):
         self._playback_bar = PlaybackBarRenderer()
         self._listen_icon_surface = self._load_listen_icon_surface()
         self._tip_box_surface = self._load_tip_box_surface()
-        self._tip_font = load_font_korean(42, (0, 0, 0), weight="bold") or pygame.font.Font(None, 42)
+        self._tip_font_cn = load_font_chinese(42, (0, 0, 0), weight="bold")
+        self._tip_font_kr = load_font_korean(42, (0, 0, 0), weight="bold")
+        self._tip_font_fallback = pygame.font.Font(None, 42)
         self._title_image_surface = self._load_title_image_surface("문장_이해하기.png")
         if self._title_image_surface is None:
             raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_이해하기.png")
@@ -401,7 +403,7 @@ class LearningScene(FSMConversationStep):
         if not txt:
             return
         lines = [ln for ln in txt.replace("\\n", "\n").split("\n")]
-        rendered = [self._tip_font.render(ln, True, (0, 0, 0)) for ln in lines if ln is not None]
+        rendered = [self._render_tip_line(ln) for ln in lines if ln is not None]
         if not rendered:
             return
         line_gap = 6
@@ -411,3 +413,58 @@ class LearningScene(FSMConversationStep):
             tx = int(x + (tw - surf.get_width()) * 0.5)
             screen.blit(surf, (tx, cur_y))
             cur_y += int(surf.get_height()) + line_gap
+
+    @staticmethod
+    def _is_hangul_char(ch: str) -> bool:
+        code = ord(ch)
+        return (0xAC00 <= code <= 0xD7A3) or (0x1100 <= code <= 0x11FF) or (0x3130 <= code <= 0x318F)
+
+    @staticmethod
+    def _is_cjk_char(ch: str) -> bool:
+        code = ord(ch)
+        return (
+            (0x4E00 <= code <= 0x9FFF)
+            or (0x3400 <= code <= 0x4DBF)
+            or (0xF900 <= code <= 0xFAFF)
+        )
+
+    def _pick_tip_font_for_char(self, ch: str) -> pygame.font.Font:
+        if self._is_hangul_char(ch):
+            return self._tip_font_kr or self._tip_font_cn or self._tip_font_fallback
+        if self._is_cjk_char(ch):
+            return self._tip_font_cn or self._tip_font_kr or self._tip_font_fallback
+        return self._tip_font_kr or self._tip_font_cn or self._tip_font_fallback
+
+    def _render_tip_line(self, text: str) -> pygame.Surface:
+        line = str(text or "")
+        if not line:
+            return (self._tip_font_kr or self._tip_font_cn or self._tip_font_fallback).render("", True, (0, 0, 0))
+        segments: list[tuple[pygame.font.Font, str]] = []
+        cur_font: pygame.font.Font | None = None
+        cur_text = ""
+        for ch in line:
+            picked = self._pick_tip_font_for_char(ch)
+            if cur_font is None:
+                cur_font = picked
+                cur_text = ch
+                continue
+            if picked == cur_font:
+                cur_text += ch
+                continue
+            segments.append((cur_font, cur_text))
+            cur_font = picked
+            cur_text = ch
+        if cur_font is not None and cur_text:
+            segments.append((cur_font, cur_text))
+        if not segments:
+            return self._tip_font_fallback.render("", True, (0, 0, 0))
+        rendered = [ft.render(seg, True, (0, 0, 0)) for ft, seg in segments]
+        total_w = sum(s.get_width() for s in rendered)
+        max_h = max(s.get_height() for s in rendered)
+        line_surf = pygame.Surface((max(1, total_w), max(1, max_h)), pygame.SRCALPHA)
+        x = 0
+        for surf in rendered:
+            y = (max_h - surf.get_height()) // 2
+            line_surf.blit(surf, (x, y))
+            x += surf.get_width()
+        return line_surf
