@@ -91,6 +91,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
     pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
+    tip_text = str(row.get("tip") or "").strip()
     raw_sentence = "".join(str(x) for x in sen if str(x).strip()).strip()
     if raw_sentence:
         try:
@@ -125,6 +126,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         "type": "base",
         "slot_index": 0,
         "sub_variants": _copy_sub_variants_list(row.get("sub_variants")),
+        "tip": tip_text,
     }
 
 
@@ -249,6 +251,7 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                 pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
                 sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or "").strip()
                 sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or "").strip()
+                tip_text = str(row.get("tip") or "").strip()
                 rows.append({
                     "id": vid,
                     "topic": topic,
@@ -266,6 +269,7 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                     "pinyin_lexical": pinyin_lexical,
                     "sound_l1": sound_l1,
                     "sound_l2": sound_l2,
+                    "tip": tip_text,
                 })
             except Exception:
                 continue
@@ -318,6 +322,7 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     "end_ms": row.get("video_end_ms") or -1,
                     "sound_l1": (row.get("sound_lv1_path") or "").strip(),
                     "sound_l2": (row.get("sound_lv2_path") or "").strip(),
+                    "tip": (row.get("tip") or "").strip(),
                     "pinyin_marks": pinyin_marks,
                     "pinyin_phonetic": pinyin_phonetic,
                     "pinyin_lexical": pinyin_lexical,

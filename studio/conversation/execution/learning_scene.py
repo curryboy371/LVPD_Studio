@@ -9,6 +9,8 @@ from typing import Any
 
 import pygame
 
+from utils.fonts import load_font_korean
+
 from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
 from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
@@ -73,6 +75,8 @@ class LearningScene(FSMConversationStep):
         self.title_fade_in_sec = float(title_fade_in_sec)
         self._playback_bar = PlaybackBarRenderer()
         self._listen_icon_surface = self._load_listen_icon_surface()
+        self._tip_box_surface = self._load_tip_box_surface()
+        self._tip_font = load_font_korean(42, (0, 0, 0), weight="bold") or pygame.font.Font(None, 42)
         self._title_image_surface = self._load_title_image_surface("문장_이해하기.png")
         if self._title_image_surface is None:
             raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_이해하기.png")
@@ -251,7 +255,7 @@ class LearningScene(FSMConversationStep):
         )
 
         self._draw_title(screen, ctx=ctx)
-        self._draw_play_listen_overlay(screen, ctx=ctx)
+        self._draw_play_listen_overlay(screen, ctx=ctx, item=item)
 
     def _load_listen_icon_surface(self) -> pygame.Surface | None:
         """학습 듣기 단계에서 사용할 listen 아이콘을 로드한다."""
@@ -289,6 +293,22 @@ class LearningScene(FSMConversationStep):
                 continue
         return None
 
+    def _load_tip_box_surface(self) -> pygame.Surface | None:
+        root = Path(__file__).resolve().parents[3]
+        candidates = (
+            root / "resource" / "image" / "icon" / "tip_box.png",
+            root / "resource" / "image" / "tip_box.png",
+            root / "resource" / "images" / "icon" / "tip_box.png",
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                return pygame.image.load(str(path))
+            except Exception:
+                continue
+        return None
+
     def _draw_title(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
         surf = self._title_image_surface
         if surf is None:
@@ -311,7 +331,13 @@ class LearningScene(FSMConversationStep):
         y = self.drawer.layout_title_y(ctx, y_ratio=0.04)
         screen.blit(draw, (x, y))
 
-    def _draw_play_listen_overlay(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
+    def _draw_play_listen_overlay(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        item: ConversationItemLike,
+    ) -> None:
         """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘을 동일하게 유지한다."""
         play = (self.Stage.PLAY_L1, self.Stage.PLAY_L2)
         wait_after = (self.Stage.WAIT_AFTER_L1, self.Stage.WAIT_AFTER_L2)
@@ -334,6 +360,12 @@ class LearningScene(FSMConversationStep):
             show_time_text=False,
             progress_color=LISTEN_BAR_COLOR,
         )
+        tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
+        self._draw_tip_box_above_gauge(
+            screen,
+            ctx=ctx,
+            tip_text=tip_text or "문장을 듣고 이해해보세요",
+        )
         if self._listen_icon_surface is None:
             return
         margin_left = 24
@@ -341,3 +373,38 @@ class LearningScene(FSMConversationStep):
         x = margin_left
         y = int(ctx.height) - int(self._listen_icon_surface.get_height()) - margin_bottom
         screen.blit(self._listen_icon_surface, (x, y))
+
+    def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
+        box = self._tip_box_surface
+        if box is None:
+            return
+        bar_rect = self._playback_bar.get_bar_rect(frame_width=ctx.width, frame_height=ctx.height)
+        sw, sh = int(box.get_width()), int(box.get_height())
+        if sw <= 0 or sh <= 0:
+            return
+        scale_x = 0.63
+        scale_y = 0.3
+        tw = max(1, int(round(sw * scale_x)))
+        th = max(1, int(round(sh * scale_y)))
+        draw = pygame.transform.smoothscale(box, (tw, th)) if (tw != sw or th != sh) else box
+        draw = draw.copy()
+        draw.set_alpha(178)
+        x = int(bar_rect.centerx - (tw // 2))
+        y = int(bar_rect.top - th - 12)
+        x = max(0, min(int(ctx.width) - tw, x))
+        y = max(0, y)
+        screen.blit(draw, (x, y))
+        txt = str(tip_text or "").strip()
+        if not txt:
+            return
+        lines = [ln for ln in txt.replace("\\n", "\n").split("\n")]
+        rendered = [self._tip_font.render(ln, True, (0, 0, 0)) for ln in lines if ln is not None]
+        if not rendered:
+            return
+        line_gap = 6
+        total_h = sum(s.get_height() for s in rendered) + line_gap * (len(rendered) - 1)
+        cur_y = int(y + (th - total_h) * 0.5)
+        for surf in rendered:
+            tx = int(x + (tw - surf.get_width()) * 0.5)
+            screen.blit(surf, (tx, cur_y))
+            cur_y += int(surf.get_height()) + line_gap

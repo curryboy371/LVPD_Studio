@@ -28,6 +28,7 @@ FIELDNAMES = [
     "sound_lv1_path",
     "sound_lv2_path",
     "base_words",
+    "tip",
 ]
 
 
@@ -87,6 +88,7 @@ def base_sentences_excel_to_csv(
             "sound_lv1_path": sound_lv1,
             "sound_lv2_path": sound_lv2,
             "base_words": _normalize(row.get("base_words", "")) or _extract_base_words(raw_sent),
+            "tip": _normalize(row.get("tip", row.get("life_tip", row.get("life_tips", "")))),
         })
 
     out_path = Path(csv_path)

@@ -146,6 +146,10 @@ class PlaybackBarRenderer:
             )
         return normalized
 
+    def get_bar_rect(self, *, frame_width: int, frame_height: int) -> pygame.Rect:
+        """Return resolved bar rectangle for external overlay alignment."""
+        return self._resolve_bar_rect(frame_width=frame_width, frame_height=frame_height)
+
     def _resolve_progress(
         self,
         *,

@@ -174,7 +174,7 @@ class VocabularyStudio:
         self._image_cache: dict[tuple[int, str], pygame.Surface] = {}
         self._sound_len_cache: dict[str, float] = {}
         self._auto_started: bool = False
-        self._auto_phase: str = "play_sound"
+        self._auto_phase: str = "idle"
         self._auto_phase_elapsed: float = 0.0
         self._auto_phase_duration: float = 0.0
         self._auto_cycle_index: int = 0
@@ -850,7 +850,9 @@ class VocabularyStudio:
         # - 오디오 길이 대기 구간: 주황색
         gauge_color: Optional[tuple[int, int, int]] = None
         gauge_progress: float = 0.0
-        if self._auto_phase == "play_sound":
+        if not self._auto_started:
+            gauge_color = None
+        elif self._auto_phase == "play_sound":
             gauge_color = (90, 220, 120)
             gauge_progress = (
                 min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
