@@ -50,6 +50,7 @@ _STROKE_FIXED_PLAY_SPEED = 1.0
 _GAUGE_H = 18
 _GAUGE_PAD_TOP = 10
 _IMAGE_CORNER_RADIUS = 16
+_TITLE_INTRO_FADE_SEC = 1.4
 
 # 품사 색상 테이블 (정확 매칭 우선, 미매칭은 기본 회색)
 _POS_COLOR_TABLE: dict[str, tuple[int, int, int]] = {
@@ -166,6 +167,7 @@ class VocabularyStudio:
         self._font_kr_pos_detail: Optional[pygame.font.Font] = None
         self._font_hint: Optional[pygame.font.Font] = None
         self._font_title: Optional[pygame.font.Font] = None
+        self._title_image_surface: Optional[pygame.Surface] = None
         self._recording_done: bool = False
         self._list_scroll_px: int = 0
         self._selected_index: int = 0
@@ -185,10 +187,15 @@ class VocabularyStudio:
         self._hanzi_animator = HanziAnimator()
         self._hanzi_anim_key: tuple[int, str] | None = None
         self._last_config: Any = None
+        self._intro_total_sec: float = _TITLE_INTRO_FADE_SEC
+        self._intro_remaining_sec: float = _TITLE_INTRO_FADE_SEC
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
         self._last_config = config
+        # 모드 재진입(또는 동일 인스턴스 재초기화) 시에도 타이틀 인트로를 항상 다시 시작한다.
+        self._intro_total_sec = _TITLE_INTRO_FADE_SEC
+        self._intro_remaining_sec = _TITLE_INTRO_FADE_SEC
         if self._font_cn_big is not None:
             return
         settings = _resolve_conversation_render_settings(config)
@@ -250,6 +257,23 @@ class VocabularyStudio:
         self._font_hint = load_font_korean(hint_size, (140, 140, 150)) or self._font_kr
         title_size = fs.kr
         self._font_title = load_font_korean(title_size, (230, 230, 235)) or self._font_kr
+        self._title_image_surface = self._load_title_image_surface("단어_공부하기.png")
+
+    def _load_title_image_surface(self, filename: str) -> Optional[pygame.Surface]:
+        root = Path(__file__).resolve().parents[2]
+        candidates = (
+            root / "resource" / "image" / "icon" / filename,
+            root / "resource" / "image" / "title" / filename,
+            root / "resource" / "image" / filename,
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                return pygame.image.load(str(path))
+            except Exception:
+                continue
+        return None
 
     def get_title(self) -> str:
         return "LVPD Studio - 단어"
@@ -303,6 +327,9 @@ class VocabularyStudio:
     def update(self, config: Any = None) -> None:
         self._last_config = config
         dt = float(getattr(config, "dt_sec", 0.0) or 0.0) if config is not None else 0.0
+        if self._intro_remaining_sec > 0.0:
+            self._intro_remaining_sec = max(0.0, self._intro_remaining_sec - max(0.0, dt))
+            return
         self._tick_auto_sequence(dt)
         ordered = self._ordered_rows()
         self._clamp_selection(len(ordered))
@@ -640,12 +667,53 @@ class VocabularyStudio:
         assert self._font_title is not None
 
         w, h = int(config.width), int(config.height)
-        title = self._font_title.render("단어 정리", True, WHITE)
-        title_x = (w - title.get_width()) // 2
-        title_y = max(0, (_HEADER_H - title.get_height()) // 2)
-        screen.blit(title, (title_x, title_y))
-
         main_top = _HEADER_H
+        title_img = self._title_image_surface
+        intro_alpha = 255
+        if self._intro_total_sec > 1e-6 and self._intro_remaining_sec > 0.0:
+            intro_alpha = int(
+                max(
+                    0,
+                    min(
+                        255,
+                        round(
+                            (1.0 - (self._intro_remaining_sec / self._intro_total_sec))
+                            * 255.0
+                        ),
+                    ),
+                )
+            )
+        if title_img is not None:
+            margin_left = 44
+            margin_top = 18
+            sw, sh = int(title_img.get_width()), int(title_img.get_height())
+            if sw > 0 and sh > 0:
+                max_w = int(w * 0.42)
+                max_h = 86
+                scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
+                tw = max(1, int(round(sw * scale)))
+                th = max(1, int(round(sh * scale)))
+                draw = (
+                    pygame.transform.smoothscale(title_img, (tw, th))
+                    if (tw != sw or th != sh)
+                    else title_img
+                )
+                if intro_alpha < 255:
+                    draw = draw.copy()
+                    draw.set_alpha(intro_alpha)
+                screen.blit(draw, (margin_left, margin_top))
+                main_top = max(_HEADER_H, margin_top + th + 8)
+        else:
+            title = self._font_title.render("단어 정리", True, WHITE)
+            if intro_alpha < 255:
+                title.set_alpha(intro_alpha)
+            title_x = (w - title.get_width()) // 2
+            title_y = max(0, (_HEADER_H - title.get_height()) // 2)
+            screen.blit(title, (title_x, title_y))
+
+        if self._intro_remaining_sec > 0.0:
+            return
+
         main_h = max(1, h - main_top)
         left_w = max(80, int(w * _LEFT_PANEL_RATIO))
         right_x = left_w

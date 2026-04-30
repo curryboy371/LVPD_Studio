@@ -86,6 +86,9 @@ class PracticeScene(IConversationStep):
         self._content_visible = False
         self._current_sub_variant = None
         self._playback_bar = PlaybackBarRenderer()
+        self._title_image_surface = self._load_title_image_surface("문장_연습하기.png")
+        if self._title_image_surface is None:
+            raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_연습하기.png")
         self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
         self._speak_icon_surface = self._load_mode_icon_surface("speak.png")
         self._bg_sounds = self._load_background_sounds()
@@ -277,13 +280,7 @@ class PracticeScene(IConversationStep):
         if frame is not None:
             screen.blit(frame, (0, 0))
 
-        self.drawer.draw_item_title(
-            screen,
-            self.title_text,
-            ctx=ctx,
-            channel=self._title_channel,
-            style=self._style,
-        )
+        self._draw_title(screen, ctx=ctx)
 
         if not self._content_visible:
             return
@@ -546,6 +543,47 @@ class PracticeScene(IConversationStep):
             except Exception:
                 continue
         return None
+
+    def _load_title_image_surface(self, filename: str) -> pygame.Surface | None:
+        root = Path(__file__).resolve().parents[3]
+        candidates = (
+            root / "resource" / "image" / "title" / filename,
+            root / "resource" / "images" / "title" / filename,
+            root / "resource" / "image" / "icon" / filename,
+            root / "resource" / "images" / "icon" / filename,
+            root / "resource" / "image" / filename,
+            root / "resource" / "images" / filename,
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                return pygame.image.load(str(path))
+            except Exception:
+                continue
+        return None
+
+    def _draw_title(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
+        surf = self._title_image_surface
+        if surf is None:
+            return
+        alpha = int(max(0, min(255, self.drawer.fade_alpha(self._title_channel))))
+        if alpha <= 0:
+            return
+        max_w = int(ctx.width * 0.56)
+        max_h = int(ctx.height * 0.16)
+        sw, sh = int(surf.get_width()), int(surf.get_height())
+        if sw <= 0 or sh <= 0:
+            return
+        scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
+        tw = max(1, int(round(sw * scale)))
+        th = max(1, int(round(sh * scale)))
+        draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
+        if alpha < 255:
+            draw.set_alpha(alpha)
+        x = max(self._style.layout.min_margin_x, (int(ctx.width) - tw) // 2)
+        y = self.drawer.layout_title_y(ctx, y_ratio=0.04)
+        screen.blit(draw, (x, y))
 
     def _load_background_sounds(self) -> list[tuple[str, pygame.mixer.Sound]]:
         """회화 모드용 배경 사운드 묶음(bg)을 미리 로드한다."""
