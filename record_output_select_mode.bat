@@ -10,11 +10,13 @@ if /I "%STUDIO%"=="vocabulary" goto :run
 if /I "%STUDIO%"=="combo" goto :run_combo
 
 echo [화면 출력 전용] 회화/단어 모드 선택 실행 (F5 디버그와 유사)
+echo  0^) 리소스 체크 모드 (topic 기반 누락 파일 점검)
 echo  1^) 회화 모드 (conversation)
 echo  2^) 단어 모드 (vocabulary)
 echo  3^) 녹화 결합 모드 (conversation record + vocabulary record + merge)
-set /p MODE_CHOICE=선택하세요 [1/2/3]:
+set /p MODE_CHOICE=선택하세요 [0/1/2/3]:
 
+if "%MODE_CHOICE%"=="0" set STUDIO=check
 if "%MODE_CHOICE%"=="1" set STUDIO=conversation
 if "%MODE_CHOICE%"=="2" set STUDIO=vocabulary
 if "%MODE_CHOICE%"=="3" set STUDIO=combo
@@ -25,10 +27,12 @@ if not defined STUDIO (
   echo   record_output_select_mode.bat conversation
   echo   record_output_select_mode.bat vocabulary
   echo   record_output_select_mode.bat combo
+  echo   record_output_select_mode.bat check
   exit /b 1
 )
 
 if /I "%STUDIO%"=="combo" goto :run_combo
+if /I "%STUDIO%"=="check" goto :run_check
 
 :run
 echo.
@@ -49,6 +53,31 @@ if errorlevel 1 (
 
 echo.
 pause
+exit /b 0
+
+:run_check
+echo.
+set "CHECK_TOPIC=%~2"
+if defined CHECK_TOPIC goto :run_check_topic_ready
+set /p CHECK_TOPIC=체크할 topic 입력 [전체는 엔터]:
+:run_check_topic_ready
+echo.
+echo [check] topic=%CHECK_TOPIC%
+where py >nul 2>nul && (
+  py -3 -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
+) || (
+  python -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
+)
+if errorlevel 1 (
+  echo.
+  echo [check] 누락 리소스가 있습니다.
+  pause
+  exit /b 1
+)
+echo.
+echo [check] 모든 리소스가 준비되었습니다.
+pause
+exit /b 0
 
 :run_combo
 echo.
