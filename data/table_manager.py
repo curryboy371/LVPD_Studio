@@ -159,7 +159,6 @@ def load_base_sentences_from_csv(
                         raw_sentence=_str(row.get("raw_sentence")),
                         translation=_str(row.get("translation")),
                         life_tip=_str(row.get("life_tip")),
-                        base_words=_str(row.get("base_words")),
                         media=media,
                     )
                 )
@@ -626,9 +625,7 @@ def get_table_rows() -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     for b in base:
-        words_str = (b.base_words or "").strip()
-        if not words_str:
-            words_str = "|".join(_raw_sentence_slot_words(b.raw_sentence))
+        words_str = "|".join(_raw_sentence_slot_words(b.raw_sentence))
         rows.append({
             "topic": b.topic,
             "id": b.id,

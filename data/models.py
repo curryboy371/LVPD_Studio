@@ -141,10 +141,6 @@ class BaseSentence(BaseModel):
     raw_sentence: str = Field(default="", description="원문 (예: {苹果}{多少}{钱})")
     translation: str = Field(default="", description="번역")
     life_tip: str = Field(default="", description="생활 팁")
-    base_words: str = Field(
-        default="",
-        description="기본 단어 순서(| 구분). 없으면 raw_sentence 슬롯으로 대체 가능.",
-    )
     media: BaseSentenceMedia = Field(default_factory=BaseSentenceMedia, description="미디어 정보")
 
 

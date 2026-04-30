@@ -1,13 +1,11 @@
 """
 base_sentences 엑셀 → base_sentences.csv 변환.
 media는 플랫 컬럼: video_path, video_start_ms, video_end_ms, sound_lv_path.
-수동 관리 편의를 위해 base_words('|') 컬럼을 함께 저장한다.
 """
 from __future__ import annotations
 
 import csv
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +24,6 @@ FIELDNAMES = [
     "video_start_ms",
     "video_end_ms",
     "sound_lv_path",
-    "base_words",
     "tip",
 ]
 
@@ -42,12 +39,6 @@ def _to_int(val: Any, default: int = 0) -> int:
         return int(float(val))
     except (TypeError, ValueError):
         return default
-
-
-def _extract_base_words(raw_sentence: str) -> str:
-    """raw_sentence 중괄호 슬롯에서 base_words('|') 문자열을 만든다."""
-    parts = [str(x).strip() for x in re.findall(r"\{([^}]*)\}", str(raw_sentence or "")) if str(x).strip()]
-    return "|".join(parts)
 
 
 def base_sentences_excel_to_csv(
@@ -92,7 +83,6 @@ def base_sentences_excel_to_csv(
             "video_start_ms": video_start_ms,
             "video_end_ms": video_end_ms,
             "sound_lv_path": sound_lv,
-            "base_words": _normalize(row.get("base_words", "")) or _extract_base_words(raw_sent),
             "tip": _normalize(row.get("tip", row.get("life_tip", row.get("life_tips", "")))),
         })
 

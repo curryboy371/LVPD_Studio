@@ -38,7 +38,6 @@
 | video_start_ms | int | - | 시작(ms) |
 | video_end_ms | int | - | 종료(ms) |
 | sound_lv_path | str | - | 음성 |
-| base_words | str | O | 기본 단어 순서(`|` 구분, 예: `苹果|多少|钱`) |
 
 ---
 
@@ -65,7 +64,7 @@ erDiagram
     words ||--o{ sub_sentences : "alt_word_id"
 ```
 
-- 기본 문장 단어 순서는 `base_sentences.base_words`에서 관리합니다.
+- 기본 문장 단어 순서는 `raw_sentence`의 슬롯(`{}`)에서 추출합니다.
 - 활용 문장은 `sub_sentences.target_slot_order` 위치를 `alt_word_id`로 교체해 생성합니다.
 
 ---
@@ -73,5 +72,5 @@ erDiagram
 ## 운영 규칙
 
 - ID 일관성: `sub_sentences.base_id == base_sentences.id`
-- 단어 순서 기준: `base_words`는 `raw_sentence`의 슬롯 순서와 일치
+- 단어 순서 기준: `raw_sentence`의 슬롯 순서를 그대로 사용
 - 사람 편집 우선: 필요한 컬럼만 유지하고 추가 메타 컬럼은 넣지 않음

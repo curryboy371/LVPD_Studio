@@ -332,7 +332,7 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     # get_table_rows() 포맷에 맞춰서 넣어둔다.
                     "sentence": _raw_sentence_to_display((row.get("raw_sentence") or "").strip()),
                     "translation": (row.get("translation") or "").strip(),
-                    "words": (row.get("base_words") or "").strip(),
+                    "words": "",
                     "video_path": (row.get("video_path") or "").strip(),
                     "start_ms": row.get("video_start_ms") or 0,
                     "end_ms": row.get("video_end_ms") or -1,
@@ -729,17 +729,11 @@ def _attach_sub_variants_to_base_rows(
     return base_rows
 
 
-def _attach_words_from_base_words(base_rows: list[dict]) -> list[dict]:
-    """base_words(예: 苹果|多少|钱) 우선, 없으면 raw_sentence 슬롯 추출로 words를 채운다."""
+def _attach_words_from_raw_sentence(base_rows: list[dict]) -> list[dict]:
+    """raw_sentence 슬롯 추출로 words를 채운다."""
     if not base_rows:
         return base_rows
     for row in base_rows:
-        base_words = str(row.get("words") or row.get("base_words") or "").strip()
-        if base_words:
-            words = [w.strip() for w in base_words.split("|") if w.strip()]
-            if words:
-                row["words"] = "|".join(words)
-                continue
         raw_sentence = str(row.get("raw_sentence") or "").strip()
         raw_words = _raw_sentence_to_words(raw_sentence)
         if raw_words:
@@ -812,7 +806,7 @@ def build_data_list(
                 except Exception:
                     sid = 0
                 if sid:
-                    words_by_id_map[sid] = str(base_row.get("words") or base_row.get("base_words") or "").strip()
+                    words_by_id_map[sid] = str(base_row.get("words") or "").strip()
 
             for row in rows:
                 try:
@@ -851,7 +845,7 @@ def build_data_list(
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
         words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
-        base_rows = _attach_words_from_base_words(base_rows)
+        base_rows = _attach_words_from_raw_sentence(base_rows)
         base_rows = _attach_sub_variants_to_base_rows(
             base_rows,
             words_by_id=words_by_id,

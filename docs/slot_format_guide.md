@@ -8,7 +8,7 @@ base 문장 한 개에 대해, 특정 단어 위치(`target_slot_order`)를 다�
 
 ## 1. 3테이블 구조
 
-- **base_sentences**: 원문·번역·미디어 + `base_words`(단어 순서)
+- **base_sentences**: 원문·번역·미디어
 - **words**: 단어 사전(`id, word, pos, meaning, img_path`)
 - **sub_sentences**: `base_id + target_slot_order + alt_word_id + alt_translation + alt_sound_path`
 
@@ -18,7 +18,7 @@ base 문장 한 개에 대해, 특정 단어 위치(`target_slot_order`)를 다�
 
 base_sentences id=1:
 - `raw_sentence`: `{苹果}{多少}{钱}？`
-- `base_words`: `苹果|多少|钱`
+- 단어 순서는 `raw_sentence`의 `{}` 슬롯 순서를 그대로 사용
 - `translation`: `사과 얼마예요?`
 
 words:
@@ -70,7 +70,7 @@ sub_sentences:
 
 ## 4. 작업 순서
 
-1. **base_sentences**에 `raw_sentence`, `base_words`, `translation` 입력
+1. **base_sentences**에 `raw_sentence`, `translation` 입력
 2. **words**에 대체 후보 단어를 등록
 3. **sub_sentences**에 같은 `base_id`로 `target_slot_order`, `alt_word_id`, `alt_translation`, `alt_sound_path` 추가
-4. 앱은 `base_words` + `sub_sentences`를 사용해 활용 문장을 만든다
+4. 앱은 `raw_sentence` 슬롯 + `sub_sentences`를 사용해 활용 문장을 만든다
