@@ -565,7 +565,11 @@ class VocabularyStudio:
         ordered = self._ordered_rows()
         n = len(ordered)
         dt = max(0.0, float(dt_sec))
-        if n <= 0 or self._recording_done:
+        if n <= 0:
+            # 녹화 until-content-done에서 단어 행이 비어 있으면 즉시 종료 신호를 올린다.
+            self._recording_done = True
+            return
+        if self._recording_done:
             return
         if not self._auto_started:
             # 단어장은 항상 id 1(정렬 첫 행)부터 시작

@@ -49,6 +49,24 @@ from data.table_manager import (
 # ----- 공통 인프라 -----
 
 
+def _ensure_record_audio_ready(pygame) -> None:
+    """record 시작 전에 mixer를 강제 점검하고, 실패 시 즉시 예외를 올린다."""
+    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+    try:
+        if pygame.mixer.get_init() is None:
+            pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+    except Exception as e:
+        raise RuntimeError(
+            "녹화 모드 오디오 초기화 실패: pygame.mixer를 사용할 수 없습니다. "
+            "오디오 장치/드라이버 설정을 확인하세요."
+        ) from e
+    if pygame.mixer.get_init() is None:
+        raise RuntimeError(
+            "녹화 모드 오디오 초기화 실패: mixer가 비활성 상태입니다."
+        )
+
+
 class StudioConfig:
     """해상도·좌표 변환. 디버그 모드에서 dt_sec, actual_fps 등이 매 프레임 설정됨."""
     def __init__(self, width: int = STUDIO_WIDTH, height: int = STUDIO_HEIGHT, fps: int = STUDIO_FPS):
@@ -238,6 +256,7 @@ def run(
     if mode == "debug":
         _run_debug(studio, config, clock, pygame)
     else:
+        _ensure_record_audio_ready(pygame)
         _run_record(
             studio,
             config,

@@ -96,15 +96,11 @@ echo         + %VOCAB_VIDEO%
 echo         = %MERGED_OUT%
 echo.
 
-ffmpeg -y -f concat -safe 0 -i "%LIST_FILE%" -c copy "%MERGED_OUT%"
+ffmpeg -y -f concat -safe 0 -i "%LIST_FILE%" -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "%MERGED_OUT%"
 if errorlevel 1 (
-  echo [merge] stream copy 실패, 재인코딩으로 재시도합니다.
-  ffmpeg -y -f concat -safe 0 -i "%LIST_FILE%" -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "%MERGED_OUT%"
-  if errorlevel 1 (
-    del /q "%LIST_FILE%" >nul 2>nul
-    echo [오류] 병합 실패. ffmpeg 설치/경로를 확인하세요.
-    exit /b 1
-  )
+  del /q "%LIST_FILE%" >nul 2>nul
+  echo [오류] 병합 실패. ffmpeg 설치/경로를 확인하세요.
+  exit /b 1
 )
 
 del /q "%LIST_FILE%" >nul 2>nul
