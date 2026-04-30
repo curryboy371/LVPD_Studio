@@ -95,8 +95,10 @@ def main() -> int:
 
     for row in selected_base:
         sid = (row.get("id") or "").strip()
-        for key in ("video_path", "sound_lv1_path", "sound_lv2_path"):
+        for key in ("video_path", "sound_lv_path"):
             raw = row.get(key) or ""
+            if key == "sound_lv_path" and not str(raw).strip():
+                raw = row.get("sound_lv1_path") or row.get("sound_lv2_path") or ""
             idx = sound_index if "sound_" in key else image_index
             resolved = _resolve_resource_path(raw, repo, idx)
             if resolved is None:

@@ -37,8 +37,7 @@
 | video_path | str | - | 영상 경로 |
 | video_start_ms | int | - | 시작(ms) |
 | video_end_ms | int | - | 종료(ms) |
-| sound_lv1_path | str | - | L1 음성 |
-| sound_lv2_path | str | - | L2 음성 |
+| sound_lv_path | str | - | 음성 |
 | base_words | str | O | 기본 단어 순서(`|` 구분, 예: `苹果|多少|钱`) |
 
 ---

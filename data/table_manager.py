@@ -144,8 +144,11 @@ def load_base_sentences_from_csv(
                         end_ms=_to_int(row.get("video_end_ms"), 0),
                     ),
                     sound=BaseSentenceSound(
-                        lv1_path=_str(row.get("sound_lv1_path")),
-                        lv2_path=_str(row.get("sound_lv2_path")),
+                        lv_path=_str(
+                            row.get("sound_lv_path")
+                            or row.get("sound_lv1_path")
+                            or row.get("sound_lv2_path")
+                        ),
                     ),
                 )
                 out.append(
@@ -557,16 +560,17 @@ def get_loaded_content() -> LoadedContent:
                 life_tips=life_tips,
             )
         )
-        sound_l1 = str(row.get("sound_l1") or "").strip()
-        sound_l2 = str(row.get("sound_l2") or "").strip()
-        if sound_l1:
-            if not Path(sound_l1).is_absolute():
-                sound_l1 = str(repo / sound_l1)
-            audio_tracks.append(AudioTrack(sound_path=sound_l1, fade_in_sec=0.0, fade_out_sec=0.0))
-        if sound_l2:
-            if not Path(sound_l2).is_absolute():
-                sound_l2 = str(repo / sound_l2)
-            audio_tracks.append(AudioTrack(sound_path=sound_l2, fade_in_sec=0.0, fade_out_sec=0.0))
+        sound_lv = str(
+            row.get("sound_lv")
+            or row.get("sound_lv_path")
+            or row.get("sound_l1")
+            or row.get("sound_l2")
+            or ""
+        ).strip()
+        if sound_lv:
+            if not Path(sound_lv).is_absolute():
+                sound_lv = str(repo / sound_lv)
+            audio_tracks.append(AudioTrack(sound_path=sound_lv, fade_in_sec=0.0, fade_out_sec=0.0))
 
     return LoadedContent(
         video_segments=video_segments,
@@ -635,8 +639,7 @@ def get_table_rows() -> list[dict[str, Any]]:
             "video_path": b.media.video_path,
             "start_ms": b.media.video_range.start_ms,
             "end_ms": b.media.video_range.end_ms,
-            "sound_l1": b.media.sound.lv1_path,
-            "sound_l2": b.media.sound.lv2_path,
+            "sound_lv": b.media.sound.lv_path,
             "pinyin_marks": "",
             "pinyin_phonetic": "",
             "pinyin_lexical": "",

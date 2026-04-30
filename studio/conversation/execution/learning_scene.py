@@ -94,8 +94,8 @@ class LearningScene(FSMConversationStep):
 
         # 오디오
         self.stage_audio_keys = {
-            self.Stage.PLAY_L1: "sound_l1",
-            self.Stage.PLAY_L2: "sound_l2",
+            self.Stage.PLAY_L1: "sound_lv",
+            self.Stage.PLAY_L2: "sound_lv",
             **(stage_audio_keys or {}),
         }
 

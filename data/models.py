@@ -119,10 +119,9 @@ class VideoRange(BaseModel):
 
 
 class BaseSentenceSound(BaseModel):
-    """문장 음성: L1/L2 경로."""
+    """문장 음성: 단일 경로."""
 
-    lv1_path: str = Field(default="", description="L1 음성 경로")
-    lv2_path: str = Field(default="", description="L2 음성 경로")
+    lv_path: str = Field(default="", description="음성 경로")
 
 
 class BaseSentenceMedia(BaseModel):

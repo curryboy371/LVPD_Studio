@@ -83,12 +83,20 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         end_raw = row.get("video_end_ms")
     end_sec = _parse_time_sec(end_raw, -1.0) if end_raw not in (None, "") else -1.0
 
-    sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or row.get("sound_lv1_path") or "").strip()
-    sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or row.get("sound_lv2_path") or "").strip()
-    if sound_l1 and not os.path.isabs(sound_l1):
-        sound_l1 = str(repo / sound_l1.replace("\\", "/"))
-    if sound_l2 and not os.path.isabs(sound_l2):
-        sound_l2 = str(repo / sound_l2.replace("\\", "/"))
+    sound_lv = (
+        row.get("sound_lv")
+        or row.get("sound_lv_path")
+        or row.get("sound_level_path")
+        or row.get("sound_l1")
+        or row.get("sound_level1_path")
+        or row.get("sound_lv1_path")
+        or row.get("sound_l2")
+        or row.get("sound_level2_path")
+        or row.get("sound_lv2_path")
+        or ""
+    ).strip()
+    if sound_lv and not os.path.isabs(sound_lv):
+        sound_lv = str(repo / sound_lv.replace("\\", "/"))
 
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
@@ -119,8 +127,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         "pinyin": pinyin_marks,
         "pinyin_phonetic": pinyin_phonetic,
         "pinyin_lexical": pinyin_lexical,
-        "sound_l1": sound_l1,
-        "sound_l2": sound_l2,
+        "sound_lv": sound_lv,
         "words": words_list,
         "id": vid,
         "topic": topic,
@@ -251,8 +258,16 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                 pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
                 pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
                 pinyin_lexical = (row.get("pinyin_lexical") or "").strip()
-                sound_l1 = (row.get("sound_l1") or row.get("sound_level1_path") or "").strip()
-                sound_l2 = (row.get("sound_l2") or row.get("sound_level2_path") or "").strip()
+                sound_lv = (
+                    row.get("sound_lv")
+                    or row.get("sound_lv_path")
+                    or row.get("sound_level_path")
+                    or row.get("sound_l1")
+                    or row.get("sound_level1_path")
+                    or row.get("sound_l2")
+                    or row.get("sound_level2_path")
+                    or ""
+                ).strip()
                 tip_text = str(row.get("tip") or "").strip()
                 rows.append({
                     "id": vid,
@@ -269,8 +284,7 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                     "pinyin_marks": pinyin_marks,
                     "pinyin_phonetic": pinyin_phonetic,
                     "pinyin_lexical": pinyin_lexical,
-                    "sound_l1": sound_l1,
-                    "sound_l2": sound_l2,
+                    "sound_lv": sound_lv,
                     "tip": tip_text,
                 })
             except Exception:
@@ -322,8 +336,12 @@ def _load_base_sentences_csv(csv_path: str) -> list[dict]:
                     "video_path": (row.get("video_path") or "").strip(),
                     "start_ms": row.get("video_start_ms") or 0,
                     "end_ms": row.get("video_end_ms") or -1,
-                    "sound_l1": (row.get("sound_lv1_path") or "").strip(),
-                    "sound_l2": (row.get("sound_lv2_path") or "").strip(),
+                    "sound_lv": (
+                        row.get("sound_lv_path")
+                        or row.get("sound_lv1_path")
+                        or row.get("sound_lv2_path")
+                        or ""
+                    ).strip(),
                     "tip": (row.get("tip") or "").strip(),
                     "pinyin_marks": pinyin_marks,
                     "pinyin_phonetic": pinyin_phonetic,

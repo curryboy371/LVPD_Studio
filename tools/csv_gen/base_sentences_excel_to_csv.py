@@ -1,6 +1,6 @@
 """
 base_sentences 엑셀 → base_sentences.csv 변환.
-media는 플랫 컬럼: video_path, video_start_ms, video_end_ms, sound_lv1_path, sound_lv2_path.
+media는 플랫 컬럼: video_path, video_start_ms, video_end_ms, sound_lv_path.
 수동 관리 편의를 위해 base_words('|') 컬럼을 함께 저장한다.
 """
 from __future__ import annotations
@@ -25,8 +25,7 @@ FIELDNAMES = [
     "video_path",
     "video_start_ms",
     "video_end_ms",
-    "sound_lv1_path",
-    "sound_lv2_path",
+    "sound_lv_path",
     "base_words",
     "tip",
 ]
@@ -74,8 +73,15 @@ def base_sentences_excel_to_csv(
         video_path = _normalize(row.get("video_path", ""))
         video_start_ms = _to_int(row.get("video_start_ms", row.get("video_start_ms")), 0)
         video_end_ms = _to_int(row.get("video_end_ms", row.get("video_end_ms")), 0)
-        sound_lv1 = _normalize(row.get("sound_lv1_path", row.get("sound_level1_path", "")))
-        sound_lv2 = _normalize(row.get("sound_lv2_path", row.get("sound_level2_path", "")))
+        sound_lv = _normalize(
+            row.get(
+                "sound_lv_path",
+                row.get(
+                    "sound_level_path",
+                    row.get("sound_lv1_path", row.get("sound_level1_path", "")),
+                ),
+            )
+        )
 
         final_rows.append({
             "id": _to_int(row.get("id"), 0),
@@ -85,8 +91,7 @@ def base_sentences_excel_to_csv(
             "video_path": video_path,
             "video_start_ms": video_start_ms,
             "video_end_ms": video_end_ms,
-            "sound_lv1_path": sound_lv1,
-            "sound_lv2_path": sound_lv2,
+            "sound_lv_path": sound_lv,
             "base_words": _normalize(row.get("base_words", "")) or _extract_base_words(raw_sent),
             "tip": _normalize(row.get("tip", row.get("life_tip", row.get("life_tips", "")))),
         })
