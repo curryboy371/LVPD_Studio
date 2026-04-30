@@ -10,6 +10,7 @@ from typing import Callable
 
 import pygame
 
+from data.table_manager import get_word
 from utils.fonts import load_font_korean
 
 from ..core.scene_transition import SceneTransitionMode
@@ -569,7 +570,64 @@ class PracticeScene(IConversationStep):
             show_time_text=False,
             progress_color=self._resolve_playback_bar_color(is_listen_phase=is_listen_phase),
         )
+        self._draw_tip_box_above_gauge(
+            screen,
+            ctx=ctx,
+            tip_text=self._build_current_sub_tip_text(),
+        )
         self._draw_mode_icon(screen, ctx=ctx, is_listen_phase=is_listen_phase)
+
+    def _build_current_sub_tip_text(self) -> str:
+        """현재 sub 변형의 alt_word_id(들)로 tip box용 '한자 : 뜻' 여러 줄 텍스트를 만든다."""
+        variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
+        alt_word_ids_raw = variant.get("alt_word_ids")
+        alt_words_raw = variant.get("alt_words")
+        alt_word_ids: list[int] = []
+        alt_words: list[str] = []
+
+        if isinstance(alt_word_ids_raw, list) and alt_word_ids_raw:
+            for raw in alt_word_ids_raw:
+                try:
+                    wid = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if wid > 0:
+                    alt_word_ids.append(wid)
+        else:
+            try:
+                single_id = int(variant.get("alt_word_id") or 0)
+            except (TypeError, ValueError):
+                single_id = 0
+            if single_id > 0:
+                alt_word_ids.append(single_id)
+
+        if isinstance(alt_words_raw, list) and alt_words_raw:
+            alt_words = [str(w or "").strip() for w in alt_words_raw]
+        else:
+            alt_words = [str(variant.get("alt_word") or "").strip()]
+
+        rows: list[str] = []
+        for i, wid in enumerate(alt_word_ids):
+            word_obj = get_word(wid)
+            hanzi = ""
+            if i < len(alt_words):
+                hanzi = str(alt_words[i] or "").strip()
+            if not hanzi and word_obj is not None:
+                hanzi = str(word_obj.word or "").strip()
+            meaning = str(word_obj.meaning or "").strip() if word_obj is not None else ""
+            if not hanzi and not meaning:
+                continue
+            if not hanzi:
+                rows.append(meaning)
+            elif not meaning:
+                rows.append(hanzi)
+            else:
+                rows.append(f"{hanzi} : {meaning}")
+
+        if not rows:
+            fallback = str(variant.get("alt_translation") or "").strip()
+            return fallback
+        return "\n".join(rows)
 
     def _resolve_playback_bar_color(self, *, is_listen_phase: bool) -> tuple[int, int, int]:
         """현재 재생 모드에 맞는 재생바 색상을 반환한다."""
@@ -641,8 +699,11 @@ class PracticeScene(IConversationStep):
         alpha = int(max(0, min(255, self.drawer.fade_alpha(self._title_channel))))
         if alpha <= 0:
             return
-        max_w = int(ctx.width * 0.56)
-        max_h = int(ctx.height * 0.16)
+        # 단어 모드 타이틀("단어_공부하기")과 같은 위치/스케일 기준을 사용한다.
+        margin_left = 44
+        margin_top = 18
+        max_w = int(ctx.width * 0.54)
+        max_h = 114
         sw, sh = int(surf.get_width()), int(surf.get_height())
         if sw <= 0 or sh <= 0:
             return
@@ -652,8 +713,8 @@ class PracticeScene(IConversationStep):
         draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
         if alpha < 255:
             draw.set_alpha(alpha)
-        x = max(self._style.layout.min_margin_x, (int(ctx.width) - tw) // 2)
-        y = self.drawer.layout_title_y(ctx, y_ratio=0.04)
+        x = max(self._style.layout.min_margin_x, margin_left)
+        y = max(0, margin_top)
         screen.blit(draw, (x, y))
 
     def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
@@ -664,7 +725,7 @@ class PracticeScene(IConversationStep):
         sw, sh = int(box.get_width()), int(box.get_height())
         if sw <= 0 or sh <= 0:
             return
-        scale_x = 0.63
+        scale_x = 0.3
         scale_y = 0.3
         tw = max(1, int(round(sw * scale_x)))
         th = max(1, int(round(sh * scale_y)))
@@ -684,10 +745,11 @@ class PracticeScene(IConversationStep):
         if not rendered:
             return
         line_gap = 6
-        total_h = sum(s.get_height() for s in rendered) + line_gap * (len(rendered) - 1)
-        cur_y = int(y + (th - total_h) * 0.5)
+        padding_left = 28
+        padding_top = 16
+        cur_y = int(y + padding_top)
         for surf in rendered:
-            tx = int(x + (tw - surf.get_width()) * 0.5)
+            tx = int(x + padding_left)
             screen.blit(surf, (tx, cur_y))
             cur_y += int(surf.get_height()) + line_gap
 

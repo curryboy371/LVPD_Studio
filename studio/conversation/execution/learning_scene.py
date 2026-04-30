@@ -316,8 +316,11 @@ class LearningScene(FSMConversationStep):
         alpha = int(max(0, min(255, self.drawer.fade_alpha(self.title_channel))))
         if alpha <= 0:
             return
-        max_w = int(ctx.width * 0.56)
-        max_h = int(ctx.height * 0.16)
+        # 단어 모드 타이틀("단어_공부하기")과 같은 위치/스케일 기준을 사용한다.
+        margin_left = 44
+        margin_top = 18
+        max_w = int(ctx.width * 0.54)
+        max_h = 114
         sw, sh = int(surf.get_width()), int(surf.get_height())
         if sw <= 0 or sh <= 0:
             return
@@ -327,8 +330,8 @@ class LearningScene(FSMConversationStep):
         draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
         if alpha < 255:
             draw.set_alpha(alpha)
-        x = max(self.style.layout.min_margin_x, (int(ctx.width) - tw) // 2)
-        y = self.drawer.layout_title_y(ctx, y_ratio=0.04)
+        x = max(self.style.layout.min_margin_x, margin_left)
+        y = max(0, margin_top)
         screen.blit(draw, (x, y))
 
     def _draw_play_listen_overlay(
@@ -382,7 +385,7 @@ class LearningScene(FSMConversationStep):
         sw, sh = int(box.get_width()), int(box.get_height())
         if sw <= 0 or sh <= 0:
             return
-        scale_x = 0.63
+        scale_x = 0.55
         scale_y = 0.3
         tw = max(1, int(round(sw * scale_x)))
         th = max(1, int(round(sh * scale_y)))
