@@ -82,7 +82,16 @@ exit /b 0
 :run_combo
 echo.
 echo [combo] conversation/vocabulary 를 각각 record 후 병합합니다.
+echo   지정 topic만 재생·녹화합니다 ^(base_sentences / vocabulary_word_rows 의 topic 컬럼^).
 echo.
+
+set "RECORD_TOPIC=%~2"
+if not defined RECORD_TOPIC set /p RECORD_TOPIC=녹화할 topic 입력 ^(필수^): 
+if not defined RECORD_TOPIC (
+  echo.
+  echo [오류] topic이 필요합니다. 예: record_output_select_mode.bat combo fruit_store
+  exit /b 1
+)
 
 if not exist "release" mkdir "release"
 set "CONV_MAX_SEC=900"
@@ -220,9 +229,9 @@ exit /b 0
 set "R_STUDIO=%~1"
 set "R_MAX_SEC=%~2"
 where py >nul 2>nul && (
-  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC%
+  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
 ) || (
-  python -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC%
+  python -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
 )
 exit /b %errorlevel%
 
@@ -230,8 +239,8 @@ exit /b %errorlevel%
 set "R_STUDIO=%~1"
 set "R_DURATION=%~2"
 where py >nul 2>nul && (
-  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION%
+  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
 ) || (
-  python -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION%
+  python -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
 )
 exit /b %errorlevel%

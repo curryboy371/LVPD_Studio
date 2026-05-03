@@ -178,6 +178,24 @@ async def _render_one_svg(
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _hanzi_frames_output_complete(out_dir: Path) -> bool:
+    """meta.json에 적힌 프레임 PNG가 모두 있으면 완료로 본다."""
+    meta_path = out_dir / "meta.json"
+    if not meta_path.exists():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        frames = meta.get("frames")
+        if not isinstance(frames, list) or not frames:
+            return False
+        for name in frames:
+            if not (out_dir / str(name)).is_file():
+                return False
+        return True
+    except Exception:
+        return False
+
+
 async def _amain(args) -> None:
     try:
         from playwright.async_api import async_playwright
@@ -211,6 +229,13 @@ async def _amain(args) -> None:
         for svg_path in targets:
             code = svg_path.stem
             out_dir = out_root / code
+            if (
+                getattr(args, "skip_existing", False)
+                and not getattr(args, "force", False)
+                and _hanzi_frames_output_complete(out_dir)
+            ):
+                print(f"[skip] {svg_path.name} -> {out_dir} (이미 있음)")
+                continue
             await _render_one_svg(
                 page,
                 svg_path,
@@ -266,6 +291,16 @@ def main() -> None:
         "--all-svgs",
         action="store_true",
         help="words.csv 추출 대신 resource/svgs 전체를 렌더",
+    )
+    ap.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="resource/hanzi_frames/{코드}/meta.json 및 나열된 PNG가 모두 있으면 해당 글자는 건너뜀",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="--skip-existing 무시하고 전부 다시 렌더",
     )
     ap.add_argument(
         "--active-stroke-color",
