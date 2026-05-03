@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Tuple, List, Union
 
@@ -445,8 +446,9 @@ def _split_csv_multi_value(raw: Any) -> list[str]:
     return [c.strip() for c in chunks if c is not None and c.strip()]
 
 
-def _parse_target_slot_orders(raw: Any) -> list[Union[int, str]]:
-    out: list[Union[int, str]] = []
+def _parse_target_slot_orders(raw: Any) -> list[Union[int, str, float]]:
+    """슬롯 순서. 한 슬롯을 여러 단어로 쪼갤 때 `0|0.1|0.2`처럼 소수로 순서만 구분한다."""
+    out: list[Union[int, str, float]] = []
     for token in _split_csv_multi_value(raw):
         t = token.strip().lower()
         if t in ("-1", "front", "start", "prefix", "맨앞", "앞"):
@@ -456,9 +458,14 @@ def _parse_target_slot_orders(raw: Any) -> list[Union[int, str]]:
             out.append(_SLOT_APPEND)
             continue
         try:
-            out.append(int(float(token)))
+            v = float(token)
         except (TypeError, ValueError):
             continue
+        # 정수 슬롯은 int 유지(기존 비교·모델 호환). 소수만 float로 유지.
+        if v.is_integer():
+            out.append(int(v))
+        else:
+            out.append(v)
     return out
 
 
@@ -474,9 +481,9 @@ def _parse_alt_word_ids(raw: Any) -> list[int]:
 
 def _zip_slot_orders_and_alt_word_ids(
     *,
-    target_slot_orders: list[Union[int, str]],
+    target_slot_orders: list[Union[int, str, float]],
     alt_word_ids: list[int],
-) -> list[tuple[Union[int, str], int]]:
+) -> list[tuple[Union[int, str, float], int]]:
     if not target_slot_orders or not alt_word_ids:
         return []
     if len(target_slot_orders) == len(alt_word_ids):
@@ -489,10 +496,28 @@ def _zip_slot_orders_and_alt_word_ids(
     return list(zip(target_slot_orders[:n], alt_word_ids[:n]))
 
 
+def _sort_key_slot_order(slot_order: Any) -> tuple[int, float]:
+    """다중 치환 적용·표시 순서: 맨앞(-1) → 본문 슬롯(소수 포함 정렬) → 맨끝(append)."""
+    if slot_order == _SLOT_APPEND:
+        return (2, 1e12)
+    if slot_order == -1:
+        return (0, -1.0)
+    try:
+        return (1, float(slot_order))
+    except (TypeError, ValueError):
+        return (3, 0.0)
+
+
+def _sort_resolved_replacements(
+    resolved: list[tuple[Union[int, str, float], int, str]],
+) -> list[tuple[Union[int, str, float], int, str]]:
+    return sorted(resolved, key=lambda x: _sort_key_slot_order(x[0]))
+
+
 def _replace_multiple_slots_in_raw_sentence(
     raw_sentence: str,
     *,
-    replacements: list[tuple[Union[int, str], str]],
+    replacements: list[tuple[Union[int, str, float], str]],
 ) -> str:
     """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다."""
     if not raw_sentence:
@@ -516,6 +541,9 @@ def _replace_multiple_slots_in_raw_sentence(
     prefix_words: list[str] = []
     suffix_words: list[str] = []
 
+    # 동일한 정수 슬롯(예: 0, 0.1, 0.2)은 순서대로 이어 붙여 한 칸을 여러 음절로 확장한다.
+    by_base: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
+
     for slot_order, new_word in replacements:
         w = str(new_word or "").strip()
         if not w:
@@ -523,17 +551,27 @@ def _replace_multiple_slots_in_raw_sentence(
         if slot_order == _SLOT_APPEND:
             suffix_words.append(w)
             continue
+        if slot_order == -1:
+            prefix_words.append(w)
+            continue
         try:
-            slot_i = int(slot_order)
+            order_f = float(slot_order)
         except (TypeError, ValueError):
             continue
-        if slot_i == -1:
-            prefix_words.append(w)
-        elif 0 <= slot_i < len(merged_slots):
-            merged_slots[slot_i] = w
+        if order_f < 0:
+            continue
+        base_i = int(order_f)
+        by_base[base_i].append((order_f, w))
+
+    for base_i, pairs in by_base.items():
+        if not pairs:
+            continue
+        pairs.sort(key=lambda x: x[0])
+        merged = "".join(p for _, p in pairs)
+        if 0 <= base_i < len(merged_slots):
+            merged_slots[base_i] = merged
         else:
-            # 기존 슬롯 인덱스를 벗어나면 문장 끝에 붙인다.
-            suffix_words.append(w)
+            suffix_words.append(merged)
 
     parts: list[str] = []
     parts.extend(prefix_words)
@@ -644,7 +682,7 @@ def _attach_sub_variants_to_base_rows(
             if not replacement_specs:
                 continue
 
-            resolved_replacements: list[tuple[Union[int, str], int, str]] = []
+            resolved_replacements: list[tuple[Union[int, str, float], int, str]] = []
             for slot_order, alt_word_id in replacement_specs:
                 alt_word = words_by_id.get(int(alt_word_id), "").strip()
                 if not alt_word:
@@ -656,6 +694,8 @@ def _attach_sub_variants_to_base_rows(
             # 일부만 해석되면 원문 슬롯이 남아 보이므로 해당 변형을 스킵한다.
             if len(resolved_replacements) != len(replacement_specs):
                 continue
+
+            resolved_replacements = _sort_resolved_replacements(resolved_replacements)
 
             alt_sound_path = str(v.get("alt_sound_path") or "").strip()
             if alt_sound_path and not os.path.isabs(alt_sound_path):
@@ -669,14 +709,20 @@ def _attach_sub_variants_to_base_rows(
                 continue
 
             primary_slot_order, primary_alt_word_id, primary_alt_word = resolved_replacements[0]
+            primary_f: Optional[float] = None
+            try:
+                primary_f = float(primary_slot_order)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                primary_f = None
             if (
-                isinstance(primary_slot_order, int)
-                and primary_slot_order >= 0
+                primary_f is not None
+                and primary_f >= 0
+                and primary_f == int(primary_f)
                 and primary_slot_order != -1
             ):
                 span = _display_alt_hanzi_span(
                     raw_sentence,
-                    target_slot_order=primary_slot_order,
+                    target_slot_order=int(primary_f),
                     alt_word=primary_alt_word,
                 )
             else:
@@ -698,10 +744,14 @@ def _attach_sub_variants_to_base_rows(
             search_pos = 0
             for slot_order, _wid, alt_word in resolved_replacements:
                 cur_span: Optional[Tuple[int, int]] = None
-                if isinstance(slot_order, int) and slot_order >= 0:
+                try:
+                    so_f = float(slot_order)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    so_f = None
+                if so_f is not None and so_f >= 0 and so_f == int(so_f):
                     cur_span = _display_alt_hanzi_span(
                         raw_sentence,
-                        target_slot_order=slot_order,
+                        target_slot_order=int(so_f),
                         alt_word=alt_word,
                     )
                 if cur_span is None:

@@ -21,6 +21,7 @@ from ..core.types import (
     build_sentence_render_data_with_tone_icons,
 )
 from ..core.conversation_step import IConversationStep
+from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
 from ..tools.playback_bar import PlaybackBarRenderer
 from utils.pinyin_processor import get_pinyin_processor
 
@@ -643,23 +644,9 @@ class PracticeScene(IConversationStep):
         return color_table[mode]
 
     def _load_mode_icon_surface(self, filename: str) -> pygame.Surface | None:
-        """재생 모드 아이콘을 로드하고 공통 크기로 축소한다."""
+        """재생 모드 아이콘을 로드한다(크기·경로는 LEARNING listen 과 공통)."""
         root = Path(__file__).resolve().parents[3]
-        candidates = (
-            root / "resource" / "image" / "icon" / filename,
-            root / "resource" / "images" / "icon" / filename,
-        )
-        for path in candidates:
-            if not path.exists():
-                continue
-            try:
-                # convert_alpha()는 display 초기화 타이밍에 따라 실패할 수 있어 생략한다.
-                surface = pygame.image.load(str(path))
-                target_size = 318
-                return pygame.transform.smoothscale(surface, (target_size, target_size))
-            except Exception:
-                continue
-        return None
+        return load_mode_icon(root, filename)
 
     def _load_title_image_surface(self, filename: str) -> pygame.Surface | None:
         root = Path(__file__).resolve().parents[3]
@@ -951,10 +938,4 @@ class PracticeScene(IConversationStep):
     def _draw_mode_icon(self, screen: pygame.Surface, *, ctx: FrameContext, is_listen_phase: bool) -> None:
         """현재 재생 구간에 맞는 모드 아이콘을 좌하단에 표시한다."""
         icon_surface = self._listen_icon_surface if is_listen_phase else self._speak_icon_surface
-        if icon_surface is None:
-            return
-        margin_left = 24
-        margin_bottom = 20
-        x = margin_left
-        y = int(ctx.height) - int(icon_surface.get_height()) - margin_bottom
-        screen.blit(icon_surface, (x, y))
+        blit_mode_icon_bottom_left(screen, icon_surface, frame_height=ctx.height)

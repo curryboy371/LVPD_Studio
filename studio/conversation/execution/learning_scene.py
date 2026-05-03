@@ -14,6 +14,7 @@ from utils.fonts import load_font_chinese, load_font_korean
 from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
 from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
+from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
 from ..tools.playback_bar import PlaybackBarRenderer
 
 LISTEN_BAR_COLOR = (46, 204, 113)
@@ -262,19 +263,7 @@ class LearningScene(FSMConversationStep):
     def _load_listen_icon_surface(self) -> pygame.Surface | None:
         """학습 듣기 단계에서 사용할 listen 아이콘을 로드한다."""
         root = Path(__file__).resolve().parents[3]
-        candidates = (
-            root / "resource" / "image" / "icon" / "listen.png",
-            root / "resource" / "images" / "icon" / "listen.png",
-        )
-        for path in candidates:
-            if not path.exists():
-                continue
-            try:
-                surface = pygame.image.load(str(path))
-                return pygame.transform.smoothscale(surface, (318, 318))
-            except Exception:
-                continue
-        return None
+        return load_mode_icon(root, "listen.png")
 
     def _load_title_image_surface(self, filename: str) -> pygame.Surface | None:
         root = Path(__file__).resolve().parents[3]
@@ -371,13 +360,7 @@ class LearningScene(FSMConversationStep):
             ctx=ctx,
             tip_text=tip_text or "문장을 듣고 이해해보세요",
         )
-        if self._listen_icon_surface is None:
-            return
-        margin_left = 24
-        margin_bottom = 20
-        x = margin_left
-        y = int(ctx.height) - int(self._listen_icon_surface.get_height()) - margin_bottom
-        screen.blit(self._listen_icon_surface, (x, y))
+        blit_mode_icon_bottom_left(screen, self._listen_icon_surface, frame_height=ctx.height)
 
     def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
         box = self._tip_box_surface
