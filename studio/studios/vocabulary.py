@@ -45,6 +45,8 @@ _LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
 _AUTO_SOUND_GAP_SEC = 1.5
 _AUTO_SOUND_REPEAT_COUNT = 2
 _AUTO_WAIT_SOUND_LEN_SCALE = 1.5
+# words.sound_path 없음·파일 없음·길이 0일 때 자동 시퀀스 타이밍(초)
+_FALLBACK_SOUND_LEN_SEC = 1.0
 _AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
 _STROKE_FIXED_PLAY_SPEED = 1.0
 _GAUGE_H = 18
@@ -562,7 +564,19 @@ class VocabularyStudio:
         cur = ordered[self._selected_index]
         w = get_word(cur.word_id)
         self._auto_sound_path = self._resolve_sound_abs((w.sound_path if w else "") or "")
-        self._auto_sound_len = self._get_sound_length_sec(self._auto_sound_path)
+        raw_sound_len = self._get_sound_length_sec(self._auto_sound_path)
+        p = (self._auto_sound_path or "").strip()
+        path_exists = bool(p) and Path(p).is_file()
+        if (not path_exists) or raw_sound_len <= 1e-9:
+            logger.warning(
+                "단어장: 사운드 없음 (word_id=%s, path=%s) — %ss로 진행",
+                cur.word_id,
+                p or "(지정 없음)",
+                _FALLBACK_SOUND_LEN_SEC,
+            )
+            self._auto_sound_len = float(_FALLBACK_SOUND_LEN_SEC)
+        else:
+            self._auto_sound_len = raw_sound_len
         self._auto_cycle_index = 0
         self._auto_word_elapsed = 0.0
         sound_cycle_duration = (

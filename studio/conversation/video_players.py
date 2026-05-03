@@ -1,4 +1,5 @@
 """회화 스튜디오 비디오·오디오 재생기."""
+import logging
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from core.paths import (
     STUDIO_VIDEO_FALLBACK_FPS,
     STUDIO_WIDTH,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SimpleVideoPlayer:
@@ -175,7 +178,14 @@ class SimpleVideoPlayer:
             return self._cached_surf
 
         duration = max(0.0, self._duration_sec)
-        while self._cached_pts < self._current_pts - frame_interval * 0.5:
+        # LEARNING/PRACTICE는 bg_frame만 쓰는 프레임이 있어 get_frame이 오래 없을 수 있음.
+        # 그 사이 tick만 진행되면 cached_pts 대비 current_pts가 크게 벌어져 한 호출에 수천 번 read()가 될 수 있다.
+        max_seek_reads = 4096
+        n_read = 0
+        while (
+            self._cached_pts < self._current_pts - frame_interval * 0.5 and n_read < max_seek_reads
+        ):
+            n_read += 1
             ok, frame = self._cap.read()
             if not ok:
                 self._current_pts = min(self._current_pts, duration) if duration else self._cached_pts
@@ -194,6 +204,18 @@ class SimpleVideoPlayer:
             if out is not None:
                 self._cached_surf = out
                 self._cached_size = (width, height)
+        if n_read >= max_seek_reads:
+            try:
+                self._cap.set(cv2.CAP_PROP_POS_MSEC, self._current_pts * 1000.0)
+            except Exception:
+                pass
+            self._cached_pts = -1.0
+            self._cached_surf = None
+            logger.warning(
+                "OpenCV: get_frame 연속 read 상한(%s) 도달 — 시크로 재동기화했습니다. 경로=%s",
+                max_seek_reads,
+                self._path,
+            )
 
         if self._cached_surf is not None and self._cached_size == (width, height):
             return self._cached_surf

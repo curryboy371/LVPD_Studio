@@ -6,6 +6,8 @@ from dataclasses import replace
 from enum import Enum, auto
 from pathlib import Path
 import logging
+import os
+import math
 import random
 from typing import Callable, Literal, Optional
 
@@ -28,6 +30,40 @@ from ..tools.playback_bar import PlaybackBarRenderer
 from utils.pinyin_processor import get_pinyin_processor
 
 logger = logging.getLogger(__name__)
+
+# sub 한 변형당 자동 대기 상한(초). 음성 길이×배율+간격이 과하면 녹화가 수십 분 멈춘 것처럼 보임.
+_SUB_VARIANT_WAIT_WARN_SEC = 90.0
+_SUB_VARIANT_WAIT_MAX_SEC = 180.0
+
+
+def _sanitize_wait_sec(v: float, *, fallback: float) -> float:
+    """NaN/inf면 타이머 비교가 영원히 False가 되어 PRACTICE가 멈출 수 있음."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(x) or x < 0.0:
+        return fallback
+    return x
+
+
+def _clamp_sub_variant_wait(wt: float, *, hold: float) -> float:
+    w = _sanitize_wait_sec(wt, fallback=hold)
+    if w > _SUB_VARIANT_WAIT_MAX_SEC:
+        logger.warning(
+            "PRACTICE: sub 변형 대기 %.1fs → 상한 %.1fs로 제한(너무 길면 녹화가 멈춘 것처럼 보입니다)",
+            w,
+            _SUB_VARIANT_WAIT_MAX_SEC,
+        )
+        return float(_SUB_VARIANT_WAIT_MAX_SEC)
+    if w > _SUB_VARIANT_WAIT_WARN_SEC:
+        logger.info(
+            "PRACTICE: sub 변형 대기 약 %.1fs (%.0fs 넘으면 상한 %ss 적용)",
+            w,
+            _SUB_VARIANT_WAIT_WARN_SEC,
+            _SUB_VARIANT_WAIT_MAX_SEC,
+        )
+    return w
 
 
 class PracticeScene(IConversationStep):
@@ -124,6 +160,7 @@ class PracticeScene(IConversationStep):
         self._bg_playing = False
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
+        self._practice_stage_log_last: "PracticeScene.Stage | None" = None
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
 
@@ -147,6 +184,7 @@ class PracticeScene(IConversationStep):
             self._stop_background_sound()
             self.drawer.hide_now(self._title_channel)
             self.drawer.hide_now(self._sentence_channel)
+            self._practice_stage_log_last = None
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """항목만 바뀌고 슬롯 리셋이 빠진 경우에도 이전 base의 sub가 남지 않게 한다."""
@@ -161,6 +199,22 @@ class PracticeScene(IConversationStep):
     def _set_stage(self, stage: "PracticeScene.Stage") -> None:
         """연습 장면 내부 Stage를 전환한다."""
         self.stage = stage
+        try:
+            if self._practice_stage_log_last == stage:
+                return
+            self._practice_stage_log_last = stage
+            print(f"[practice][stage] {stage.name}", flush=True)
+        except Exception:
+            pass
+
+    def _log_sub_variant_wait(self, wt: float) -> None:
+        """SHOW_SUB_CONTENT: 변형별 대기 시작 시 녹화 콘솔용(장시간 무응답처럼 보이지 않게)."""
+        total = max(1, len(self._sub_variants))
+        cur = min(total, self._sub_variant_index + 1)
+        try:
+            print(f"[practice][sub] variant {cur}/{total} 대기~{wt:.1f}s", flush=True)
+        except Exception:
+            pass
 
     def _sentence_slide_y_offset_px(self) -> int:
         """기본→첫 sub 전환 시 문장 블록 세로 오프셋(위 슬라이드 아웃 / 아래에서 슬라이드 인)."""
@@ -198,6 +252,7 @@ class PracticeScene(IConversationStep):
         key = self._playback_item_key(item)
         if key != self._active_item_key:
             self._active_item_key = key
+            self._practice_stage_log_last = None
             # 새 아이템 진입 시에는 본문을 숨기고 제목 페이드부터 진행한다.
             self._content_visible = False
             self._title_wait_remaining_sec = self.title_fade_in_sec
@@ -271,12 +326,17 @@ class PracticeScene(IConversationStep):
                     self._base_to_sub_transition = None
                     self._base_to_sub_elapsed = 0.0
                     wait_total = self._start_current_sub_variant_audio_and_get_wait()
-                    self._sub_content_wait_total_sec = max(0.0, float(wait_total))
-                    self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                    wt = _clamp_sub_variant_wait(
+                        float(wait_total), hold=float(self._sub_content_hold_sec)
+                    )
+                    self._sub_content_wait_total_sec = wt
+                    self._sub_content_wait_remaining_sec = wt
+                    self._log_sub_variant_wait(wt)
                 return
             self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
-                self._sub_content_wait_remaining_sec = max(0.0, self._sub_content_wait_remaining_sec - dt)
+                nr = max(0.0, float(self._sub_content_wait_remaining_sec) - dt)
+                self._sub_content_wait_remaining_sec = _sanitize_wait_sec(nr, fallback=0.0)
             if self._sub_content_wait_remaining_sec <= 0.0:
                 if len(self._sub_variants) > 1:
                     next_index = self._sub_variant_index + 1
@@ -284,10 +344,21 @@ class PracticeScene(IConversationStep):
                         self._sub_variant_index = next_index
                         self._current_sub_variant = self._sub_variants[self._sub_variant_index]
                         wait_total = self._start_current_sub_variant_audio_and_get_wait()
-                        self._sub_content_wait_total_sec = max(0.0, float(wait_total))
-                        self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                        wt = _clamp_sub_variant_wait(
+                            float(wait_total), hold=float(self._sub_content_hold_sec)
+                        )
+                        self._sub_content_wait_total_sec = wt
+                        self._sub_content_wait_remaining_sec = wt
+                        self._log_sub_variant_wait(wt)
                         return
                 # 마지막 sub 변형까지 모두 끝나면 다음 SceneKind로 전환한다.
+                try:
+                    print(
+                        f"[practice][sub] 변형 {len(self._sub_variants)}개 완료 → 다음 장면 전환",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
                 self._stop_background_sound()
                 self.complete()
                 self.allow_transition()
@@ -321,6 +392,15 @@ class PracticeScene(IConversationStep):
             sp = get_repo_root() / sp
         sound_path = str(sp)
 
+        if not os.path.isfile(sound_path):
+            logger.warning(
+                "PRACTICE: sub 사운드 파일 없음 — 기본 대기 %.1fs | %s",
+                self._sub_content_hold_sec,
+                sound_path,
+            )
+            self._sub_content_sound_sec = 0.0
+            return float(self._sub_content_hold_sec)
+
         gap = float(self._listen_to_speak_gap_sec)
         if self.play_voice is not None:
             try:
@@ -334,12 +414,14 @@ class PracticeScene(IConversationStep):
 
                 pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             sound_len_sec = float(pygame.mixer.Sound(sound_path).get_length() or 0.0)
+            sound_len_sec = _sanitize_wait_sec(sound_len_sec, fallback=0.0)
             if sound_len_sec > 0.0:
                 self._sub_content_sound_sec = sound_len_sec
                 tail = max(0.0, float(self._speak_complete_hold_sec))
                 # 듣기 + 듣기후간격 + 말하기(원음 길이 * 배율) + 말하기 후 간격
                 speak_sec = sound_len_sec * float(self._SPEAK_SOUND_LEN_SCALE)
-                return sound_len_sec + max(0.0, gap) + speak_sec + tail
+                total = sound_len_sec + max(0.0, gap) + speak_sec + tail
+                return _sanitize_wait_sec(total, fallback=float(self._sub_content_hold_sec))
         except Exception:
             pass
         self._sub_content_sound_sec = 0.0

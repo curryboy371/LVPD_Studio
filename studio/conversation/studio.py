@@ -45,6 +45,17 @@ from .tools.fonts import (
 logger = logging.getLogger(__name__)
 
 
+def _frame_dt_sec(config: Any) -> float:
+    """update/render 공통: dt_sec=0이면 페이드·타이머가 영구 정지할 수 있음."""
+    dt = 1.0 / 30.0
+    if config is not None and getattr(config, "dt_sec", None) is not None:
+        dt = float(config.dt_sec)
+    if dt <= 1e-12:
+        fps = float(getattr(config, "fps", 30) or 30) if config is not None else 30.0
+        dt = 1.0 / max(1.0, fps)
+    return dt
+
+
 class ConversationStudio:
     """회화 스튜디오: LoadedContent/CSV 기반 비디오 + 텍스트 표시."""
 
@@ -313,12 +324,7 @@ class ConversationStudio:
             return
         self._last_config = config
 
-        dt = 1.0 / 30.0
-        if config is not None and getattr(config, "dt_sec", None) is not None:
-            dt = float(config.dt_sec)
-        if dt <= 1e-12:
-            fps = float(getattr(config, "fps", 30) or 30) if config is not None else 30.0
-            dt = 1.0 / max(1.0, fps)
+        dt = _frame_dt_sec(config)
         width = int(getattr(config, "width", 1280))
         height = int(getattr(config, "height", 720))
         ctx = FrameContext(width=width, height=height, dt_sec=dt)
@@ -383,7 +389,11 @@ class ConversationStudio:
             screen.blit(msg, (20, 20))
             return
 
-        ctx = FrameContext(width=int(config.width), height=int(config.height), dt_sec=float(getattr(config, "dt_sec", 1.0 / 30.0)))
+        ctx = FrameContext(
+            width=int(config.width),
+            height=int(config.height),
+            dt_sec=_frame_dt_sec(config),
+        )
         self._manager.render(screen, ctx)
         draw_paused_and_debug(self, screen, config)
 
