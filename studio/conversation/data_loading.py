@@ -714,7 +714,9 @@ def _attach_sub_variants_to_base_rows(
                 primary_f = float(primary_slot_order)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 primary_f = None
-            if (
+            # 치환 후 문장 기준으로 찾는다. 앞 슬롯 길이가 바뀌면(两→十二 등) 원문 슬롯 누적 길이 방식은 인덱스가 어긋난다.
+            span = _find_word_span_in_display_sentence(replaced_sentence, primary_alt_word)
+            if span is None and (
                 primary_f is not None
                 and primary_f >= 0
                 and primary_f == int(primary_f)
@@ -725,8 +727,6 @@ def _attach_sub_variants_to_base_rows(
                     target_slot_order=int(primary_f),
                     alt_word=primary_alt_word,
                 )
-            else:
-                span = _find_word_span_in_display_sentence(replaced_sentence, primary_alt_word)
 
             variant_dict: dict[str, Any] = {
                 "target_slot_order": primary_slot_order,
@@ -743,23 +743,22 @@ def _attach_sub_variants_to_base_rows(
             spans: list[dict[str, int]] = []
             search_pos = 0
             for slot_order, _wid, alt_word in resolved_replacements:
-                cur_span: Optional[Tuple[int, int]] = None
-                try:
-                    so_f = float(slot_order)  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    so_f = None
-                if so_f is not None and so_f >= 0 and so_f == int(so_f):
-                    cur_span = _display_alt_hanzi_span(
-                        raw_sentence,
-                        target_slot_order=int(so_f),
-                        alt_word=alt_word,
-                    )
+                cur_span = _find_word_span_in_display_sentence_from(
+                    replaced_sentence,
+                    alt_word,
+                    start_pos=search_pos,
+                )
                 if cur_span is None:
-                    cur_span = _find_word_span_in_display_sentence_from(
-                        replaced_sentence,
-                        alt_word,
-                        start_pos=search_pos,
-                    )
+                    try:
+                        so_f = float(slot_order)  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        so_f = None
+                    if so_f is not None and so_f >= 0 and so_f == int(so_f):
+                        cur_span = _display_alt_hanzi_span(
+                            raw_sentence,
+                            target_slot_order=int(so_f),
+                            alt_word=alt_word,
+                        )
                 if cur_span is None:
                     continue
                 start_i, len_i = int(cur_span[0]), int(cur_span[1])

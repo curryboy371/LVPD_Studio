@@ -4,12 +4,13 @@
   python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). 기본 topic은 fruit store. --mode record 로 오프스크린 녹화
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
 
-테이블 CSV 생성은 배치 파일에서만 실행 (create_all_csv.bat → run_create_new_tables_csv.py).
+시작 시 create_all_csv.bat를 한 번 실행한 뒤 studio/batch로 진행한다(SKIP_PAUSE=1로 pause 생략).
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -44,7 +45,7 @@ def _get_video_duration_sec(file_path: str | Path) -> float:
     if not path.exists():
         return 0.0
     try:
-    result = subprocess.run(
+        result = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1", str(path),
@@ -418,6 +419,32 @@ def _add_batch_parser(subparsers: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_cmd_batch)
 
 
+def _run_create_all_csv_at_startup() -> None:
+    """프로젝트 루트의 create_all_csv.bat 실행(chcp·py/python 선택 로직 동일). pause는 SKIP_PAUSE로 건너뜀."""
+    repo = Path(__file__).resolve().parent
+    bat = repo / "create_all_csv.bat"
+    if not bat.is_file():
+        logger.error("CSV 배치 파일 없음: %s", bat)
+        sys.exit(1)
+    env = os.environ.copy()
+    env["SKIP_PAUSE"] = "1"
+    logger.info("테이블 CSV 일괄 생성: %s", bat.name)
+    try:
+        result = subprocess.run(
+            ["cmd", "/c", str(bat)],
+            cwd=str(repo),
+            env=env,
+            shell=False,
+            check=False,
+        )
+    except OSError as e:
+        logger.exception("CSV 배치 실행 실패: %s", e)
+        sys.exit(1)
+    if result.returncode != 0:
+        logger.error("create_all_csv.bat 실패 (종료 코드 %s)", result.returncode)
+        sys.exit(result.returncode)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="LVPD: studio / batch")
     subparsers = parser.add_subparsers(dest="cmd", required=True, help="실행 모드")
@@ -426,6 +453,7 @@ def main() -> None:
     _add_batch_parser(subparsers)
 
     args = parser.parse_args()
+    _run_create_all_csv_at_startup()
     args.func(parser, args)
 
 

@@ -6,7 +6,14 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/studio/runner.py",
-      "args": ["--studio", "conversation", "--mode", "debug"],
+      "args": [
+        "--studio",
+        "conversation",
+        "--mode",
+        "debug",
+        "--topic",
+        "fruit_store"
+      ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": { "PYTHONPATH": "${workspaceFolder}" },

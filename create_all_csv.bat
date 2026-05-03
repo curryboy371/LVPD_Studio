@@ -9,4 +9,4 @@ if errorlevel 1 (
     echo pandas 미설치 시: py -3 -m pip install pandas openpyxl
 )
 echo.
-pause
+if not "%SKIP_PAUSE%"=="1" pause
