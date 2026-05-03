@@ -400,6 +400,34 @@ class ConversationStudio:
             return False
         return self._manager.is_full_run_complete()
 
+    def recording_stop_summary(self) -> str:
+        """녹화가 should_stop으로 끝났을 때 터미널에 찍을 한 줄 요약."""
+        if not self._data_list or self._manager is None:
+            return "회화: 재생 목록 없음 또는 manager 미초기화"
+        items = self._data_list
+        n = len(items)
+        ids: list[str] = []
+        topic_seen: list[str] = []
+        seen_t: set[str] = set()
+        for x in items:
+            if not isinstance(x, dict):
+                continue
+            raw_id = x.get("id")
+            ids.append(str(raw_id if raw_id is not None else "?"))
+            t = str(x.get("topic") or "").strip()
+            if t and t not in seen_t:
+                seen_t.add(t)
+                topic_seen.append(t)
+        st = self._manager.state
+        sk = st.scene_kind.value if hasattr(st.scene_kind, "value") else str(st.scene_kind)
+        last_id = ids[-1] if ids else "?"
+        id_seq = ",".join(ids) if ids else ""
+        topics_s = ",".join(topic_seen) if topic_seen else "(미지정)"
+        return (
+            f"회화: 문장 {n}개, base_sentences id=[{id_seq}], topic=[{topics_s}], "
+            f"종료 시그널 기준 마지막 id={last_id}, scene={sk}"
+        )
+
     def is_conversation_run_complete(self) -> bool:
         """복합 스튜디오(회화 후 단어 등)용: 회화 트랙만 전부 끝났는지(녹화 종료와 동일 기준)."""
         if self._manager is None:

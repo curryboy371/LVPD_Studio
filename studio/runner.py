@@ -365,12 +365,28 @@ def _run_record(
             clock.tick(config.fps)
             if record_until_content_done and studio.should_stop_recording():
                 stopped_by_content = True
+                try:
+                    print(
+                        "[rec][step] should_stop_recording=True → 루프 종료 | "
+                        f"frame={frame_index} t={frame_index / max(1e-9, float(config.fps)):.3f}s",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
                 break
         else:
             if record_until_content_done and not stopped_by_content:
                 print(
                     "[!] record_max_sec 상한에 도달했습니다. 콘텐츠가 끝나기 전에 끊겼다면 --record-max-sec 을 늘리세요.",
                 )
+                _fn_partial = getattr(studio, "recording_stop_summary", None)
+                if callable(_fn_partial):
+                    try:
+                        line = _fn_partial()
+                        if line:
+                            print("[!] 상한 도달 시점:", line)
+                    except Exception:
+                        pass
     finally:
         try:
             end_tl = (frames_written / float(config.fps)) if frames_written > 0 else 0.0
@@ -387,6 +403,14 @@ def _run_record(
     print("[rec] 녹화 완료:", frames_written, "프레임")
     if record_until_content_done and stopped_by_content:
         print("[rec] 콘텐츠 종료 조건(마지막 아이템·마지막 장면까지)으로 루프를 마쳤습니다.")
+        _fn = getattr(studio, "recording_stop_summary", None)
+        if callable(_fn):
+            try:
+                line = _fn()
+                if line:
+                    print("[rec]", line)
+            except Exception:
+                pass
     video_path = recorder.get_last_video_path()
     duration_sec = frames_written / config.fps if frames_written > 0 else 0.0
     if video_path is not None and recording_events and duration_sec > 0:

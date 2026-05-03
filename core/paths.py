@@ -29,6 +29,9 @@ DEFAULT_TONE_ICON_DIR = _REPO_ROOT / "resource" / "image" / "icon"
 FONT_CN_FILENAME = "MaruBuri-Light.otf"   # 중국어(문장·병음)용
 FONT_KR_FILENAME = "NotoSansKR-Regular.ttf"    # 한국어(번역·UI)용
 
+# 스튜디오 CLI / record_output_select_mode.bat combo에서 topic 생략·엔터 시 기본값과 동일하게 유지
+DEFAULT_STUDIO_TOPIC = "fruit_store"
+
 # 스튜디오: 해상도·FPS (창/녹화 공통)
 STUDIO_WIDTH = 1920
 STUDIO_HEIGHT = 1080

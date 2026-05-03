@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+REM print 로그가 녹화 중에도 즉시 콘솔에 보이게 함(파이썬 stdout 블록 버퍼링 방지)
+set PYTHONUNBUFFERED=1
 
 set STUDIO=%~1
 set MODE_CHOICE=
@@ -13,7 +15,7 @@ echo [화면 출력 전용] 회화/단어 모드 선택 실행 (F5 디버그와 
 echo  0^) 리소스 체크 모드 (topic 기반 누락 파일 점검)
 echo  1^) 회화 모드 (conversation)
 echo  2^) 단어 모드 (vocabulary)
-echo  3^) 녹화 결합 모드 (conversation record + vocabulary record + merge)
+echo  3^) 녹화 결합: 지정 topic만 ^(1^) 회화 전부 1파일 ^(2^) 단어 전부 1파일 ^(3^) ffmpeg 병합
 set /p MODE_CHOICE=선택하세요 [0/1/2/3]:
 
 if "%MODE_CHOICE%"=="0" set STUDIO=check
@@ -40,9 +42,9 @@ echo [%STUDIO%] 화면 출력(debug) 모드 실행
 echo.
 
 where py >nul 2>nul && (
-  py -3 -m studio.runner --studio %STUDIO% --mode debug
+  py -3 -u -m studio.runner --studio %STUDIO% --mode debug
 ) || (
-  python -m studio.runner --studio %STUDIO% --mode debug
+  python -u -m studio.runner --studio %STUDIO% --mode debug
 )
 
 if errorlevel 1 (
@@ -64,9 +66,9 @@ set /p CHECK_TOPIC=체크할 topic 입력 [전체는 엔터]:
 echo.
 echo [check] topic=%CHECK_TOPIC%
 where py >nul 2>nul && (
-  py -3 -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
+  py -3 -u -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
 ) || (
-  python -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
+  python -u -m tools.check_topic_resources --topic "%CHECK_TOPIC%"
 )
 if errorlevel 1 (
   echo.
@@ -81,17 +83,20 @@ exit /b 0
 
 :run_combo
 echo.
-echo [combo] conversation/vocabulary 를 각각 record 후 병합합니다.
-echo   지정 topic만 재생·녹화합니다 ^(base_sentences / vocabulary_word_rows 의 topic 컬럼^).
+echo [combo] 지정 topic만 사용합니다 ^(base_sentences / vocabulary_word_rows 의 topic^).
+echo   1단계: 회화 ^(conversation^) 목록 끝까지 1회 녹화 → release\*.mp4
+echo   2단계: 단어장 ^(vocabulary^) 해당 topic만 1회 녹화 → release\*.mp4
+echo   3단계: 위 두 파일을 순서대로 ffmpeg 로 합칩니다 ^(회화 → 단어^).
 echo.
 
 set "RECORD_TOPIC=%~2"
-if not defined RECORD_TOPIC set /p RECORD_TOPIC=녹화할 topic 입력 ^(필수^): 
-if not defined RECORD_TOPIC (
-  echo.
-  echo [오류] topic이 필요합니다. 예: record_output_select_mode.bat combo fruit_store
-  exit /b 1
+if "%RECORD_TOPIC%"=="" (
+  set /p RECORD_TOPIC=녹화할 topic 입력 [엔터=기본값 fruit_store / core.paths DEFAULT_STUDIO_TOPIC 동일]: 
 )
+REM 배치 기본값은 core\paths.py 의 DEFAULT_STUDIO_TOPIC 과 같아야 함 ^(현재 fruit_store^)
+if "%RECORD_TOPIC%"=="" set "RECORD_TOPIC=fruit_store"
+echo   ^> topic=%RECORD_TOPIC%
+echo.
 
 if not exist "release" mkdir "release"
 set "CONV_MAX_SEC=900"
@@ -102,9 +107,12 @@ set "CONV_VIDEO="
 set "VOCAB_VIDEO="
 set "MERGED_OUT="
 
+echo -------- 1/2 회화 녹화 ^(topic=%RECORD_TOPIC%^) --------
 call :run_record_and_pick_latest conversation CONV_VIDEO %CONV_MAX_SEC%
 if errorlevel 1 exit /b 1
 
+echo.
+echo -------- 2/2 단어장 녹화 ^(topic=%RECORD_TOPIC%^) --------
 call :run_record_and_pick_latest vocabulary VOCAB_VIDEO %VOCAB_MAX_SEC%
 if errorlevel 1 exit /b 1
 
@@ -126,9 +134,10 @@ set "LIST_FILE=%TEMP%\lvpd_concat_%RANDOM%_%RANDOM%.txt"
 >> "%LIST_FILE%" echo file '%VOCAB_VIDEO:\=/%'
 
 for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"`) do set "TS=%%A"
-set "MERGED_OUT=%CD%\release\record_conversation_then_words_until_done_%TS%.mp4"
+set "MERGED_OUT=%CD%\release\record_combo_%RECORD_TOPIC%_%TS%.mp4"
 
 echo.
+echo -------- 3/3 병합 ^(회화 + 단어, topic=%RECORD_TOPIC%^) --------
 echo [merge] %CONV_VIDEO%
 echo         + %VOCAB_VIDEO%
 echo         = %MERGED_OUT%
@@ -229,9 +238,9 @@ exit /b 0
 set "R_STUDIO=%~1"
 set "R_MAX_SEC=%~2"
 where py >nul 2>nul && (
-  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
+  py -3 -u -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
 ) || (
-  python -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
+  python -u -m studio.runner --studio %R_STUDIO% --mode record --record-until-content-done --record-max-sec %R_MAX_SEC% --topic "%RECORD_TOPIC%"
 )
 exit /b %errorlevel%
 
@@ -239,8 +248,8 @@ exit /b %errorlevel%
 set "R_STUDIO=%~1"
 set "R_DURATION=%~2"
 where py >nul 2>nul && (
-  py -3 -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
+  py -3 -u -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
 ) || (
-  python -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
+  python -u -m studio.runner --studio %R_STUDIO% --mode record --record-duration %R_DURATION% --topic "%RECORD_TOPIC%"
 )
 exit /b %errorlevel%

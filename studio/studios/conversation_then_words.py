@@ -171,5 +171,11 @@ class ConversationThenWordsStudio:
             return False
         return bool(self._vocab.should_stop_recording())
 
+    def recording_stop_summary(self) -> str:
+        """복합 스튜디오: 녹화 종료는 단어 단계 기준이므로 단어장 요약을 우선한다."""
+        if self._vocab is not None:
+            return self._vocab.recording_stop_summary()
+        return self._conversation.recording_stop_summary()
+
     def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
         self._conversation.finalize_recording_audio_segments(timeline_end_sec=timeline_end_sec)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Sequence, Any
+from typing import Any, Mapping, Sequence
 
 import pygame
 
@@ -34,6 +34,17 @@ class LastSceneSequencePolicy(str, Enum):
 class PlaybackState:
     item_index: int = 0
     scene_kind: SceneKind = SceneKind.VIDEO
+
+
+def _base_sentence_id_at(items: Sequence[ConversationItemLike], idx: int) -> str:
+    """로그용: 재생 목록 인덱스에 대응하는 base_sentences 행 id."""
+    if not (0 <= idx < len(items)):
+        return "?"
+    it = items[idx]
+    if isinstance(it, dict):
+        raw = it.get("id")
+        return str(raw if raw is not None else "?")
+    return str(idx)
 
 
 class PlaybackManager:
@@ -69,6 +80,36 @@ class PlaybackManager:
 
         if self._items:
             self._apply_item_to_video(self.current_item())
+
+    def _step_debug(self, reason: str, *, extra: str = "") -> None:
+        """SceneKind·문장 인덱스 전환 추적용(녹화 멈춤 원인 디버깅). 항상 stdout flush."""
+        n = len(self._items)
+        idx = int(self.state.item_index)
+        it = self.current_item()
+        bid = str(it.get("id", "?")) if isinstance(it, dict) else "?"
+        top = str(it.get("topic") or "").strip() if isinstance(it, dict) else ""
+        sk = self.state.scene_kind.value if hasattr(self.state.scene_kind, "value") else str(self.state.scene_kind)
+        pend = "no"
+        if self._pending_transition is not None:
+            p = self._pending_transition
+            pend = (
+                f"yes mode={getattr(p.mode, 'value', p.mode)} "
+                f"{getattr(p.from_kind, 'value', p.from_kind)}->{getattr(p.to_kind, 'value', p.to_kind)} "
+                f"t={p.elapsed_sec:.3f}/{max(1e-9, p.duration_sec):.3f}s"
+            )
+        try:
+            complete = self.is_full_run_complete()
+        except Exception:
+            complete = False
+        seg = (
+            f"[playback][step] {reason} | "
+            f"list={n} index={idx}/{max(0, n - 1)} base_id={bid} topic={top or '-'} | "
+            f"scene={sk} pending={pend} | "
+            f"full_run_complete={complete} words_handoff={self._words_handoff_ready}"
+        )
+        if extra:
+            seg += f" | {extra}"
+        print(seg, flush=True)
 
     def _flush_stale_step_state(self) -> None:
         """항목 인덱스가 바뀔 때 LEARNING/PRACTICE 슬롯의 잔류 FSM·sub_variants를 비운다.
@@ -154,17 +195,29 @@ class PlaybackManager:
 
         # 마지막 장면인지 확인
         if curr_idx >= len(self._scene_sequence) - 1:
+            self._step_debug(
+                "transition_signal: 시퀀스 마지막 장면→_handle_last_scene",
+                extra=f"현재={getattr(cur_kind, 'value', cur_kind)} seq_idx={curr_idx}",
+            )
             self._handle_last_scene(outgoing_scene)
             return
 
         next_kind = self._scene_sequence[curr_idx + 1]
         mode, duration, peak = read_scene_transition(outgoing_scene)
+        self._step_debug(
+            "transition_signal: 다음 장면 결정",
+            extra=(
+                f"{getattr(cur_kind, 'value', cur_kind)}->{getattr(next_kind, 'value', next_kind)} "
+                f"mode={getattr(mode, 'value', mode)} dur={duration:.3f}s"
+            ),
+        )
 
         self._take_snapshot(ctx, outgoing_scene)
 
         if mode == SceneTransitionMode.CUT or duration <= 0:
             self.state.scene_kind = next_kind
             self._reset_scene(next_kind)
+            self._step_debug("장면 전환 CUT 즉시 적용 완료")
         else:
             self._pending_transition = PendingSceneTransition(
                 mode=mode,
@@ -178,6 +231,9 @@ class PlaybackManager:
             if mode == SceneTransitionMode.CROSSFADE:
                 self.state.scene_kind = next_kind
                 self._reset_scene(next_kind)
+                self._step_debug("장면 전환 CROSSFADE(첫 프레임에서 대상 씬 로드)")
+            else:
+                self._step_debug("장면 전환 OVERLAY(페이드 중) pending 시작")
 
         outgoing_scene.transition_signal = False
 
@@ -193,6 +249,10 @@ class PlaybackManager:
                 self.state.scene_kind = p.to_kind
                 self._reset_scene(p.to_kind)
                 p.midpoint_committed = True
+                self._step_debug(
+                    "OVERLAY 중간: 장면 스위치",
+                    extra=f"{getattr(p.from_kind, 'value', p.from_kind)}->{getattr(p.to_kind, 'value', p.to_kind)}",
+                )
 
         # 현재 장면(이미 바뀐 상태일 수 있음) 업데이트 유지
         scene = self._scenes.get(self.state.scene_kind)
@@ -201,6 +261,7 @@ class PlaybackManager:
 
         if p.elapsed_sec >= p.duration_sec:
             self._pending_transition = None
+            self._step_debug("장면 전환 pending 종료(연출 끝)")
 
     def _render_pending_transition(self, screen: pygame.Surface, ctx: FrameContext) -> None:
         p = self._pending_transition
@@ -322,8 +383,17 @@ class PlaybackManager:
     def _handle_last_scene(self, scene: IConversationStep) -> None:
         scene.transition_signal = False
         cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
+        n = len(self._items)
+        is_last = bool(self._items) and cur >= n - 1
         if self._items and cur >= len(self._items) - 1:
             self._words_handoff_ready = True
+        self._step_debug(
+            "PRACTICE(또는 시퀀스 끝) _handle_last_scene",
+            extra=(
+                f"policy={getattr(self._last_scene_policy, 'value', self._last_scene_policy)} "
+                f"cur_index={cur} n_items={n} is_last={is_last} will_next={self._last_scene_policy == LastSceneSequencePolicy.ADVANCE_ITEM and cur < n - 1}"
+            ),
+        )
         if self._last_scene_policy == LastSceneSequencePolicy.ADVANCE_ITEM:
             # 마지막 항목 PRACTICE까지 끝나면 next_item()을 호출하면 index가 그대로라 VIDEO부터 같은 항목이 무한 반복된다.
             if cur < len(self._items) - 1:
@@ -342,24 +412,42 @@ class PlaybackManager:
         self._words_handoff_ready = False
         cur = max(0, min(len(self._items) - 1, int(self.state.item_index)))
         if cur >= len(self._items) - 1:
+            self._step_debug("next_item: 스킵(이미 마지막 문장)")
             return
-        self.state.item_index = cur + 1
+        new_idx = cur + 1
+        oid = _base_sentence_id_at(self._items, cur)
+        nid = _base_sentence_id_at(self._items, new_idx)
+        self.state.item_index = new_idx
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
         self.state.scene_kind = self._scene_sequence[0]
         self._flush_stale_step_state()
         self._reset_scene(self.state.scene_kind)
+        self._step_debug(
+            "다음 문장(인덱스 이동)",
+            extra=f"index {cur}->{new_idx} id {oid}->{nid} →장면 {SceneKind.VIDEO.value}",
+        )
 
     def prev_item(self) -> None:
         if not self._items:
             return
         self._words_handoff_ready = False
-        self.state.item_index = max(0, self.state.item_index - 1)
+        old_idx = int(self.state.item_index)
+        new_idx = max(0, old_idx - 1)
+        if old_idx == new_idx:
+            return
+        oid = _base_sentence_id_at(self._items, old_idx)
+        nid = _base_sentence_id_at(self._items, new_idx)
+        self.state.item_index = new_idx
         self._apply_item_to_video(self.current_item())
         self._pending_transition = None
         self.state.scene_kind = self._scene_sequence[0]
         self._flush_stale_step_state()
         self._reset_scene(self.state.scene_kind)
+        self._step_debug(
+            "이전 문장(인덱스 이동)",
+            extra=f"index {old_idx}->{new_idx} id {oid}->{nid} →장면 {SceneKind.VIDEO.value}",
+        )
 
     def toggle_pause(self) -> None:
         self._video_player.toggle_pause()
@@ -376,6 +464,7 @@ class PlaybackManager:
         if kind not in self._scenes:
             return
         self._words_handoff_ready = False
+        old = self.state.scene_kind
         current_scene = self._scenes.get(self.state.scene_kind)
         if current_scene:
             ctx = FrameContext(
@@ -387,3 +476,7 @@ class PlaybackManager:
         self._pending_transition = None
         self.state.scene_kind = kind
         self._reset_scene(kind)
+        self._step_debug(
+            "수동 SceneKind",
+            extra=f"{getattr(old, 'value', old)}->{getattr(kind, 'value', kind)} (키 1/2/3)",
+        )

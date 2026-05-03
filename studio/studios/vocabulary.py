@@ -964,3 +964,12 @@ class VocabularyStudio:
 
     def should_stop_recording(self) -> bool:
         return self._recording_done
+
+    def recording_stop_summary(self) -> str:
+        """녹화가 단어장 자동 순회 완료로 끝났을 때 터미널에 찍을 한 줄 요약."""
+        n = len(self._rows)
+        topics = sorted(
+            {str(r.topic or "").strip() for r in self._rows if str(r.topic or "").strip()}
+        )
+        topics_s = ",".join(topics) if topics else "(미지정)"
+        return f"단어장: 단어 {n}개, topic=[{topics_s}], 종료 시 선택 idx={int(self._selected_index)}"

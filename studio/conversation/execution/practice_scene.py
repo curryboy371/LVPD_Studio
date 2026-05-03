@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from enum import Enum, auto
 from pathlib import Path
+import logging
 import random
 from typing import Callable, Literal, Optional
 
 import pygame
 
+from core.paths import get_repo_root
 from data.table_manager import get_word
 from utils.fonts import load_font_chinese, load_font_korean
 
@@ -24,6 +26,8 @@ from ..core.conversation_step import IConversationStep
 from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
 from ..tools.playback_bar import PlaybackBarRenderer
 from utils.pinyin_processor import get_pinyin_processor
+
+logger = logging.getLogger(__name__)
 
 
 class PracticeScene(IConversationStep):
@@ -254,8 +258,16 @@ class PracticeScene(IConversationStep):
                 self._base_to_sub_elapsed += dt
                 # 슬라이드·Drawer 페이드 인이 끝난 뒤에만 듣기/게이지 타이머를 시작한다.
                 slide_done = self._base_to_sub_elapsed >= self.base_to_sub_slide_in_sec
-                fade_done = self.drawer.fade_alpha(self._sentence_channel) >= 250
-                if slide_done and fade_done:
+                alpha = int(self.drawer.fade_alpha(self._sentence_channel))
+                # int 보간으로 알파가 249 근처에서 멈추면 fade_alpha>=250이 영원히 False가 될 수 있음 → 완화 + 타임아웃
+                fade_done = alpha >= 248
+                fade_force = self._base_to_sub_elapsed >= self.base_to_sub_slide_in_sec + 1.0
+                if slide_done and (fade_done or fade_force):
+                    if fade_force and not fade_done:
+                        logger.warning(
+                            "PRACTICE SHOW_SUB_CONTENT: Drawer 페이드 인 타임아웃(alpha=%s), 타이머 강제 시작",
+                            alpha,
+                        )
                     self._base_to_sub_transition = None
                     self._base_to_sub_elapsed = 0.0
                     wait_total = self._start_current_sub_variant_audio_and_get_wait()
@@ -299,10 +311,15 @@ class PracticeScene(IConversationStep):
     def _start_current_sub_variant_audio_and_get_wait(self) -> float:
         """현재 sub 변형의 alt_sound_path를 재생하고, 듣기·간격·말하기·말하기후간격을 합한 대기 시간(초)을 반환한다."""
         variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
-        sound_path = str(variant.get("alt_sound_path") or "").strip()
-        if not sound_path:
+        sound_raw = str(variant.get("alt_sound_path") or "").strip()
+        if not sound_raw:
             self._sub_content_sound_sec = 0.0
             return self._sub_content_hold_sec
+
+        sp = Path(sound_raw.replace("\\", "/"))
+        if not sp.is_absolute():
+            sp = get_repo_root() / sp
+        sound_path = str(sp)
 
         gap = float(self._listen_to_speak_gap_sec)
         if self.play_voice is not None:

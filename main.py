@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from core.paths import (
     DEFAULT_OUTPUT_DIR,
+    DEFAULT_STUDIO_TOPIC,
     FFMPEG_CMD,
     RENDER_FPS,
     RENDER_HEIGHT,
@@ -32,8 +33,7 @@ if TYPE_CHECKING:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# `python main.py studio` / F5: `--topic` 생략 시 사용. CSV의 topic·vocabulary_word_rows.topic과 동일한 문자열이어야 한다.
-DEFAULT_STUDIO_TOPIC = "fruit_store"
+# DEFAULT_STUDIO_TOPIC 은 core.paths 에서 정의 (`python main.py studio` / `--topic` 생략 시).
 
 # =============================================================================
 # 배치 파이프라인: 영상 길이·렌더·mux
