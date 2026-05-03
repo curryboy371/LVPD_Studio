@@ -316,6 +316,9 @@ class ConversationStudio:
         dt = 1.0 / 30.0
         if config is not None and getattr(config, "dt_sec", None) is not None:
             dt = float(config.dt_sec)
+        if dt <= 1e-12:
+            fps = float(getattr(config, "fps", 30) or 30) if config is not None else 30.0
+            dt = 1.0 / max(1.0, fps)
         width = int(getattr(config, "width", 1280))
         height = int(getattr(config, "height", 720))
         ctx = FrameContext(width=width, height=height, dt_sec=dt)

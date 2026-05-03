@@ -139,6 +139,17 @@ class LearningScene(FSMConversationStep):
 
         self.set_stage(S.TITLE)
 
+    def set_stage(self, stage: Any) -> None:
+        """내부 FSM 단계 전환 시 stdout 로그(녹화 시 장면 전환 로그만 있으면 ‘멈춤’으로 오인되기 쉬움)."""
+        super().set_stage(stage)
+        try:
+            sn = getattr(stage, "name", str(stage))
+            t = float(self.timer)
+            ts = "inf" if t > 1e100 else f"{t:.3f}"
+            print(f"[learning][stage] {sn} | timer={ts}s", flush=True)
+        except Exception:
+            pass
+
     def reset(self, *, clear_background: bool = False) -> None:
         """장면 슬롯 재진입(숫자 키 전환 등) 시 내부 FSM이 DONE 등에 남아 UI가 깜빡이지 않도록 동기 키를 비운다.
 

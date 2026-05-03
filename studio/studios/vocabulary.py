@@ -329,6 +329,9 @@ class VocabularyStudio:
     def update(self, config: Any = None) -> None:
         self._last_config = config
         dt = float(getattr(config, "dt_sec", 0.0) or 0.0) if config is not None else 0.0
+        if dt <= 0.0 and config is not None:
+            fps = float(getattr(config, "fps", 30) or 30)
+            dt = 1.0 / max(1.0, fps)
         if self._intro_remaining_sec > 0.0:
             self._intro_remaining_sec = max(0.0, self._intro_remaining_sec - max(0.0, dt))
             return

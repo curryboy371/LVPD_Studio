@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -83,6 +84,17 @@ class HanziAnimator:
         if codepoint in self._auto_render_attempted:
             return
         self._auto_render_attempted.add(codepoint)
+        # 녹화(runner record)는 SDL_VIDEODRIVER=dummy. 메인 스레드에서 playwright 렌더를 돌리면
+        # 프레임 루프가 멈춘 것처럼 보이고 오프스크린 녹화도 진행되지 않는다.
+        if os.environ.get("SDL_VIDEODRIVER", "").strip().lower() == "dummy":
+            logger.debug(
+                "한자 프레임 자동 생성 생략 (SDL_VIDEODRIVER=dummy): U+%04X",
+                codepoint,
+            )
+            return
+        skip = os.environ.get("LVPD_SKIP_HANZI_AUTO_RENDER", "").strip().lower()
+        if skip in ("1", "true", "yes", "on"):
+            return
         svg_path = self._svgs_root / f"{codepoint}.svg"
         if not svg_path.exists():
             return
