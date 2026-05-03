@@ -269,6 +269,7 @@ class CommonDrawer:
         top_y_ratio: float = 0.12,
         bottom_margin_px: int = 48,
         title_clearance: Optional[tuple[str, float, int]] = None,
+        y_offset_px: int = 0,
     ) -> None:
         """`build_sentence_render_data_with_tone_icons`로 item을 변환(아이템 단위 캐시) 후 레이아웃·`draw_sentence`.
 
@@ -297,7 +298,7 @@ class CommonDrawer:
             data,
             channel=channel,
             center_x=int(ctx.width) // 2,
-            y_base=y_base,
+            y_base=y_base + int(y_offset_px),
             style=style,
             align=align,
         )

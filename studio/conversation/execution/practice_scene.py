@@ -6,7 +6,7 @@ from dataclasses import replace
 from enum import Enum, auto
 from pathlib import Path
 import random
-from typing import Callable
+from typing import Callable, Literal, Optional
 
 import pygame
 
@@ -56,6 +56,10 @@ class PracticeScene(IConversationStep):
         title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
         content_hold_sec: float = 3.0,
+        base_to_sub_slide_out_sec: float = 0.55,
+        base_to_sub_slide_in_sec: float = 0.6,
+        base_to_sub_slide_out_px: int = 28,
+        base_to_sub_slide_in_offset_px: int = 10,
     ) -> None:
         """연습용 Drawer·비디오·문장 스타일을 연결하고 제목 페이드인을 준비한다."""
         super().__init__()
@@ -71,6 +75,12 @@ class PracticeScene(IConversationStep):
         self.title_fade_in_sec = float(title_fade_in_sec)
         # SHOW_CONTENT 단계에서 sub 문장으로 넘어가기 전 대기 시간(초).
         self.content_hold_sec = float(content_hold_sec)
+        self.base_to_sub_slide_out_sec = max(1e-6, float(base_to_sub_slide_out_sec))
+        self.base_to_sub_slide_in_sec = max(1e-6, float(base_to_sub_slide_in_sec))
+        self.base_to_sub_slide_out_px = int(base_to_sub_slide_out_px)
+        self.base_to_sub_slide_in_offset_px = int(base_to_sub_slide_in_offset_px)
+        self._base_to_sub_transition: Optional[Literal["out", "in"]] = None
+        self._base_to_sub_elapsed: float = 0.0
         self._title_channel = "practice_title"
         self._sentence_channel = "practice_sentence"
         self._active_item_key = None
@@ -128,6 +138,8 @@ class PracticeScene(IConversationStep):
             self._sub_content_wait_remaining_sec = 0.0
             self._sub_content_wait_total_sec = 0.0
             self._sub_content_sound_sec = 0.0
+            self._base_to_sub_transition = None
+            self._base_to_sub_elapsed = 0.0
             self._stop_background_sound()
             self.drawer.hide_now(self._title_channel)
             self.drawer.hide_now(self._sentence_channel)
@@ -145,6 +157,16 @@ class PracticeScene(IConversationStep):
     def _set_stage(self, stage: "PracticeScene.Stage") -> None:
         """연습 장면 내부 Stage를 전환한다."""
         self.stage = stage
+
+    def _sentence_slide_y_offset_px(self) -> int:
+        """기본→첫 sub 전환 시 문장 블록 세로 오프셋(위 슬라이드 아웃 / 아래에서 슬라이드 인)."""
+        if self.stage == self.Stage.SHOW_CONTENT and self._base_to_sub_transition == "out":
+            t = min(1.0, self._base_to_sub_elapsed / self.base_to_sub_slide_out_sec)
+            return int(round(-self.base_to_sub_slide_out_px * t))
+        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._base_to_sub_transition == "in":
+            t = min(1.0, self._base_to_sub_elapsed / self.base_to_sub_slide_in_sec)
+            return int(round(self.base_to_sub_slide_in_offset_px * (1.0 - t)))
+        return 0
 
     @staticmethod
     def _playback_item_key(item: ConversationItemLike) -> tuple:
@@ -183,6 +205,8 @@ class PracticeScene(IConversationStep):
             self._sub_content_wait_remaining_sec = self._sub_content_hold_sec
             self._sub_content_wait_total_sec = self._sub_content_hold_sec
             self._sub_content_sound_sec = 0.0
+            self._base_to_sub_transition = None
+            self._base_to_sub_elapsed = 0.0
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
             self._set_stage(self.Stage.TITLE)
@@ -202,6 +226,14 @@ class PracticeScene(IConversationStep):
         # 기본 문장을 잠시 보여준 뒤, sub_sentences.csv 기반 변형이 있으면 다음 Stage로 넘긴다.
         if self.stage == self.Stage.SHOW_CONTENT:
             self._stop_background_sound()
+            if self._base_to_sub_transition == "out":
+                self._base_to_sub_elapsed += dt
+                if self._base_to_sub_elapsed >= self.base_to_sub_slide_out_sec:
+                    self._base_to_sub_transition = "in"
+                    self._base_to_sub_elapsed = 0.0
+                    self._set_stage(self.Stage.SHOW_SUB_CONTENT)
+                    self.drawer.fade_on(self._sentence_channel, self.base_to_sub_slide_in_sec)
+                return
             if self._content_wait_remaining_sec > 0.0:
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
             if self._content_wait_remaining_sec <= 0.0:
@@ -210,14 +242,26 @@ class PracticeScene(IConversationStep):
                     self.complete()
                     self.allow_transition()
                     return
-                self._set_stage(self.Stage.SHOW_SUB_CONTENT)
-                wait_total = self._start_current_sub_variant_audio_and_get_wait()
-                self._sub_content_wait_total_sec = max(0.0, float(wait_total))
-                self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                if self._base_to_sub_transition is None:
+                    self._base_to_sub_transition = "out"
+                    self._base_to_sub_elapsed = 0.0
+                    self.drawer.fade_off(self._sentence_channel, self.base_to_sub_slide_out_sec)
             return
 
         # SHOW_SUB_CONTENT 타이머는 sub 개수와 무관하게 항상 흐르게 유지한다.
         if self.stage == self.Stage.SHOW_SUB_CONTENT:
+            if self._base_to_sub_transition == "in":
+                self._base_to_sub_elapsed += dt
+                # 슬라이드·Drawer 페이드 인이 끝난 뒤에만 듣기/게이지 타이머를 시작한다.
+                slide_done = self._base_to_sub_elapsed >= self.base_to_sub_slide_in_sec
+                fade_done = self.drawer.fade_alpha(self._sentence_channel) >= 250
+                if slide_done and fade_done:
+                    self._base_to_sub_transition = None
+                    self._base_to_sub_elapsed = 0.0
+                    wait_total = self._start_current_sub_variant_audio_and_get_wait()
+                    self._sub_content_wait_total_sec = max(0.0, float(wait_total))
+                    self._sub_content_wait_remaining_sec = self._sub_content_wait_total_sec
+                return
             self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
                 self._sub_content_wait_remaining_sec = max(0.0, self._sub_content_wait_remaining_sec - dt)
@@ -295,6 +339,7 @@ class PracticeScene(IConversationStep):
         if not self._content_visible:
             return
 
+        slide_y = self._sentence_slide_y_offset_px()
         render_item = item
         # sub 단계에서는 sub_sentences.csv에서 만들어진 교체 문장/번역을 우선 렌더한다.
         if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
@@ -332,8 +377,10 @@ class PracticeScene(IConversationStep):
                 ctx=ctx,
                 base_item=item,
                 render_item=render_item,
+                y_offset_px=slide_y,
             )
-            self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
+            if self._base_to_sub_transition != "in":
+                self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
             return
 
         draw_style = self._style
@@ -351,6 +398,7 @@ class PracticeScene(IConversationStep):
             channel=self._sentence_channel,
             style=draw_style,
             title_clearance=(self.title_text, 0.12, 12),
+            y_offset_px=slide_y,
         )
 
         # 하단 단어(노란 텍스트) 렌더링은 비활성화한다.
@@ -363,6 +411,7 @@ class PracticeScene(IConversationStep):
         ctx: FrameContext,
         base_item: ConversationItemLike,
         render_item: ConversationItemLike,
+        y_offset_px: int = 0,
     ) -> None:
         """SHOW_SUB_CONTENT용 한자 하이라이트 렌더.
 
@@ -375,15 +424,18 @@ class PracticeScene(IConversationStep):
             colors=replace(self._style.colors, hanzi_color=(255, 255, 255)),
         )
         data = build_sentence_render_data_with_tone_icons(render_item)
-        y_base = self.drawer.layout_sentence_y_base(
-            ctx,
-            data,
-            white_style,
-            align_v="center",
-            center_y_ratio=self.drawer.ITEM_SENTENCE_CENTER_Y_RATIO,
-            top_y_ratio=0.12,
-            bottom_margin_px=48,
-            title_clearance=(self.title_text, 0.12, 12),
+        y_base = (
+            self.drawer.layout_sentence_y_base(
+                ctx,
+                data,
+                white_style,
+                align_v="center",
+                center_y_ratio=self.drawer.ITEM_SENTENCE_CENTER_Y_RATIO,
+                top_y_ratio=0.12,
+                bottom_margin_px=48,
+                title_clearance=(self.title_text, 0.12, 12),
+            )
+            + int(y_offset_px)
         )
         # SHOW_SUB_CONTENT에서는 한자 줄을 별도 수동 렌더링하므로,
         # drawer에는 병음/번역만 그리게 한다(겹침/잔상 방지).
