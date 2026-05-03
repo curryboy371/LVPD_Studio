@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pygame
 
-MODE_ICON_TARGET_SIZE_PX = 318
+MODE_ICON_TARGET_SIZE_PX = 380
 MODE_ICON_MARGIN_LEFT_PX = 24
-MODE_ICON_MARGIN_BOTTOM_PX = 20
+MODE_ICON_MARGIN_BOTTOM_PX = 38
 
 
 def load_mode_icon(repo_root: Path, filename: str) -> pygame.Surface | None:
