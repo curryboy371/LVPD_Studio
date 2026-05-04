@@ -14,6 +14,9 @@ from ..core.types import SentenceStyleConfig
 Align = Literal["center", "left", "right"]
 
 TONE_ICON_GAP_ABOVE_PX = 8
+TONE_SANDHI_LABEL_GAP_PX = 4
+# 성조 아이콘·변화 설명을 병음 쪽으로 내릴 때(y 증가). 레이아웃(extent)과 무관.
+TONE_DECORATION_NUDGE_DOWN_PX = 12
 TONE_ICON_SCALE = 0.5
 
 
@@ -121,8 +124,9 @@ class ToneIconRenderer:
         style: SentenceStyleConfig,
         alpha: int,
         align: Align,
+        render_sandhi_label: Optional[Callable[[str], Any]] = None,
     ) -> None:
-        """병음 줄 위에 음절별 성조 아이콘을 배치한다."""
+        """병음 줄 위에 음절별 성조 아이콘(·선택 시 변화 설명)을 배치한다."""
         syllables = split_pinyin_syllables(pinyin_line)
         if not syllables or not any(s is not None for s in slots):
             return
@@ -146,17 +150,45 @@ class ToneIconRenderer:
                 continue
             surf = self._scaled_icon_surface(surf)
             cx = centers[i]
-            iy = y_pinyin - TONE_ICON_GAP_ABOVE_PX - surf.get_height()
+            iy_icon = (
+                y_pinyin
+                - TONE_ICON_GAP_ABOVE_PX
+                - surf.get_height()
+                + int(TONE_DECORATION_NUDGE_DOWN_PX)
+            )
             ix = cx - surf.get_width() // 2
             ix = max(style.layout.min_margin_x, ix)
             if alpha <= 0:
                 continue
+            label_surf = None
+            if (
+                render_sandhi_label is not None
+                and slot.sandhi_label
+                and str(slot.sandhi_label).strip()
+            ):
+                try:
+                    label_surf = render_sandhi_label(str(slot.sandhi_label).strip())
+                except Exception:
+                    label_surf = None
+            if label_surf is not None:
+                iy_label = iy_icon - TONE_SANDHI_LABEL_GAP_PX - int(label_surf.get_height())
+                lx = cx - label_surf.get_width() // 2
+                lx = max(style.layout.min_margin_x, lx)
+                if alpha >= 255:
+                    screen.blit(label_surf, (lx, iy_label))
+                else:
+                    old_la = label_surf.get_alpha()
+                    label_surf.set_alpha(alpha)
+                    try:
+                        screen.blit(label_surf, (lx, iy_label))
+                    finally:
+                        self._restore_surface_alpha(label_surf, old_la)
             if alpha >= 255:
-                screen.blit(surf, (ix, iy))
+                screen.blit(surf, (ix, iy_icon))
             else:
                 old_a = surf.get_alpha()
                 surf.set_alpha(alpha)
                 try:
-                    screen.blit(surf, (ix, iy))
+                    screen.blit(surf, (ix, iy_icon))
                 finally:
                     self._restore_surface_alpha(surf, old_a)

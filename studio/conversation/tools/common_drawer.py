@@ -8,7 +8,7 @@ from typing import Any, Literal, Optional
 
 import pygame
 
-from utils.tone_icon_assets import load_tone_icon_surface, tone_icon_path
+from utils.fonts import load_font_korean
 
 from ..core.types import (
     ConversationItemLike,
@@ -18,14 +18,16 @@ from ..core.types import (
     build_sentence_render_data_with_tone_icons,
 )
 from .fade_controller import FadeController
-from .tone_icon_renderer import (
-    TONE_ICON_GAP_ABOVE_PX,
-    ToneIconRenderer,
-    split_pinyin_syllables,
-)
+from .tone_icon_renderer import ToneIconRenderer
 
 
 Align = Literal["center", "left", "right"]
+# 성조 변화 설명(소형 한글 폰트)
+SANDHI_HINT_COLOR: tuple[int, int, int] = (255, 210, 125)
+SANDHI_HINT_FONT_PX = 42
+# 병음 줄이 있을 때 위쪽 성조 아이콘·변화 설명용으로만 확보하는 고정 돌출(px).
+# 측정값을 쓰면 성조 슬롯 유무·PNG 높이·텍스트 유무에 따라 병음·한자 블록 세로 위치가 달라진다.
+PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104
 AlignV = Literal["center", "top", "bottom"]
 
 
@@ -95,6 +97,12 @@ class CommonDrawer:
         self._cache_hanzi = _LRUTextCache()
         self._cache_pinyin = _LRUTextCache()
         self._cache_translation = _LRUTextCache()
+        self._cache_sandhi_hint = _LRUTextCache()
+        self._sandhi_hint_font = load_font_korean(
+            SANDHI_HINT_FONT_PX, SANDHI_HINT_COLOR, weight="regular"
+        )
+        if self._sandhi_hint_font is None:
+            self._sandhi_hint_font = pygame.font.Font(None, max(12, SANDHI_HINT_FONT_PX))
         self._fade = FadeController()
         self._sentence_data_cache = _LRUSentenceDataCache()
         self._tone_icons = ToneIconRenderer(
@@ -135,31 +143,16 @@ class CommonDrawer:
         """문장 블록의 세로 범위. (y_base 위로 돌출, y_base 아래로 돌출) 픽셀.
 
         `y_base`는 `draw_sentence`의 첫 줄(병음 또는 한자) 상단과 같다.
-        성조 아이콘은 병음 위로만 그려지므로 `extent_above`에 포함된다.
+        병음 줄이 있으면 성조 아이콘·성조 변화 설명은 그 위에 그리되, 레이아웃은 `PINYIN_TONE_DECORATION_FIXED_ABOVE_PX`
+        고정값만 반영한다(텍스트/이미지·측정 높이로 extent를 바꾸지 않음).
         """
         hanzi = (data.sentence or "")[: style.text.max_hanzi]
         pinyin = (data.pinyin or "")[: style.text.max_pinyin]
         trans = (data.translation or "")[: style.text.max_translation]
 
         extent_above = 0
-        if pinyin:
-            syllables = split_pinyin_syllables(pinyin)
-            slots = data.tone_icon_slots or ()
-            aligned = self._tone_icons.align_tone_icon_slots(syllables, slots) if syllables else ()
-            max_icon_h = 0
-            for slot in aligned:
-                if slot is None:
-                    continue
-                path = tone_icon_path(slot.icon_tone, is_mismatch=slot.is_mismatch)
-                if path is None:
-                    continue
-                # 모듈 전역 LRU — 매 프레임 디스크 로드 없음
-                surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)
-                if surf is not None:
-                    surf = ToneIconRenderer._scaled_icon_surface(surf)
-                    max_icon_h = max(max_icon_h, int(surf.get_height()))
-            if max_icon_h > 0:
-                extent_above = max_icon_h + TONE_ICON_GAP_ABOVE_PX
+        if (pinyin or "").strip():
+            extent_above = PINYIN_TONE_DECORATION_FIXED_ABOVE_PX
 
         h_pinyin = self._cached_line_height(
             self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, pinyin, style.colors.pinyin_color
@@ -168,7 +161,7 @@ class CommonDrawer:
             self._cache_hanzi, self._fonts.hanzi_ft, self._fonts.hanzi_pg, hanzi, style.colors.hanzi_color
         )
         h_trans = 0
-        if (trans or "").strip():
+        if (trans or "").strip(): 
             surf = self._get_cached_translation_surf(trans, style.colors.translation_color)
             h_trans = int(surf.get_height()) if surf is not None else 0
 
@@ -368,6 +361,18 @@ class CommonDrawer:
         surf, _ = cached
         return surf
 
+    def _get_cached_sandhi_hint_surf(self, text: str, color: tuple[int, int, int]) -> Any:
+        """성조 변화 설명 — 번역 줄보다 작은 전용 폰트."""
+        font_pg = self._sandhi_hint_font
+        key = _text_cache_key(None, font_pg, text, color)
+        cached = self._cache_sandhi_hint.get(key)
+        if cached is None:
+            surf = font_pg.render(text, True, color)
+            cached = (surf, surf.get_rect())
+            self._cache_sandhi_hint.put(key, cached)
+        surf, _ = cached
+        return surf
+
     @staticmethod
     def _restore_surface_alpha(surf: pygame.Surface, old: Any) -> None:
         """set_alpha 실험 후 원래 알파 상태로 되돌린다."""
@@ -443,6 +448,9 @@ class CommonDrawer:
                     style=style,
                     alpha=a,
                     align=align,
+                    render_sandhi_label=lambda t: self._get_cached_sandhi_hint_surf(
+                        t, SANDHI_HINT_COLOR
+                    ),
                 )
             self._blit_text(
                 screen,

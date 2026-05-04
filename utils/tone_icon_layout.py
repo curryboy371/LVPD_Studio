@@ -6,15 +6,16 @@ from dataclasses import dataclass
 from math import isclose
 from typing import Any, Mapping, Optional
 
-from utils.pinyin_processor import get_pinyin_processor, parse_tone_from_syllable
+from utils.pinyin_processor import get_pinyin_processor, parse_tone_from_syllable, sandhi_type_ui_label
 
 
 @dataclass(frozen=True)
 class ToneIconSlot:
-    """표기≠발음일 때만 사용. PNG는 표기 성조 기준이며 반3성(3.5) 구간은 슬롯 없음."""
+    """표기≠발음일 때만 사용. PNG는 실제 발음(숫자 병음) 성조 기준. 반3성(3.5)은 슬롯 없음."""
 
     icon_tone: float
     is_mismatch: bool
+    sandhi_label: Optional[str] = None
 
 
 def _sentence_plain(item: Mapping[str, Any]) -> str:
@@ -72,6 +73,8 @@ def build_tone_icon_slots(item: Mapping[str, Any], display_pinyin: str) -> tuple
     if not lex or not ph:
         return tuple(out)
 
+    sandhi_types = pp.get_sandhi_types(chinese)
+
     n = min(len(display), len(lex), len(ph))
 
     for i in range(n):
@@ -83,7 +86,13 @@ def build_tone_icon_slots(item: Mapping[str, Any], display_pinyin: str) -> tuple
             continue
         if _tones_equal(t_lex, t_ph):
             continue
-        out[i] = ToneIconSlot(icon_tone=float(t_lex), is_mismatch=True)
+        st_key = sandhi_types[i] if i < len(sandhi_types) else None
+        label = sandhi_type_ui_label(st_key)
+        out[i] = ToneIconSlot(
+            icon_tone=float(t_ph),
+            is_mismatch=True,
+            sandhi_label=label,
+        )
 
     return tuple(out)
 

@@ -244,6 +244,17 @@ def diff_lexical_phonetic(lexical: str, phonetic: str) -> str:
     return " ".join(out)
 
 
+def sandhi_type_ui_label(type_key: Optional[str]) -> Optional[str]:
+    """성조 아이콘 위 한 줄 설명 (예: 성조변화 - 3성+3성 -> 2성+3성)."""
+    if not type_key:
+        return None
+    raw = SANDHI_TYPE_LABELS.get(type_key)
+    if not raw:
+        return None
+    detail = raw.replace("*", "").strip()
+    return f"성조변화 - {detail}"
+
+
 def diff_lexical_phonetic_per_syllable(lexical: str, phonetic: str) -> list[Optional[str]]:
     """음절 위치별로 lexical과 phonetic을 비교해, 달라지는 위치에는 발음(phonetic) 값을, 같으면 None 반환.
     pinyin_marks와 같은 길이로 쓸 수 있도록, marks 음절 수 기준으로 인덱스 맞춤.
@@ -266,6 +277,7 @@ __all__ = [
     "PinyinProcessor",
     "get_pinyin_processor",
     "parse_tone_from_syllable",
+    "sandhi_type_ui_label",
     "diff_lexical_phonetic",
     "diff_lexical_phonetic_per_syllable",
     "SANDHI_TYPE_LABELS",
