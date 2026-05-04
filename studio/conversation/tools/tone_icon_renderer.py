@@ -138,7 +138,7 @@ class ToneIconRenderer:
         for i, slot in enumerate(aligned):
             if slot is None or i >= len(centers):
                 continue
-            path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
+            path = tone_icon_path(slot.icon_tone, is_mismatch=slot.is_mismatch)
             if path is None:
                 continue
             surf = load_tone_icon_surface(path, pygame, is_mismatch=slot.is_mismatch)

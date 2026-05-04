@@ -1,4 +1,4 @@
-"""표기·발음 숫자 병음 음절별 성조 일치 여부 → 아이콘 슬롯."""
+"""표기·발음 성조가 다른 음절에만 성조 아이콘 슬롯을 채운다."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from utils.pinyin_processor import get_pinyin_processor, parse_tone_from_syllabl
 
 @dataclass(frozen=True)
 class ToneIconSlot:
-    """한 음절 위에 올릴 아이콘 정보. 발음 성조 기준으로 에셋을 고른다."""
+    """표기≠발음일 때만 사용. PNG는 표기 성조 기준이며 반3성(3.5) 구간은 슬롯 없음."""
 
-    phonetic_tone: float
+    icon_tone: float
     is_mismatch: bool
 
 
@@ -34,10 +34,15 @@ def _tones_equal(a: Optional[float], b: Optional[float]) -> bool:
     return isclose(a, b, rel_tol=0.0, abs_tol=1e-6)
 
 
+def _is_half_third_tone(t: Optional[float]) -> bool:
+    return t is not None and isclose(float(t), 3.5, rel_tol=0.0, abs_tol=1e-6)
+
+
 def build_tone_icon_slots(item: Mapping[str, Any], display_pinyin: str) -> tuple[Optional[ToneIconSlot], ...]:
     """병음 표시 줄(display_pinyin) 음절 수에 맞춰 슬롯을 만든다.
 
     표기/발음은 `pinyin_lexical`·`pinyin_phonetic` 또는 원문으로 g2pM 보강.
+    표기 성조와 발음 성조가 같으면 슬롯을 두지 않는다. 반3성(3.5) 포함 시에도 아이콘 없음.
     음절 수가 맞지 않으면 짧은 쪽 길이만 채우고 나머지는 None.
     """
     display = _split_syllables(display_pinyin[:500])
@@ -72,10 +77,13 @@ def build_tone_icon_slots(item: Mapping[str, Any], display_pinyin: str) -> tuple
     for i in range(n):
         t_lex = parse_tone_from_syllable(lex[i])
         t_ph = parse_tone_from_syllable(ph[i])
-        if t_ph is None:
+        if t_lex is None or t_ph is None:
             continue
-        mismatch = not _tones_equal(t_lex, t_ph)
-        out[i] = ToneIconSlot(phonetic_tone=t_ph, is_mismatch=mismatch)
+        if _is_half_third_tone(t_lex) or _is_half_third_tone(t_ph):
+            continue
+        if _tones_equal(t_lex, t_ph):
+            continue
+        out[i] = ToneIconSlot(icon_tone=float(t_lex), is_mismatch=True)
 
     return tuple(out)
 
