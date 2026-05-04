@@ -156,7 +156,7 @@ class PracticeScene(IConversationStep):
         self._bg_channel_index = 5
         self._bg_channel: pygame.mixer.Channel | None = None
         self._bg_fade_ms = 1000
-        self._bg_volume = 0.45
+        self._bg_volume = 0.2
         self._bg_playing = False
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE

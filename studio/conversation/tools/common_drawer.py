@@ -150,7 +150,7 @@ class CommonDrawer:
             for slot in aligned:
                 if slot is None:
                     continue
-                path = tone_icon_path(slot.phonetic_tone, is_mismatch=slot.is_mismatch)
+                path = tone_icon_path(slot.icon_tone, is_mismatch=slot.is_mismatch)
                 if path is None:
                     continue
                 # 모듈 전역 LRU — 매 프레임 디스크 로드 없음

@@ -956,15 +956,6 @@ class VocabularyStudio:
             ix = img_rect.x + (img_rect.width - scaled.get_width()) // 2
             iy = img_rect.y + (img_rect.height - scaled.get_height()) // 2
             screen.blit(scaled, (ix, iy))
-        else:
-            ph = self._font_hint.render("이미지 없음 또는 로드 실패", True, (100, 100, 110))
-            screen.blit(
-                ph,
-                (
-                    img_rect.x + (img_rect.width - ph.get_width()) // 2,
-                    img_rect.y + img_rect.height // 2,
-                ),
-            )
 
         if not self._hanzi_animator.draw(screen, stroke_rect):
             ph2 = self._font_hint.render("획순 데이터 없음", True, (100, 100, 110))
