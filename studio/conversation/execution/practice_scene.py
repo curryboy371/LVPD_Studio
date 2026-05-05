@@ -14,7 +14,6 @@ from typing import Callable, Literal, Optional
 import pygame
 
 from core.paths import get_repo_root
-from data.table_manager import get_word
 from utils.fonts import load_font_chinese, load_font_korean
 
 from ..core.scene_transition import SceneTransitionMode
@@ -34,6 +33,11 @@ logger = logging.getLogger(__name__)
 # sub 한 변형당 자동 대기 상한(초). 음성 길이×배율+간격이 과하면 녹화가 수십 분 멈춘 것처럼 보임.
 _SUB_VARIANT_WAIT_WARN_SEC = 90.0
 _SUB_VARIANT_WAIT_MAX_SEC = 180.0
+
+# sub 변형: 팁 인 → 문장 인 → 팁 아웃 → 듣기/말하기 재생
+_SubPlayPhase = Literal[
+    "tip_in", "tip_hold", "sentence_in", "sentence_hold", "tip_out", "playing"
+]
 
 
 def _sanitize_wait_sec(v: float, *, fallback: float) -> float:
@@ -79,6 +83,8 @@ class PracticeScene(IConversationStep):
         """연습 장면 내부 단계."""
 
         TITLE = auto()
+        INTRO_SENTENCE_IN = auto()
+        INTRO_SENTENCE_HOLD = auto()
         SHOW_CONTENT = auto()
         SHOW_SUB_CONTENT = auto()
 
@@ -95,6 +101,11 @@ class PracticeScene(IConversationStep):
         on_bg_sound_started: Callable[[str, float], None] | None = None,
         title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
+        tip_box_intro_fade_in_sec: float = 0.5,
+        sentence_intro_fade_in_sec: float = 0.55,
+        tip_box_intro_fade_out_sec: float = 1.25,
+        tip_intro_hold_sec: float = 1.0,
+        sentence_intro_hold_sec: float = 2.0,
         content_hold_sec: float = 3.0,
         base_to_sub_slide_out_sec: float = 0.55,
         base_to_sub_slide_in_sec: float = 0.6,
@@ -113,6 +124,11 @@ class PracticeScene(IConversationStep):
         self._style = style
         self.title_text = str(title_text or "듣고 따라해보기")
         self.title_fade_in_sec = float(title_fade_in_sec)
+        self._tip_intro_fade_in_sec = max(1e-6, float(tip_box_intro_fade_in_sec))
+        self._sentence_intro_fade_in_sec = max(1e-6, float(sentence_intro_fade_in_sec))
+        self._tip_intro_fade_out_sec = max(1e-6, float(tip_box_intro_fade_out_sec))
+        self._tip_intro_hold_sec = max(0.0, float(tip_intro_hold_sec))
+        self._sentence_intro_hold_sec = max(0.0, float(sentence_intro_hold_sec))
         # SHOW_CONTENT 단계에서 sub 문장으로 넘어가기 전 대기 시간(초).
         self.content_hold_sec = float(content_hold_sec)
         self.base_to_sub_slide_out_sec = max(1e-6, float(base_to_sub_slide_out_sec))
@@ -123,6 +139,7 @@ class PracticeScene(IConversationStep):
         self._base_to_sub_elapsed: float = 0.0
         self._title_channel = "practice_title"
         self._sentence_channel = "practice_sentence"
+        self._tip_intro_channel = "practice_tip_intro"
         self._active_item_key = None
         self._title_wait_remaining_sec = 0.0
         self._content_wait_remaining_sec = 0.0
@@ -161,8 +178,13 @@ class PracticeScene(IConversationStep):
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self._practice_stage_log_last: "PracticeScene.Stage | None" = None
+        self._intro_wait_remaining_sec = 0.0
+        self._sub_play_phase: _SubPlayPhase | None = None
+        self._sub_intro_wait_remaining_sec = 0.0
+        self._sub_slide_in_elapsed = 0.0
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
+        self.drawer.hide_now(self._tip_intro_channel)
 
     def reset(self, *, clear_background: bool = False) -> None:
         """다른 SceneKind로 갔다가 돌아올 때 Stage·타이머 잔상으로 문장/재생바가 깜빡이지 않게 한다."""
@@ -184,6 +206,11 @@ class PracticeScene(IConversationStep):
             self._stop_background_sound()
             self.drawer.hide_now(self._title_channel)
             self.drawer.hide_now(self._sentence_channel)
+            self.drawer.hide_now(self._tip_intro_channel)
+            self._intro_wait_remaining_sec = 0.0
+            self._sub_play_phase = None
+            self._sub_intro_wait_remaining_sec = 0.0
+            self._sub_slide_in_elapsed = 0.0
             self._practice_stage_log_last = None
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
@@ -217,12 +244,12 @@ class PracticeScene(IConversationStep):
             pass
 
     def _sentence_slide_y_offset_px(self) -> int:
-        """기본→첫 sub 전환 시 문장 블록 세로 오프셋(위 슬라이드 아웃 / 아래에서 슬라이드 인)."""
+        """기본→첫 sub 전환 시 문장 블록 세로 오프셋(위 슬라이드 아웃 / sub 문장 인트로 슬라이드 인)."""
         if self.stage == self.Stage.SHOW_CONTENT and self._base_to_sub_transition == "out":
             t = min(1.0, self._base_to_sub_elapsed / self.base_to_sub_slide_out_sec)
             return int(round(-self.base_to_sub_slide_out_px * t))
-        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._base_to_sub_transition == "in":
-            t = min(1.0, self._base_to_sub_elapsed / self.base_to_sub_slide_in_sec)
+        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._sub_play_phase == "sentence_in":
+            t = min(1.0, self._sub_slide_in_elapsed / self.base_to_sub_slide_in_sec)
             return int(round(self.base_to_sub_slide_in_offset_px * (1.0 - t)))
         return 0
 
@@ -266,7 +293,11 @@ class PracticeScene(IConversationStep):
             self._sub_content_sound_sec = 0.0
             self._base_to_sub_transition = None
             self._base_to_sub_elapsed = 0.0
+            self._sub_play_phase = None
+            self._sub_intro_wait_remaining_sec = 0.0
+            self._sub_slide_in_elapsed = 0.0
             self.drawer.hide_now(self._sentence_channel)
+            self.drawer.hide_now(self._tip_intro_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
             self._set_stage(self.Stage.TITLE)
             return
@@ -277,8 +308,28 @@ class PracticeScene(IConversationStep):
             if self._title_wait_remaining_sec > 0.0:
                 self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - dt)
             if self._title_wait_remaining_sec <= 0.0:
+                self.drawer.show_now(self._title_channel)
+                self._set_stage(self.Stage.INTRO_SENTENCE_IN)
+                self.drawer.hide_now(self._tip_intro_channel)
+                self.drawer.fade_on(self._sentence_channel, self._sentence_intro_fade_in_sec)
+                self._intro_wait_remaining_sec = self._sentence_intro_fade_in_sec
+            return
+
+        if self.stage == self.Stage.INTRO_SENTENCE_IN:
+            self._stop_background_sound()
+            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - dt)
+            if self._intro_wait_remaining_sec <= 0.0:
+                self._set_stage(self.Stage.INTRO_SENTENCE_HOLD)
+                self._intro_wait_remaining_sec = self._sentence_intro_hold_sec
+            return
+
+        if self.stage == self.Stage.INTRO_SENTENCE_HOLD:
+            self._stop_background_sound()
+            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - dt)
+            if self._intro_wait_remaining_sec <= 0.0:
+                self.drawer.hide_now(self._tip_intro_channel)
                 self._content_visible = True
-                self.drawer.show_now(self._sentence_channel)
+                self._content_wait_remaining_sec = self.content_hold_sec
                 self._set_stage(self.Stage.SHOW_CONTENT)
             return
 
@@ -288,10 +339,10 @@ class PracticeScene(IConversationStep):
             if self._base_to_sub_transition == "out":
                 self._base_to_sub_elapsed += dt
                 if self._base_to_sub_elapsed >= self.base_to_sub_slide_out_sec:
-                    self._base_to_sub_transition = "in"
+                    self._base_to_sub_transition = None
                     self._base_to_sub_elapsed = 0.0
                     self._set_stage(self.Stage.SHOW_SUB_CONTENT)
-                    self.drawer.fade_on(self._sentence_channel, self.base_to_sub_slide_in_sec)
+                    self._begin_sub_variant_intro()
                 return
             if self._content_wait_remaining_sec > 0.0:
                 self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
@@ -307,24 +358,46 @@ class PracticeScene(IConversationStep):
                     self.drawer.fade_off(self._sentence_channel, self.base_to_sub_slide_out_sec)
             return
 
-        # SHOW_SUB_CONTENT 타이머는 sub 개수와 무관하게 항상 흐르게 유지한다.
+        # SHOW_SUB_CONTENT: sub별 팁 인 → 문장 인 → 팁 아웃 → 듣기/말하기 타이머
         if self.stage == self.Stage.SHOW_SUB_CONTENT:
-            if self._base_to_sub_transition == "in":
-                self._base_to_sub_elapsed += dt
-                # 슬라이드·Drawer 페이드 인이 끝난 뒤에만 듣기/게이지 타이머를 시작한다.
-                slide_done = self._base_to_sub_elapsed >= self.base_to_sub_slide_in_sec
-                alpha = int(self.drawer.fade_alpha(self._sentence_channel))
-                # int 보간으로 알파가 249 근처에서 멈추면 fade_alpha>=250이 영원히 False가 될 수 있음 → 완화 + 타임아웃
-                fade_done = alpha >= 248
-                fade_force = self._base_to_sub_elapsed >= self.base_to_sub_slide_in_sec + 1.0
-                if slide_done and (fade_done or fade_force):
-                    if fade_force and not fade_done:
-                        logger.warning(
-                            "PRACTICE SHOW_SUB_CONTENT: Drawer 페이드 인 타임아웃(alpha=%s), 타이머 강제 시작",
-                            alpha,
-                        )
-                    self._base_to_sub_transition = None
-                    self._base_to_sub_elapsed = 0.0
+            if self._sub_play_phase == "tip_in":
+                self._stop_background_sound()
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                if self._sub_intro_wait_remaining_sec <= 0.0:
+                    self._sub_play_phase = "tip_hold"
+                    self._sub_intro_wait_remaining_sec = self._tip_intro_hold_sec
+                return
+            if self._sub_play_phase == "tip_hold":
+                self._stop_background_sound()
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                if self._sub_intro_wait_remaining_sec <= 0.0:
+                    self._sub_play_phase = "sentence_in"
+                    self.drawer.fade_on(self._sentence_channel, self._sentence_intro_fade_in_sec)
+                    self._sub_intro_wait_remaining_sec = self._sentence_intro_fade_in_sec
+                    self._sub_slide_in_elapsed = 0.0
+                return
+            if self._sub_play_phase == "sentence_in":
+                self._stop_background_sound()
+                self._sub_slide_in_elapsed += dt
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                if self._sub_intro_wait_remaining_sec <= 0.0:
+                    self._sub_play_phase = "sentence_hold"
+                    self._sub_intro_wait_remaining_sec = self._sentence_intro_hold_sec
+                return
+            if self._sub_play_phase == "sentence_hold":
+                self._stop_background_sound()
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                if self._sub_intro_wait_remaining_sec <= 0.0:
+                    self._sub_play_phase = "tip_out"
+                    self.drawer.fade_off(self._tip_intro_channel, self._tip_intro_fade_out_sec)
+                    self._sub_intro_wait_remaining_sec = self._tip_intro_fade_out_sec
+                return
+            if self._sub_play_phase == "tip_out":
+                self._stop_background_sound()
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                if self._sub_intro_wait_remaining_sec <= 0.0:
+                    self.drawer.hide_now(self._tip_intro_channel)
+                    self._sub_play_phase = "playing"
                     wait_total = self._start_current_sub_variant_audio_and_get_wait()
                     wt = _clamp_sub_variant_wait(
                         float(wait_total), hold=float(self._sub_content_hold_sec)
@@ -332,6 +405,8 @@ class PracticeScene(IConversationStep):
                     self._sub_content_wait_total_sec = wt
                     self._sub_content_wait_remaining_sec = wt
                     self._log_sub_variant_wait(wt)
+                return
+            if self._sub_play_phase != "playing":
                 return
             self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
@@ -343,13 +418,7 @@ class PracticeScene(IConversationStep):
                     if next_index < len(self._sub_variants):
                         self._sub_variant_index = next_index
                         self._current_sub_variant = self._sub_variants[self._sub_variant_index]
-                        wait_total = self._start_current_sub_variant_audio_and_get_wait()
-                        wt = _clamp_sub_variant_wait(
-                            float(wait_total), hold=float(self._sub_content_hold_sec)
-                        )
-                        self._sub_content_wait_total_sec = wt
-                        self._sub_content_wait_remaining_sec = wt
-                        self._log_sub_variant_wait(wt)
+                        self._begin_sub_variant_intro()
                         return
                 # 마지막 sub 변형까지 모두 끝나면 다음 SceneKind로 전환한다.
                 try:
@@ -378,6 +447,43 @@ class PracticeScene(IConversationStep):
                 continue
             valid.append(dict(variant))
         return valid
+
+    def _begin_sub_variant_intro(self) -> None:
+        """sub 변형: 팁 인 →(대기)→ 문장 인 →(대기)→ 팁 아웃 → 음성/게이지. 대기 길이는 `tip_intro_hold_sec`·`sentence_intro_hold_sec`."""
+        self.drawer.hide_now(self._sentence_channel)
+        self.drawer.hide_now(self._tip_intro_channel)
+        self._sub_play_phase = "tip_in"
+        self.drawer.fade_on(self._tip_intro_channel, self._tip_intro_fade_in_sec)
+        self._sub_intro_wait_remaining_sec = self._tip_intro_fade_in_sec
+        self._sub_slide_in_elapsed = 0.0
+
+    def _sub_variant_render_item(self, item: ConversationItemLike) -> ConversationItemLike:
+        """현재 `sub` 변형으로 `draw_item_sentence` / 하이라이트용 렌더 항목을 만든다."""
+        if self._current_sub_variant is None or not isinstance(item, dict):
+            return item
+        base_map = item
+        replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
+        pinyin_marks = ""
+        pinyin_phonetic = ""
+        pinyin_lexical = ""
+        if replaced_sentence:
+            try:
+                pinyin_processor = get_pinyin_processor()
+                if pinyin_processor.available:
+                    pinyin_marks = pinyin_processor.full_convert(replaced_sentence)
+                    pinyin_lexical = " ".join(pinyin_processor.get_lexical_pinyin(replaced_sentence)).strip()
+                    pinyin_phonetic = " ".join(pinyin_processor.get_phonetic_pinyin(replaced_sentence)).strip()
+            except Exception:
+                pass
+        return {
+            **base_map,
+            "sentence": [replaced_sentence],
+            "translation": [str(self._current_sub_variant.get("alt_translation") or "").strip()],
+            "pinyin": pinyin_marks,
+            "pinyin_marks": pinyin_marks,
+            "pinyin_phonetic": pinyin_phonetic,
+            "pinyin_lexical": pinyin_lexical,
+        }
 
     def _start_current_sub_variant_audio_and_get_wait(self) -> float:
         """현재 sub 변형의 alt_sound_path를 재생하고, 듣기·간격·말하기·말하기후간격을 합한 대기 시간(초)을 반환한다."""
@@ -435,38 +541,58 @@ class PracticeScene(IConversationStep):
 
         self._draw_title(screen, ctx=ctx)
 
+        if self.stage in (
+            self.Stage.INTRO_SENTENCE_IN,
+            self.Stage.INTRO_SENTENCE_HOLD,
+        ):
+            slide_y = self._sentence_slide_y_offset_px()
+            draw_style = replace(
+                self._style,
+                colors=replace(self._style.colors, hanzi_color=(255, 255, 255)),
+            )
+            self.drawer.draw_item_sentence(
+                screen,
+                item,
+                ctx=ctx,
+                channel=self._sentence_channel,
+                style=draw_style,
+                title_clearance=(self.title_text, 0.12, 12),
+                y_offset_px=slide_y,
+            )
+            return
+
+        if (
+            self.stage == self.Stage.SHOW_SUB_CONTENT
+            and self._sub_play_phase
+            in ("tip_in", "tip_hold", "sentence_in", "sentence_hold", "tip_out")
+            and self._current_sub_variant is not None
+        ):
+            tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
+            self._draw_tip_box_above_gauge(
+                screen,
+                ctx=ctx,
+                tip_text=tip_text or "듣고 따라 말해보세요",
+                alpha_channel=self._tip_intro_channel,
+            )
+            if self._sub_play_phase not in ("tip_in", "tip_hold"):
+                slide_y = self._sentence_slide_y_offset_px()
+                render_item = self._sub_variant_render_item(item)
+                self._draw_sub_sentence_with_highlight(
+                    screen,
+                    ctx=ctx,
+                    base_item=item,
+                    render_item=render_item,
+                    y_offset_px=slide_y,
+                )
+            return
+
         if not self._content_visible:
             return
 
         slide_y = self._sentence_slide_y_offset_px()
         render_item = item
-        # sub 단계에서는 sub_sentences.csv에서 만들어진 교체 문장/번역을 우선 렌더한다.
         if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
-            base_map = item if isinstance(item, dict) else {}
-            replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
-            pinyin_marks = ""
-            pinyin_phonetic = ""
-            pinyin_lexical = ""
-            # sub 문장은 base 문장과 달라질 수 있어, 매번 현재 문장 기준 병음을 재생성한다.
-            if replaced_sentence:
-                try:
-                    pinyin_processor = get_pinyin_processor()
-                    if pinyin_processor.available:
-                        pinyin_marks = pinyin_processor.full_convert(replaced_sentence)
-                        pinyin_lexical = " ".join(pinyin_processor.get_lexical_pinyin(replaced_sentence)).strip()
-                        pinyin_phonetic = " ".join(pinyin_processor.get_phonetic_pinyin(replaced_sentence)).strip()
-                except Exception:
-                    pass
-            render_item = {
-                **base_map,
-                "sentence": [replaced_sentence],
-                "translation": [str(self._current_sub_variant.get("alt_translation") or "").strip()],
-                # sub 문장에서도 병음/발음 정보를 채워야 병음 줄과 발음 아이콘이 함께 표시된다.
-                "pinyin": pinyin_marks,
-                "pinyin_marks": pinyin_marks,
-                "pinyin_phonetic": pinyin_phonetic,
-                "pinyin_lexical": pinyin_lexical,
-            }
+            render_item = self._sub_variant_render_item(item)
 
         # SHOW_SUB_CONTENT에서는 기본 한자색을 흰색으로 그리고,
         # 슬롯에 들어간 alt_word 구간만 연습색(AMBER)으로 오버레이한다.
@@ -478,7 +604,7 @@ class PracticeScene(IConversationStep):
                 render_item=render_item,
                 y_offset_px=slide_y,
             )
-            if self._base_to_sub_transition != "in":
+            if self._sub_play_phase == "playing":
                 self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
             return
 
@@ -726,64 +852,7 @@ class PracticeScene(IConversationStep):
             show_time_text=False,
             progress_color=self._resolve_playback_bar_color(is_listen_phase=is_listen_phase),
         )
-        self._draw_tip_box_above_gauge(
-            screen,
-            ctx=ctx,
-            tip_text=self._build_current_sub_tip_text(),
-        )
         self._draw_mode_icon(screen, ctx=ctx, is_listen_phase=is_listen_phase)
-
-    def _build_current_sub_tip_text(self) -> str:
-        """현재 sub 변형의 alt_word_id(들)로 tip box용 '한자 : 뜻' 여러 줄 텍스트를 만든다."""
-        variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
-        alt_word_ids_raw = variant.get("alt_word_ids")
-        alt_words_raw = variant.get("alt_words")
-        alt_word_ids: list[int] = []
-        alt_words: list[str] = []
-
-        if isinstance(alt_word_ids_raw, list) and alt_word_ids_raw:
-            for raw in alt_word_ids_raw:
-                try:
-                    wid = int(raw)
-                except (TypeError, ValueError):
-                    continue
-                if wid > 0:
-                    alt_word_ids.append(wid)
-        else:
-            try:
-                single_id = int(variant.get("alt_word_id") or 0)
-            except (TypeError, ValueError):
-                single_id = 0
-            if single_id > 0:
-                alt_word_ids.append(single_id)
-
-        if isinstance(alt_words_raw, list) and alt_words_raw:
-            alt_words = [str(w or "").strip() for w in alt_words_raw]
-        else:
-            alt_words = [str(variant.get("alt_word") or "").strip()]
-
-        rows: list[str] = []
-        for i, wid in enumerate(alt_word_ids):
-            word_obj = get_word(wid)
-            hanzi = ""
-            if i < len(alt_words):
-                hanzi = str(alt_words[i] or "").strip()
-            if not hanzi and word_obj is not None:
-                hanzi = str(word_obj.word or "").strip()
-            meaning = str(word_obj.meaning or "").strip() if word_obj is not None else ""
-            if not hanzi and not meaning:
-                continue
-            if not hanzi:
-                rows.append(meaning)
-            elif not meaning:
-                rows.append(hanzi)
-            else:
-                rows.append(f"{hanzi} : {meaning}")
-
-        if not rows:
-            fallback = str(variant.get("alt_translation") or "").strip()
-            return fallback
-        return "\n".join(rows)
 
     def _resolve_playback_bar_color(self, *, is_listen_phase: bool) -> tuple[int, int, int]:
         """현재 재생 모드에 맞는 재생바 색상을 반환한다."""
@@ -886,9 +955,26 @@ class PracticeScene(IConversationStep):
         target_h = max(1, int(round(rh * ref_scale)))
         return target_w, target_h
 
-    def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
+    def _tip_box_pixel_alpha(self, *, alpha_channel: str | None) -> int:
+        base = 178
+        if not alpha_channel:
+            return base
+        fa = int(self.drawer.fade_alpha(str(alpha_channel)))
+        return max(0, min(255, int(round(float(base) * float(fa) / 255.0))))
+
+    def _draw_tip_box_above_gauge(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        tip_text: str,
+        alpha_channel: str | None = None,
+    ) -> None:
         box = self._tip_box_surface
         if box is None:
+            return
+        px_alpha = self._tip_box_pixel_alpha(alpha_channel=alpha_channel)
+        if px_alpha <= 0:
             return
         bar_rect = self._playback_bar.get_bar_rect(frame_width=ctx.width, frame_height=ctx.height)
         sw, sh = int(box.get_width()), int(box.get_height())
@@ -900,7 +986,7 @@ class PracticeScene(IConversationStep):
         th = max(1, int(round(sh * scale_y)))
         draw = pygame.transform.smoothscale(box, (tw, th)) if (tw != sw or th != sh) else box
         draw = draw.copy()
-        draw.set_alpha(178)
+        draw.set_alpha(px_alpha)
         x = int(bar_rect.centerx - (tw // 2))
         y = int(bar_rect.top - th - 12)
         x = max(0, min(int(ctx.width) - tw, x))
@@ -919,7 +1005,12 @@ class PracticeScene(IConversationStep):
         cur_y = int(y + padding_top)
         for surf in rendered:
             tx = int(x + padding_left)
-            screen.blit(surf, (tx, cur_y))
+            if px_alpha < 255:
+                s2 = surf.copy()
+                s2.set_alpha(px_alpha)
+                screen.blit(s2, (tx, cur_y))
+            else:
+                screen.blit(surf, (tx, cur_y))
             cur_y += int(surf.get_height()) + line_gap
 
     @staticmethod

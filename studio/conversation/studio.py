@@ -200,6 +200,22 @@ class ConversationStudio:
             title_text=str(
                 getattr(settings, "learning_title_text", "문장 이해하기") or "문장 이해하기"
             ),
+            title_fade_in_sec=float(getattr(settings, "learning_title_fade_in_sec", 1.0) or 1.0),
+            tip_box_intro_fade_in_sec=float(
+                getattr(settings, "learning_tip_box_intro_fade_in_sec", 0.5) or 0.5
+            ),
+            sentence_intro_fade_in_sec=float(
+                getattr(settings, "learning_sentence_intro_fade_in_sec", 0.55) or 0.55
+            ),
+            tip_box_intro_fade_out_sec=float(
+                getattr(settings, "learning_tip_box_intro_fade_out_sec", 1.25) or 1.25
+            ),
+            tip_intro_hold_sec=float(
+                getattr(settings, "learning_tip_intro_hold_sec", 1.0) or 1.0
+            ),
+            sentence_intro_hold_sec=float(
+                getattr(settings, "learning_sentence_intro_hold_sec", 2.0) or 2.0
+            ),
             layer_channel_prefix=str(
                 getattr(settings, "learning_layer_channel_prefix", None) or "learning"
             ),
@@ -217,6 +233,21 @@ class ConversationStudio:
             ),
             # LearningScene과 동일하게 제목 페이드 인 시간을 설정 가능하게 한다.
             title_fade_in_sec=float(getattr(settings, "practice_title_fade_in_sec", 1.0) or 1.0),
+            tip_box_intro_fade_in_sec=float(
+                getattr(settings, "practice_tip_box_intro_fade_in_sec", 0.5) or 0.5
+            ),
+            sentence_intro_fade_in_sec=float(
+                getattr(settings, "practice_sentence_intro_fade_in_sec", 0.55) or 0.55
+            ),
+            tip_box_intro_fade_out_sec=float(
+                getattr(settings, "practice_tip_box_intro_fade_out_sec", 1.25) or 1.25
+            ),
+            tip_intro_hold_sec=float(
+                getattr(settings, "practice_tip_intro_hold_sec", 1.0) or 1.0
+            ),
+            sentence_intro_hold_sec=float(
+                getattr(settings, "practice_sentence_intro_hold_sec", 2.0) or 2.0
+            ),
             base_to_sub_slide_out_sec=float(
                 getattr(settings, "practice_base_to_sub_slide_out_sec", 0.55) or 0.55
             ),

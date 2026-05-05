@@ -25,6 +25,11 @@ class LearningScene(FSMConversationStep):
 
     class Stage(Enum):
         TITLE = auto()
+        INTRO_TIP_IN = auto()
+        INTRO_TIP_HOLD = auto()
+        INTRO_SENTENCE_IN = auto()
+        INTRO_SENTENCE_HOLD = auto()
+        INTRO_TIP_OUT = auto()
         PLAY_L1 = auto()
         WAIT_AFTER_L1 = auto()
         PLAY_L2 = auto()
@@ -57,6 +62,11 @@ class LearningScene(FSMConversationStep):
         play_voice: Callable[..., None] | None = None,
         title_text: str = "문장 이해하기",
         title_fade_in_sec: float = 1.0,
+        tip_box_intro_fade_in_sec: float = 0.5,
+        sentence_intro_fade_in_sec: float = 0.55,
+        tip_box_intro_fade_out_sec: float = 1.25,
+        tip_intro_hold_sec: float = 1.0,
+        sentence_intro_hold_sec: float = 2.0,
         layer_channel_prefix: str = "learning",
         stage_audio_keys: dict["LearningScene.Stage", str] | None = None,
         wait_for_sound_end: bool = False,
@@ -74,6 +84,11 @@ class LearningScene(FSMConversationStep):
         self.hold_sec = float(hold_sec)
         self.title_text = title_text
         self.title_fade_in_sec = float(title_fade_in_sec)
+        self.tip_box_intro_fade_in_sec = max(1e-6, float(tip_box_intro_fade_in_sec))
+        self.sentence_intro_fade_in_sec = max(1e-6, float(sentence_intro_fade_in_sec))
+        self.tip_box_intro_fade_out_sec = max(1e-6, float(tip_box_intro_fade_out_sec))
+        self.tip_intro_hold_sec = max(0.0, float(tip_intro_hold_sec))
+        self.sentence_intro_hold_sec = max(0.0, float(sentence_intro_hold_sec))
         self._playback_bar = PlaybackBarRenderer()
         self._listen_icon_surface = self._load_listen_icon_surface()
         self._tip_box_surface = self._load_tip_box_surface()
@@ -91,9 +106,10 @@ class LearningScene(FSMConversationStep):
         self.scene_transition_overlay_peak_alpha = 220
 
         # 채널
-        ch = self.channels_from_layers(["title", "sentence"], prefix=layer_channel_prefix)
+        ch = self.channels_from_layers(["title", "sentence", "tip_intro"], prefix=layer_channel_prefix)
         self.title_channel = ch["title"]
         self.sentence_channel = ch["sentence"]
+        self.tip_intro_channel = ch["tip_intro"]
 
         # 오디오
         self.stage_audio_keys = {
@@ -114,6 +130,26 @@ class LearningScene(FSMConversationStep):
         self.stage_table = {
             S.TITLE: StageConfig(
                 on_enter=self._enter_title,
+                next_stage=S.INTRO_TIP_IN,
+            ),
+            S.INTRO_TIP_IN: StageConfig(
+                on_enter=self._enter_intro_tip_in,
+                next_stage=S.INTRO_TIP_HOLD,
+            ),
+            S.INTRO_TIP_HOLD: StageConfig(
+                on_enter=self._enter_intro_tip_hold,
+                next_stage=S.INTRO_SENTENCE_IN,
+            ),
+            S.INTRO_SENTENCE_IN: StageConfig(
+                on_enter=self._enter_intro_sentence_in,
+                next_stage=S.INTRO_SENTENCE_HOLD,
+            ),
+            S.INTRO_SENTENCE_HOLD: StageConfig(
+                on_enter=self._enter_intro_sentence_hold,
+                next_stage=S.INTRO_TIP_OUT,
+            ),
+            S.INTRO_TIP_OUT: StageConfig(
+                on_enter=self._enter_intro_tip_out,
                 next_stage=S.PLAY_L1,
             ),
             S.PLAY_L1: StageConfig(
@@ -172,11 +208,35 @@ class LearningScene(FSMConversationStep):
     # ------------------------
     def _enter_title(self) -> float:
         self.drawer.hide_now(self.sentence_channel)
+        self.drawer.hide_now(self.tip_intro_channel)
         self.drawer.fade_on(self.title_channel, self.title_fade_in_sec)
         return self.title_fade_in_sec
 
+    def _enter_intro_tip_in(self) -> float:
+        self.drawer.show_now(self.title_channel)
+        self.drawer.hide_now(self.sentence_channel)
+        self.drawer.fade_on(self.tip_intro_channel, self.tip_box_intro_fade_in_sec)
+        return self.tip_box_intro_fade_in_sec
+
+    def _enter_intro_tip_hold(self) -> float:
+        """팁 페이드 인 완료 후 대기(문장은 아직 숨김)."""
+        return self.tip_intro_hold_sec * 2.0
+
+    def _enter_intro_sentence_in(self) -> float:
+        self.drawer.fade_on(self.sentence_channel, self.sentence_intro_fade_in_sec)
+        return self.sentence_intro_fade_in_sec
+
+    def _enter_intro_sentence_hold(self) -> float:
+        """문장 페이드 인 완료 후 대기(팁·문장 동시 표시)."""
+        return self.sentence_intro_hold_sec
+
+    def _enter_intro_tip_out(self) -> float:
+        self.drawer.fade_off(self.tip_intro_channel, self.tip_box_intro_fade_out_sec)
+        return self.tip_box_intro_fade_out_sec
+
     def _enter_play(self, stage: "LearningScene.Stage") -> float:
         self.drawer.show_now(self.title_channel)
+        self.drawer.hide_now(self.tip_intro_channel)
         self.drawer.show_now(self.sentence_channel)
 
         path = str(self.current_item.get(self.stage_audio_keys[stage]) or "")
@@ -269,6 +329,20 @@ class LearningScene(FSMConversationStep):
         )
 
         self._draw_title(screen, ctx=ctx)
+        if self.stage in (
+            self.Stage.INTRO_TIP_IN,
+            self.Stage.INTRO_TIP_HOLD,
+            self.Stage.INTRO_SENTENCE_IN,
+            self.Stage.INTRO_SENTENCE_HOLD,
+            self.Stage.INTRO_TIP_OUT,
+        ):
+            tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
+            self._draw_tip_box_above_gauge(
+                screen,
+                ctx=ctx,
+                tip_text=tip_text or "문장을 듣고 이해해보세요",
+                alpha_channel=self.tip_intro_channel,
+            )
         self._draw_play_listen_overlay(screen, ctx=ctx, item=item)
 
     def _load_listen_icon_surface(self) -> pygame.Surface | None:
@@ -343,7 +417,10 @@ class LearningScene(FSMConversationStep):
         ctx: FrameContext,
         item: ConversationItemLike,
     ) -> None:
-        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘을 동일하게 유지한다."""
+        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘만 표시한다.
+
+        팁 박스는 인트로에서만 페이드 인/아웃하고, 음성 재생 구간에는 두지 않는다.
+        """
         play = (self.Stage.PLAY_L1, self.Stage.PLAY_L2)
         wait_after = (self.Stage.WAIT_AFTER_L1, self.Stage.WAIT_AFTER_L2)
         if self.stage not in play + wait_after:
@@ -365,17 +442,29 @@ class LearningScene(FSMConversationStep):
             show_time_text=False,
             progress_color=LISTEN_BAR_COLOR,
         )
-        tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
-        self._draw_tip_box_above_gauge(
-            screen,
-            ctx=ctx,
-            tip_text=tip_text or "문장을 듣고 이해해보세요",
-        )
         blit_mode_icon_bottom_left(screen, self._listen_icon_surface, frame_height=ctx.height)
 
-    def _draw_tip_box_above_gauge(self, screen: pygame.Surface, *, ctx: FrameContext, tip_text: str) -> None:
+    def _tip_box_pixel_alpha(self, *, alpha_channel: str | None) -> int:
+        """재생 구간 고정 178 또는 `alpha_channel` 페이드에 맞춘 알파."""
+        base = 178
+        if not alpha_channel:
+            return base
+        fa = int(self.drawer.fade_alpha(str(alpha_channel)))
+        return max(0, min(255, int(round(float(base) * float(fa) / 255.0))))
+
+    def _draw_tip_box_above_gauge(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        tip_text: str,
+        alpha_channel: str | None = None,
+    ) -> None:
         box = self._tip_box_surface
         if box is None:
+            return
+        px_alpha = self._tip_box_pixel_alpha(alpha_channel=alpha_channel)
+        if px_alpha <= 0:
             return
         bar_rect = self._playback_bar.get_bar_rect(frame_width=ctx.width, frame_height=ctx.height)
         sw, sh = int(box.get_width()), int(box.get_height())
@@ -387,7 +476,7 @@ class LearningScene(FSMConversationStep):
         th = max(1, int(round(sh * scale_y)))
         draw = pygame.transform.smoothscale(box, (tw, th)) if (tw != sw or th != sh) else box
         draw = draw.copy()
-        draw.set_alpha(178)
+        draw.set_alpha(px_alpha)
         x = int(bar_rect.centerx - (tw // 2))
         y = int(bar_rect.top - th - 12)
         x = max(0, min(int(ctx.width) - tw, x))
@@ -405,7 +494,12 @@ class LearningScene(FSMConversationStep):
         cur_y = int(y + (th - total_h) * 0.5)
         for surf in rendered:
             tx = int(x + (tw - surf.get_width()) * 0.5)
-            screen.blit(surf, (tx, cur_y))
+            if px_alpha < 255:
+                s2 = surf.copy()
+                s2.set_alpha(px_alpha)
+                screen.blit(s2, (tx, cur_y))
+            else:
+                screen.blit(surf, (tx, cur_y))
             cur_y += int(surf.get_height()) + line_gap
 
     @staticmethod
