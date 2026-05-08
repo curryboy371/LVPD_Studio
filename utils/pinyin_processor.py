@@ -11,14 +11,13 @@ except ImportError:
     G2pM = None  # type: ignore[misc, assignment]
 
 # 발음 변화 타입 테이블: UI에서 성조 아이콘 위에 노란색으로 표시할 라벨
-# bu는 뒤 음절, yi는 이전 음절 기준으로 2성·4성을 세분화
 SANDHI_TYPE_LABELS: dict[str, str] = {
-    # 不: 4성 앞 → 2성 / 그 외 → 4성
-    "bu_to_2": "* 不 (4성 앞 → 2성)",
-    "bu_to_4": "* 不 (123성 앞 → 4성)",
-    # 一: 이전 음절이 4성 → 2성 / 그 외 → 4성
-    "yi_to_2": "* 一 (이전 4성 → 2성)",
-    "yi_to_4": "* 一 (이전 123성 → 4성)",
+    # 不: 뒤 음절이 4성 → 2성 / 비4성 → 4성
+    "bu_to_2": "* 不 (뒤 4성 → 2성)",
+    "bu_to_4": "* 不 (뒤 1·2·3성 → 4성)",
+    # 一: 뒤 음절이 4성 → 2성 / 1·2·3성 → 4성
+    "yi_to_2": "* 一 (뒤 4성 → 2성)",
+    "yi_to_4": "* 一 (뒤 1·2·3성 → 4성)",
     "tone3_2": "* 3성+3성 -> 2성+3성",
     "tone3_half": "* 반3성",
     "reduplication": "* 중첩(경성)",
@@ -138,13 +137,12 @@ class PinyinProcessor:
                     seq[i]["tone"] = 4
                     seq[i]["sandhi_type"] = "bu_to_4"
 
-        for i in range(len(seq)):
+        for i in range(len(seq) - 1):
             if seq[i]["char"] == "一":
-                prev_tone = seq[i - 1]["tone"] if i > 0 else None
-                if prev_tone == 4:
+                if seq[i + 1]["tone"] == 4:
                     seq[i]["tone"] = 2
                     seq[i]["sandhi_type"] = "yi_to_2"
-                elif prev_tone in [1, 2, 3, 3.5, 5]:
+                elif seq[i + 1]["tone"] in [1, 2, 3, 3.5]:
                     seq[i]["tone"] = 4
                     seq[i]["sandhi_type"] = "yi_to_4"
 
