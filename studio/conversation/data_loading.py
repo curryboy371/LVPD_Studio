@@ -10,7 +10,7 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional, Tuple, List, Union
+from typing import Any, Dict, Optional, Tuple, List, Union
 
 from utils.pinyin_processor import get_pinyin_processor
 
@@ -372,6 +372,33 @@ def _load_words_csv(csv_path: str) -> dict[int, str]:
     return out
 
 
+def _load_words_and_meanings_csv(
+    csv_path: str,
+) -> Tuple[Dict[int, str], Dict[int, str]]:
+    """words.csv를 읽어 (word_id->word, word_id->meaning) 매핑을 만든다."""
+    path = Path(csv_path)
+    if not path.exists():
+        return {}, {}
+    words_by_id: Dict[int, str] = {}
+    meanings_by_id: Dict[int, str] = {}
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                wid = int(float(row.get("id") or 0))
+            except Exception:
+                continue
+            if not wid:
+                continue
+            w = str(row.get("word") or "").strip()
+            if w:
+                words_by_id[wid] = w
+            m = str(row.get("meaning") or "").strip()
+            if m:
+                meanings_by_id[wid] = m
+    return words_by_id, meanings_by_id
+
+
 def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
     path = Path(csv_path)
     if not path.exists():
@@ -648,6 +675,7 @@ def _attach_sub_variants_to_base_rows(
     base_rows: list[dict],
     *,
     words_by_id: dict[int, str],
+    meanings_by_id: Optional[Dict[int, str]] = None,
     sub_rows_by_base_id: dict[int, list[dict]],
 ) -> list[dict]:
     """base row에 학습 활용용 sub 변형 리스트(`sub_variants`)를 채운다."""
@@ -682,12 +710,15 @@ def _attach_sub_variants_to_base_rows(
             if not replacement_specs:
                 continue
 
-            resolved_replacements: list[tuple[Union[int, str, float], int, str]] = []
+            resolved_replacements: list[tuple[Union[int, str, float], int, str, str]] = []
             for slot_order, alt_word_id in replacement_specs:
                 alt_word = words_by_id.get(int(alt_word_id), "").strip()
                 if not alt_word:
                     continue
-                resolved_replacements.append((slot_order, int(alt_word_id), alt_word))
+                alt_meaning = ""
+                if meanings_by_id:
+                    alt_meaning = str(meanings_by_id.get(int(alt_word_id), "") or "").strip()
+                resolved_replacements.append((slot_order, int(alt_word_id), alt_word, alt_meaning))
             if not resolved_replacements:
                 continue
             # 요청한 다중 치환은 "전부 성공"해야 한다.
@@ -703,12 +734,16 @@ def _attach_sub_variants_to_base_rows(
 
             replaced_sentence = _replace_multiple_slots_in_raw_sentence(
                 raw_sentence,
-                replacements=[(slot_order, alt_word) for slot_order, _wid, alt_word in resolved_replacements],
+                replacements=[
+                    (slot_order, alt_word) for slot_order, _wid, alt_word, _m in resolved_replacements
+                ],
             )
             if not replaced_sentence:
                 continue
 
-            primary_slot_order, primary_alt_word_id, primary_alt_word = resolved_replacements[0]
+            primary_slot_order, primary_alt_word_id, primary_alt_word, primary_alt_meaning = (
+                resolved_replacements[0]
+            )
             primary_f: Optional[float] = None
             try:
                 primary_f = float(primary_slot_order)  # type: ignore[arg-type]
@@ -732,9 +767,11 @@ def _attach_sub_variants_to_base_rows(
                 "target_slot_order": primary_slot_order,
                 "alt_word_id": primary_alt_word_id,
                 "alt_word": primary_alt_word,
-                "target_slot_orders": [slot for slot, _wid, _w in resolved_replacements],
-                "alt_word_ids": [wid for _slot, wid, _w in resolved_replacements],
-                "alt_words": [w for _slot, _wid, w in resolved_replacements],
+                "alt_word_meaning": primary_alt_meaning,
+                "target_slot_orders": [slot for slot, _wid, _w, _m in resolved_replacements],
+                "alt_word_ids": [wid for _slot, wid, _w, _m in resolved_replacements],
+                "alt_words": [w for _slot, _wid, w, _m in resolved_replacements],
+                "alt_word_meanings": [m for _slot, _wid, _w, m in resolved_replacements],
                 "replaced_sentence": replaced_sentence,
                 "alt_translation": str(v.get("alt_translation") or "").strip(),
                 "alt_sound_path": alt_sound_path,
@@ -742,7 +779,7 @@ def _attach_sub_variants_to_base_rows(
             # 추가/치환된 단어를 모두 하이라이트할 수 있도록 span 목록을 저장한다.
             spans: list[dict[str, int]] = []
             search_pos = 0
-            for slot_order, _wid, alt_word in resolved_replacements:
+            for slot_order, _wid, alt_word, _m in resolved_replacements:
                 cur_span = _find_word_span_in_display_sentence_from(
                     replaced_sentence,
                     alt_word,
@@ -829,6 +866,7 @@ def build_data_list(
         # conversation CSV 경로를 쓰더라도, sub_sentences.csv 기반 활용 문장 정보를
         # 붙여야 PRACTICE의 SHOW_SUB_CONTENT 단계로 정상 전환된다.
         words_by_id: dict[int, str] = {}
+        meanings_by_id: dict[int, str] = {}
         sub_rows_by_base_id: dict[int, list[dict]] = {}
         try:
             from core.paths import (
@@ -837,7 +875,7 @@ def build_data_list(
                 DEFAULT_SUB_SENTENCES_CSV,
             )
 
-            words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
+            words_by_id, meanings_by_id = _load_words_and_meanings_csv(str(DEFAULT_WORDS_TABLE_CSV))
             sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
             base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
             raw_sentence_by_id: dict[int, str] = {}
@@ -876,6 +914,7 @@ def build_data_list(
                 rows = _attach_sub_variants_to_base_rows(
                     rows,
                     words_by_id=words_by_id,
+                    meanings_by_id=meanings_by_id,
                     sub_rows_by_base_id=sub_rows_by_base_id,
                 )
         except Exception:
@@ -892,12 +931,13 @@ def build_data_list(
         )
 
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
-        words_by_id = _load_words_csv(str(DEFAULT_WORDS_TABLE_CSV))
+        words_by_id, meanings_by_id = _load_words_and_meanings_csv(str(DEFAULT_WORDS_TABLE_CSV))
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
         base_rows = _attach_words_from_raw_sentence(base_rows)
         base_rows = _attach_sub_variants_to_base_rows(
             base_rows,
             words_by_id=words_by_id,
+            meanings_by_id=meanings_by_id,
             sub_rows_by_base_id=sub_rows_by_base_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)

@@ -24,7 +24,7 @@ from .tone_icon_renderer import ToneIconRenderer
 Align = Literal["center", "left", "right"]
 # 성조 변화 설명(소형 한글 폰트)
 SANDHI_HINT_COLOR: tuple[int, int, int] = (255, 210, 125)
-SANDHI_HINT_FONT_PX = 42
+SANDHI_HINT_FONT_PX = 38
 # 병음 줄이 있을 때 위쪽 성조 아이콘·변화 설명용으로만 확보하는 고정 돌출(px).
 # 측정값을 쓰면 성조 슬롯 유무·PNG 높이·텍스트 유무에 따라 병음·한자 블록 세로 위치가 달라진다.
 PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104

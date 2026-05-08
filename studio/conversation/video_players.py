@@ -44,6 +44,10 @@ class SimpleVideoPlayer:
         try:
             import cv2
         except ImportError:
+            try:
+                logger.warning("OpenCV(cv2) 없음 — 비디오 프레임을 읽을 수 없습니다.")
+            except Exception:
+                pass
             self._path = ""
             self._cap = None
             return
@@ -55,10 +59,18 @@ class SimpleVideoPlayer:
         self._end_time = end_time
         self._current_pts = start_time
         if not path or not os.path.exists(path):
+            try:
+                logger.warning("비디오 파일 없음: %s", path)
+            except Exception:
+                pass
             self._cap = None
             return
         cap = cv2.VideoCapture(path)
         if not cap.isOpened():
+            try:
+                logger.warning("OpenCV: 비디오 열기 실패: %s", path)
+            except Exception:
+                pass
             cap.release()
             self._cap = None
             return
@@ -127,6 +139,10 @@ class SimpleVideoPlayer:
     def is_paused(self) -> bool:
         """현재 일시정지 여부."""
         return self._paused
+
+    def has_source(self) -> bool:
+        """현재 아이템의 비디오 소스를 정상적으로 연 상태인지."""
+        return self._cap is not None
 
     def get_frame(self, width: int, height: int) -> Optional[pygame.Surface]:
         """현재 PTS에 맞는 프레임을 pygame Surface로 반환(캐시·리사이즈 포함)."""

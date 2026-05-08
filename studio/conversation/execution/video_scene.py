@@ -42,6 +42,13 @@ class VideoScene(IConversationStep):
     def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """구간 끝에서 일시정지되면 페이드아웃 후 전환 스냅샷과 `transition_signal`을 설정한다."""
         _ = (ctx, item)
+        # 비디오 파일이 없거나 열기에 실패한 항목은 VIDEO 장면에서 대기하지 않고 즉시 다음 장면으로 넘긴다.
+        if not bool(getattr(self.video_player, "has_source", lambda: True)()):
+            self._is_fading = False
+            self._fade_elapsed = 0.0
+            self.transition_bg_frame = None
+            self.transition_signal = True
+            return
         # 비디오 재생(시간 진행)은 PlaybackManager가 tick()으로 담당.
         # 여기서는 "해당 아이템의 세그먼트가 끝났는지"를 감지해
         # fadeout 완료 후 transition_signal을 올린다.

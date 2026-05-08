@@ -211,7 +211,7 @@ class ConversationStudio:
                 getattr(settings, "learning_tip_box_intro_fade_out_sec", 1.25) or 1.25
             ),
             tip_intro_hold_sec=float(
-                getattr(settings, "learning_tip_intro_hold_sec", 1.0) or 1.0
+                getattr(settings, "learning_tip_intro_hold_sec", 3.0) or 3.0
             ),
             sentence_intro_hold_sec=float(
                 getattr(settings, "learning_sentence_intro_hold_sec", 2.0) or 2.0
@@ -243,7 +243,7 @@ class ConversationStudio:
                 getattr(settings, "practice_tip_box_intro_fade_out_sec", 1.25) or 1.25
             ),
             tip_intro_hold_sec=float(
-                getattr(settings, "practice_tip_intro_hold_sec", 1.0) or 1.0
+                getattr(settings, "practice_tip_intro_hold_sec", 3.0) or 3.0
             ),
             sentence_intro_hold_sec=float(
                 getattr(settings, "practice_sentence_intro_hold_sec", 2.0) or 2.0

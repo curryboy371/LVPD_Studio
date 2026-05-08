@@ -220,7 +220,7 @@ class LearningScene(FSMConversationStep):
 
     def _enter_intro_tip_hold(self) -> float:
         """팁 페이드 인 완료 후 대기(문장은 아직 숨김)."""
-        return self.tip_intro_hold_sec * 2.0
+        return 3.0
 
     def _enter_intro_sentence_in(self) -> float:
         self.drawer.fade_on(self.sentence_channel, self.sentence_intro_fade_in_sec)
@@ -478,7 +478,7 @@ class LearningScene(FSMConversationStep):
         draw = draw.copy()
         draw.set_alpha(px_alpha)
         x = int(bar_rect.centerx - (tw // 2))
-        y = int(bar_rect.top - th - 12)
+        y = int(bar_rect.top - th + 24)
         x = max(0, min(int(ctx.width) - tw, x))
         y = max(0, y)
         screen.blit(draw, (x, y))
@@ -489,7 +489,7 @@ class LearningScene(FSMConversationStep):
         rendered = [self._render_tip_line(ln) for ln in lines if ln is not None]
         if not rendered:
             return
-        line_gap = 6
+        line_gap = 25
         total_h = sum(s.get_height() for s in rendered) + line_gap * (len(rendered) - 1)
         cur_y = int(y + (th - total_h) * 0.5)
         for surf in rendered:

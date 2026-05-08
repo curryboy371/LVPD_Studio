@@ -252,7 +252,7 @@ def sandhi_type_ui_label(type_key: Optional[str]) -> Optional[str]:
     if not raw:
         return None
     detail = raw.replace("*", "").strip()
-    return f"성조변화 - {detail}"
+    return f"발음: {detail}"
 
 
 def diff_lexical_phonetic_per_syllable(lexical: str, phonetic: str) -> list[Optional[str]]:
