@@ -90,7 +90,7 @@ class StudioConfig:
 
 
 class SimpleRecordingManager:
-    """녹화: 프레임 큐 + 스레드에서 비디오만 저장 (opencv). 프레임 드랍 방지를 위해 블로킹 put 사용."""
+    """녹화: 프레임을 OpenCV VideoWriter에 즉시 저장한다."""
     # put() 대기 최대 시간(초). writer가 느릴 때 메인 루프가 이만큼만 대기.
     _PUT_TIMEOUT_SEC = 30.0
 
@@ -104,45 +104,54 @@ class SimpleRecordingManager:
         self._fps = float(STUDIO_FPS)
         self._size = (STUDIO_WIDTH, STUDIO_HEIGHT)
         self._last_video_path: Optional[Path] = None
+        self._cv2: Any = None
+        self._writer: Any = None
 
     def start(self, filename_prefix: str = "rec", fps: float = STUDIO_FPS, size: tuple[int, int] = (STUDIO_WIDTH, STUDIO_HEIGHT)) -> None:
-        """프레임 큐와 writer 스레드를 시작해 녹화 상태로 만든다."""
+        """VideoWriter를 열고 녹화 상태로 전환한다."""
         if self.is_recording:
             return
+        try:
+            import cv2
+        except ImportError:
+            print("[!] opencv-python 없음. 녹화 비디오 저장을 건너뜁니다.")
+            return
+        from datetime import datetime
+
         self._fps = fps
         self._size = size
-        # 큐 크기 확대: 프레임 드랍 가능성 감소 (최소 10초치 + 여유)
-        max_q = max(120, int(fps * 12))
-        self._frame_queue = queue.Queue(maxsize=max_q)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = self.output_dir / f"{filename_prefix}_{stamp}.mp4"
+        w, h = self._size[0], self._size[1]
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(path), fourcc, self._fps, (w, h))
+        if not writer.isOpened():
+            print("[!] OpenCV VideoWriter 열기 실패:", path)
+            return
+        self._cv2 = cv2
+        self._writer = writer
+        self._last_video_path = path
         self.is_recording = True
-        self._thread = threading.Thread(
-            target=self._record_loop,
-            args=(filename_prefix,),
-            daemon=True,
-        )
-        self._thread.start()
 
     def submit_frame(self, frame_rgb) -> None:
-        """RGB 프레임을 큐에 넣어 백그라운드 인코더가 소비하게 한다."""
-        if not self.is_recording or self._frame_queue is None or np is None:
+        """RGB 프레임을 VideoWriter에 바로 쓴다."""
+        if not self.is_recording or self._writer is None or self._cv2 is None or np is None:
             return
         frame = np.asarray(frame_rgb, dtype=np.uint8)
-        try:
-            self._frame_queue.put(frame, timeout=self._PUT_TIMEOUT_SEC)
-        except queue.Full:
-            # 타임아웃 후에도 Full이면 프레임 보존 우선으로 한 번 더 시도 후 포기
-            try:
-                self._frame_queue.put(frame, timeout=5.0)
-            except queue.Full:
-                pass
+        w, h = self._size[0], self._size[1]
+        if frame.shape[0] != h or frame.shape[1] != w:
+            frame = self._cv2.resize(frame, (w, h))
+        self._writer.write(self._cv2.cvtColor(frame, self._cv2.COLOR_RGB2BGR))
 
     def stop(self) -> None:
-        """녹화 플래그를 내리고 writer 스레드가 끝날 때까지 대기한다."""
+        """VideoWriter를 닫고 마지막 녹화 경로를 출력한다."""
         self.is_recording = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5.0)
-        self._thread = None
-        self._frame_queue = None
+        writer = self._writer
+        self._writer = None
+        if writer is not None:
+            writer.release()
+            if self._last_video_path is not None:
+                print("[rec] 녹화 저장:", self._last_video_path)
 
     def _record_loop(self, filename_prefix: str) -> None:
         """스레드 진입점: 비디오만 파일로 저장한다."""

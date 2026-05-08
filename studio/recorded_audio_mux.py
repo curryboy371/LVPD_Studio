@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from core.paths import STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN
+from core.paths import STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN, STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN
 from studio.recording_events import (
     InsertSound,
     RecordingEvent,
@@ -33,9 +33,12 @@ def _mux_segment_audio_role(path: str) -> str:
 
 
 def _mux_volume_prefix(role: str) -> str:
-    """embedded만 STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN. sidecar(MP3 등)·삽입음은 부스트 없음(디버그 재생과 레벨 맞춤, 클리핑 방지)."""
+    """녹화 mux용 역할별 선형 볼륨 필터 prefix."""
     if role == "embedded":
         g = max(0.0, min(2.0, float(STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN)))
+        return f"volume={g},"
+    if role == "bg_insert":
+        g = max(0.0, min(2.0, float(STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)))
         return f"volume={g},"
     return ""
 

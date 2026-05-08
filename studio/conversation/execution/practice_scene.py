@@ -13,7 +13,7 @@ from typing import Callable, Literal, Optional
 
 import pygame
 
-from core.paths import get_repo_root
+from core.paths import STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN, get_repo_root
 from utils.fonts import load_font_chinese, load_font_korean
 
 from ..core.scene_transition import SceneTransitionMode
@@ -101,6 +101,7 @@ class PracticeScene(IConversationStep):
         style: SentenceStyleConfig,
         play_voice: Callable[..., None] | None = None,
         on_bg_sound_started: Callable[[str, float], None] | None = None,
+        is_recording: Callable[[], bool] | None = None,
         title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
@@ -120,6 +121,7 @@ class PracticeScene(IConversationStep):
         self.video_player = video_player
         self.play_voice = play_voice
         self.on_bg_sound_started = on_bg_sound_started
+        self.is_recording = is_recording
         self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
@@ -175,7 +177,7 @@ class PracticeScene(IConversationStep):
         self._bg_channel_index = 5
         self._bg_channel: pygame.mixer.Channel | None = None
         self._bg_fade_ms = 1000
-        self._bg_volume = 0.2
+        self._bg_volume = float(STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)
         self._bg_playing = False
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
@@ -1206,16 +1208,26 @@ class PracticeScene(IConversationStep):
         if not self._bg_sounds:
             return
         try:
-            if pygame.mixer.get_init() is None:
-                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
-
-                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             if len(self._bg_sounds) == 1:
                 picked_index = 0
             else:
                 candidates = [i for i in range(len(self._bg_sounds)) if i != self._bg_last_sound_index]
                 picked_index = random.choice(candidates) if candidates else 0
             sound_path, sound = self._bg_sounds[picked_index]
+            if self._is_recording_mode():
+                self._bg_channel = None
+                self._bg_last_sound_index = picked_index
+                self._bg_playing = True
+                if self.on_bg_sound_started is not None:
+                    try:
+                        self.on_bg_sound_started(sound_path, self._bg_active_remaining_sec())
+                    except Exception:
+                        pass
+                return
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             channel = pygame.mixer.Channel(self._bg_channel_index)
             channel.set_volume(float(self._bg_volume))
             channel.play(sound, loops=-1, fade_ms=int(self._bg_fade_ms))
@@ -1230,6 +1242,14 @@ class PracticeScene(IConversationStep):
         except Exception:
             self._bg_channel = None
             self._bg_playing = False
+
+    def _is_recording_mode(self) -> bool:
+        if self.is_recording is None:
+            return False
+        try:
+            return bool(self.is_recording())
+        except Exception:
+            return False
 
     def _stop_background_sound(self) -> None:
         channel = self._bg_channel
