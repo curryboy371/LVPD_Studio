@@ -228,7 +228,7 @@ class LearningScene(FSMConversationStep):
 
     def _enter_intro_sentence_hold(self) -> float:
         """문장 페이드 인 완료 후 대기(팁·문장 동시 표시)."""
-        return self.sentence_intro_hold_sec
+        return 3.0
 
     def _enter_intro_tip_out(self) -> float:
         self.drawer.fade_off(self.tip_intro_channel, self.tip_box_intro_fade_out_sec)

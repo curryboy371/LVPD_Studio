@@ -89,8 +89,8 @@ class PracticeScene(IConversationStep):
         SHOW_SUB_CONTENT = auto()
 
     _SPEAK_SOUND_LEN_SCALE = 1.3
-    _SUB_TIP_HOLD_PER_WORD_SEC = 1.2
-    _SUB_TIP_HOLD_MAX_SEC = 6.0
+    _SUB_TIP_HOLD_PER_WORD_SEC = 0.25
+    _SUB_TIP_HOLD_MAX_SEC = 3.8
     _BG_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 
     def __init__(
@@ -182,6 +182,7 @@ class PracticeScene(IConversationStep):
         self._practice_stage_log_last: "PracticeScene.Stage | None" = None
         self._intro_wait_remaining_sec = 0.0
         self._sub_play_phase: _SubPlayPhase | None = None
+        self._sub_phase_log_last: _SubPlayPhase | None = None
         self._sub_intro_wait_remaining_sec = 0.0
         self._sub_slide_in_elapsed = 0.0
         self.drawer.hide_now(self._title_channel)
@@ -211,6 +212,7 @@ class PracticeScene(IConversationStep):
             self.drawer.hide_now(self._tip_intro_channel)
             self._intro_wait_remaining_sec = 0.0
             self._sub_play_phase = None
+            self._sub_phase_log_last = None
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
             self._practice_stage_log_last = None
@@ -276,6 +278,7 @@ class PracticeScene(IConversationStep):
         """아이템이 바뀌면 제목을 먼저 fade in 하고, 끝난 뒤 문장/단어를 노출한다."""
         # Drawer 내부 알파 애니메이션 타이머를 매 프레임 진행한다.
         dt = float(ctx.dt_sec)
+        eff_dt = dt if dt > 1e-6 else (1.0 / 30.0)
         self.drawer.fade_tick(dt)
 
         key = self._playback_item_key(item)
@@ -296,6 +299,7 @@ class PracticeScene(IConversationStep):
             self._base_to_sub_transition = None
             self._base_to_sub_elapsed = 0.0
             self._sub_play_phase = None
+            self._sub_phase_log_last = None
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
             self.drawer.hide_now(self._sentence_channel)
@@ -308,7 +312,7 @@ class PracticeScene(IConversationStep):
         if self.stage == self.Stage.TITLE:
             self._stop_background_sound()
             if self._title_wait_remaining_sec > 0.0:
-                self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - dt)
+                self._title_wait_remaining_sec = max(0.0, self._title_wait_remaining_sec - eff_dt)
             if self._title_wait_remaining_sec <= 0.0:
                 self.drawer.show_now(self._title_channel)
                 if self._current_sub_variant is not None:
@@ -326,7 +330,7 @@ class PracticeScene(IConversationStep):
 
         if self.stage == self.Stage.INTRO_SENTENCE_IN:
             self._stop_background_sound()
-            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - dt)
+            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - eff_dt)
             if self._intro_wait_remaining_sec <= 0.0:
                 self._set_stage(self.Stage.INTRO_SENTENCE_HOLD)
                 self._intro_wait_remaining_sec = self._sentence_intro_hold_sec
@@ -334,7 +338,7 @@ class PracticeScene(IConversationStep):
 
         if self.stage == self.Stage.INTRO_SENTENCE_HOLD:
             self._stop_background_sound()
-            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - dt)
+            self._intro_wait_remaining_sec = max(0.0, self._intro_wait_remaining_sec - eff_dt)
             if self._intro_wait_remaining_sec <= 0.0:
                 self.drawer.hide_now(self._tip_intro_channel)
                 self._content_visible = True
@@ -354,7 +358,7 @@ class PracticeScene(IConversationStep):
                     self._begin_sub_variant_intro()
                 return
             if self._content_wait_remaining_sec > 0.0:
-                self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - dt)
+                self._content_wait_remaining_sec = max(0.0, self._content_wait_remaining_sec - eff_dt)
             if self._content_wait_remaining_sec <= 0.0:
                 # sub 변형이 없으면 기본 문장 노출 후 곧바로 Step 완료 처리한다.
                 if self._current_sub_variant is None:
@@ -369,16 +373,27 @@ class PracticeScene(IConversationStep):
 
         # SHOW_SUB_CONTENT: sub별 팁 인 → 문장 인 → 팁 아웃 → 듣기/말하기 타이머
         if self.stage == self.Stage.SHOW_SUB_CONTENT:
+            if self._sub_play_phase != self._sub_phase_log_last:
+                self._sub_phase_log_last = self._sub_play_phase
+                try:
+                    phase = str(self._sub_play_phase or "none")
+                    print(
+                        f"[practice][sub-phase] {phase} | intro_wait={self._sub_intro_wait_remaining_sec:.3f}s "
+                        f"play_wait={self._sub_content_wait_remaining_sec:.3f}s",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
             if self._sub_play_phase == "tip_in":
                 self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
                     self._sub_play_phase = "tip_hold"
                     self._sub_intro_wait_remaining_sec = self._compute_sub_tip_hold_sec()
                 return
             if self._sub_play_phase == "tip_hold":
                 self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
                     self._sub_play_phase = "sentence_in"
                     self.drawer.fade_on(self._sentence_channel, self._sentence_intro_fade_in_sec)
@@ -387,15 +402,15 @@ class PracticeScene(IConversationStep):
                 return
             if self._sub_play_phase == "sentence_in":
                 self._stop_background_sound()
-                self._sub_slide_in_elapsed += dt
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                self._sub_slide_in_elapsed += eff_dt
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
                     self._sub_play_phase = "sentence_hold"
                     self._sub_intro_wait_remaining_sec = self._sentence_intro_hold_sec
                 return
             if self._sub_play_phase == "sentence_hold":
                 self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
                     self._sub_play_phase = "tip_out"
                     self.drawer.fade_off(self._tip_intro_channel, self._tip_intro_fade_out_sec)
@@ -403,7 +418,7 @@ class PracticeScene(IConversationStep):
                 return
             if self._sub_play_phase == "tip_out":
                 self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - dt)
+                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
                     self.drawer.hide_now(self._tip_intro_channel)
                     self._sub_play_phase = "playing"
@@ -419,9 +434,6 @@ class PracticeScene(IConversationStep):
                 return
             self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
-                # 간헐적으로 dt가 0(또는 매우 작음)으로 들어오면 playing 타이머가 멈춘 것처럼 보일 수 있다.
-                # 이 구간은 오디오/게이지 동기 대기이므로 최소 프레임 dt를 보장해 진행 정지를 방지한다.
-                eff_dt = dt if dt > 1e-6 else (1.0 / 30.0)
                 nr = max(0.0, float(self._sub_content_wait_remaining_sec) - eff_dt)
                 self._sub_content_wait_remaining_sec = _sanitize_wait_sec(nr, fallback=0.0)
             if self._sub_content_wait_remaining_sec <= 0.0:
@@ -608,12 +620,12 @@ class PracticeScene(IConversationStep):
                 lines: list[str] = []
                 for i, w in enumerate(words_clean):
                     m = meanings_clean[i] if i < len(meanings_clean) else ""
-                    lines.append(f"{w} {m}".rstrip())
+                    lines.append(f"{w}   :   {m}".rstrip())
                 tip_text = "\n".join(lines).strip()
             else:
                 alt_word_text = str(variant.get("alt_word") or "").strip()
                 alt_meaning_text = str(variant.get("alt_word_meaning") or "").strip()
-                tip_text = f"{alt_word_text} {alt_meaning_text}".strip()
+                tip_text = f"{alt_word_text}   :   {alt_meaning_text}".strip()
             tip_text = tip_text or "듣고 따라 말해보세요"
             self._draw_tip_box_above_gauge(
                 screen,
