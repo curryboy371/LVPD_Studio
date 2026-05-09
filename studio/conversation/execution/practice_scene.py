@@ -9,6 +9,7 @@ import logging
 import os
 import math
 import random
+import time
 from typing import Callable, Literal, Optional
 
 import pygame
@@ -187,6 +188,8 @@ class PracticeScene(IConversationStep):
         self._sub_phase_log_last: _SubPlayPhase | None = None
         self._sub_intro_wait_remaining_sec = 0.0
         self._sub_slide_in_elapsed = 0.0
+        self._sub_play_started_mono_sec: float = 0.0
+        self._sub_play_last_tick_mono_sec: float = 0.0
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
         self.drawer.hide_now(self._tip_intro_channel)
@@ -217,6 +220,8 @@ class PracticeScene(IConversationStep):
             self._sub_phase_log_last = None
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
+            self._sub_play_started_mono_sec = 0.0
+            self._sub_play_last_tick_mono_sec = 0.0
             self._practice_stage_log_last = None
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
@@ -261,7 +266,7 @@ class PracticeScene(IConversationStep):
 
     @staticmethod
     def _playback_item_key(item: ConversationItemLike) -> tuple:
-        """아이템 전환 판별용 키. topic·id·index·구간으로 구분한다(동일 id 다른 topic 등)."""
+        """아이템 전환 판별용 키. topic·id·index로 구분한다(동일 id 다른 topic 등)."""
         topic_key = str(item.get("topic") or "").strip().lower()
         raw_id = item.get("id")
         try:
@@ -272,9 +277,7 @@ class PracticeScene(IConversationStep):
             idx_key = int(item.get("index", -1))
         except (TypeError, ValueError):
             idx_key = -1
-        st = float(item.get("start_time", 0.0) or 0.0)
-        et = float(item.get("end_time", -1.0) or -1.0)
-        return (topic_key, id_key, idx_key, st, et)
+        return (topic_key, id_key, idx_key)
 
     def on_update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """아이템이 바뀌면 제목을 먼저 fade in 하고, 끝난 뒤 문장/단어를 노출한다."""
@@ -430,15 +433,38 @@ class PracticeScene(IConversationStep):
                     )
                     self._sub_content_wait_total_sec = wt
                     self._sub_content_wait_remaining_sec = wt
+                    now_mono = time.monotonic()
+                    self._sub_play_started_mono_sec = now_mono
+                    self._sub_play_last_tick_mono_sec = now_mono
                     self._log_sub_variant_wait(wt)
                 return
             if self._sub_play_phase != "playing":
                 return
             self._sync_background_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
-                nr = max(0.0, float(self._sub_content_wait_remaining_sec) - eff_dt)
+                now_mono = time.monotonic()
+                wall_dt = 0.0
+                if self._sub_play_last_tick_mono_sec > 0.0:
+                    wall_dt = max(0.0, now_mono - self._sub_play_last_tick_mono_sec)
+                self._sub_play_last_tick_mono_sec = now_mono
+                # dt가 비정상(0/아주 작음)으로 들어와도 실제 경과 시간 기준으로 진행되게 보정.
+                dec_sec = max(float(eff_dt), min(0.25, wall_dt))
+                nr = max(0.0, float(self._sub_content_wait_remaining_sec) - dec_sec)
                 self._sub_content_wait_remaining_sec = _sanitize_wait_sec(nr, fallback=0.0)
+                # 안전장치: playing 단계가 비정상으로 오래 머무르면 강제로 다음 변형으로 전진.
+                if self._sub_play_started_mono_sec > 0.0:
+                    elapsed_wall = max(0.0, now_mono - self._sub_play_started_mono_sec)
+                    hard_limit = max(15.0, float(self._sub_content_wait_total_sec) + 5.0)
+                    if elapsed_wall >= hard_limit:
+                        logger.warning(
+                            "PRACTICE: sub 변형 재생 타임아웃(%.1fs >= %.1fs)으로 강제 전환",
+                            elapsed_wall,
+                            hard_limit,
+                        )
+                        self._sub_content_wait_remaining_sec = 0.0
             if self._sub_content_wait_remaining_sec <= 0.0:
+                self._sub_play_started_mono_sec = 0.0
+                self._sub_play_last_tick_mono_sec = 0.0
                 if len(self._sub_variants) > 1:
                     next_index = self._sub_variant_index + 1
                     if next_index < len(self._sub_variants):
@@ -479,6 +505,8 @@ class PracticeScene(IConversationStep):
         self.drawer.hide_now(self._sentence_channel)
         self.drawer.hide_now(self._tip_intro_channel)
         self._sub_play_phase = "tip_in"
+        self._sub_play_started_mono_sec = 0.0
+        self._sub_play_last_tick_mono_sec = 0.0
         self.drawer.fade_on(self._tip_intro_channel, self._tip_intro_fade_in_sec)
         self._sub_intro_wait_remaining_sec = self._tip_intro_fade_in_sec
         self._sub_slide_in_elapsed = 0.0

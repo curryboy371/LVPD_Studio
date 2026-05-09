@@ -106,6 +106,11 @@ class SimpleRecordingManager:
         self._last_video_path: Optional[Path] = None
         self._cv2: Any = None
         self._writer: Any = None
+        # 디스크/코덱 지연으로 메인 루프가 막히지 않게 비동기 프레임 큐를 사용한다.
+        self._queue_maxsize = 240
+        self._submitted_frames = 0
+        self._encoded_frames = 0
+        self._dropped_frames = 0
 
     def start(self, filename_prefix: str = "rec", fps: float = STUDIO_FPS, size: tuple[int, int] = (STUDIO_WIDTH, STUDIO_HEIGHT)) -> None:
         """VideoWriter를 열고 녹화 상태로 전환한다."""
@@ -131,34 +136,83 @@ class SimpleRecordingManager:
         self._cv2 = cv2
         self._writer = writer
         self._last_video_path = path
+        self._submitted_frames = 0
+        self._encoded_frames = 0
+        self._dropped_frames = 0
+        self._frame_queue = queue.Queue(maxsize=max(8, int(self._queue_maxsize)))
         self.is_recording = True
+        self._thread = threading.Thread(target=self._record_loop, args=(filename_prefix,), daemon=True)
+        self._thread.start()
 
     def submit_frame(self, frame_rgb) -> None:
-        """RGB 프레임을 VideoWriter에 바로 쓴다."""
-        if not self.is_recording or self._writer is None or self._cv2 is None or np is None:
+        """RGB 프레임을 비동기 큐에 넣고, 저장은 별도 스레드에서 처리한다."""
+        if not self.is_recording or self._writer is None or self._cv2 is None or np is None or self._frame_queue is None:
             return
-        frame = np.asarray(frame_rgb, dtype=np.uint8)
-        w, h = self._size[0], self._size[1]
-        if frame.shape[0] != h or frame.shape[1] != w:
-            frame = self._cv2.resize(frame, (w, h))
-        self._writer.write(self._cv2.cvtColor(frame, self._cv2.COLOR_RGB2BGR))
+        self._submitted_frames += 1
+        frame = np.asarray(frame_rgb, dtype=np.uint8).copy()
+        try:
+            self._frame_queue.put_nowait(frame)
+        except queue.Full:
+            # 실시간 진행을 우선한다: 큐가 꽉 차면 가장 오래된 프레임을 버리고 최신 프레임을 넣는다.
+            try:
+                _ = self._frame_queue.get_nowait()
+                self._dropped_frames += 1
+            except queue.Empty:
+                pass
+            try:
+                self._frame_queue.put_nowait(frame)
+            except queue.Full:
+                self._dropped_frames += 1
 
     def stop(self) -> None:
         """VideoWriter를 닫고 마지막 녹화 경로를 출력한다."""
         self.is_recording = False
+        thread = self._thread
+        self._thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=30.0)
         writer = self._writer
         self._writer = None
+        self._frame_queue = None
         if writer is not None:
             writer.release()
             if self._last_video_path is not None:
                 print("[rec] 녹화 저장:", self._last_video_path)
+                submitted = int(self._submitted_frames)
+                encoded = int(self._encoded_frames)
+                dropped = int(self._dropped_frames)
+                drop_rate = (float(dropped) / float(submitted) * 100.0) if submitted > 0 else 0.0
+                print(
+                    f"[rec][stats] frame 제출={submitted} 저장={encoded} 드롭={dropped} "
+                    f"(drop={drop_rate:.2f}%)"
+                )
+                if dropped > 0:
+                    print(f"[rec][warn] 인코딩 지연으로 프레임 {dropped}개 드롭됨")
 
     def _record_loop(self, filename_prefix: str) -> None:
-        """스레드 진입점: 비디오만 파일로 저장한다."""
+        """스레드 진입점: 큐 프레임을 인코딩해 비디오로 저장한다."""
+        _ = filename_prefix
         try:
-            self._record_video_only(filename_prefix)
+            self._record_video_from_queue()
         except Exception as e:
             print("[!] 녹화 저장 중 오류:", e)
+
+    def _record_video_from_queue(self) -> None:
+        """큐를 비우며 VideoWriter에 기록한다(메인 루프 비차단)."""
+        if self._writer is None or self._cv2 is None:
+            return
+        w, h = self._size[0], self._size[1]
+        while self.is_recording or (self._frame_queue is not None and not self._frame_queue.empty()):
+            if self._frame_queue is None:
+                break
+            try:
+                frame = self._frame_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if frame.shape[0] != h or frame.shape[1] != w:
+                frame = self._cv2.resize(frame, (w, h))
+            self._writer.write(self._cv2.cvtColor(frame, self._cv2.COLOR_RGB2BGR))
+            self._encoded_frames += 1
 
     def _record_video_only(self, filename_prefix: str) -> None:
         """큐에서 프레임을 꺼내 OpenCV VideoWriter로 MP4를 쓴다."""

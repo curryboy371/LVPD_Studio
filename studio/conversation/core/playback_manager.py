@@ -376,8 +376,9 @@ class PlaybackManager:
 
     def _apply_item_to_video(self, item: ConversationItemLike) -> None:
         path = str(item.get("video_path", "")).strip()
-        st = float(item.get("start_time", 0.0))
-        et = float(item.get("end_time", -1.0))
+        # Conversation 재생은 항상 원본 전체(0초~끝) 기준으로 맞춘다.
+        st = 0.0
+        et = -1.0
         self._video_player.set_source(path, st, et)
 
     def _handle_last_scene(self, scene: IConversationStep) -> None:
@@ -453,9 +454,8 @@ class PlaybackManager:
         self._video_player.toggle_pause()
 
     def restart_segment(self) -> None:
-        item = self.current_item()
-        st = float(item.get("start_time", 0.0) or 0.0)
-        self._video_player.seek_to(st)
+        # start/end 구간 개념을 쓰지 않으므로 항상 파일 시작(0s)으로 재시작.
+        self._video_player.seek_to(0.0)
 
     def seek(self, delta_sec: float) -> None:
         self._video_player.seek(delta_sec)

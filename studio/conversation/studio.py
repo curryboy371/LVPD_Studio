@@ -558,7 +558,10 @@ class ConversationStudio:
         try:
             end_sec = float(self._video_player.get_effective_end_sec())
             pts = float(self._video_player.get_pts())
-            if self._video_player.is_paused() and pts >= end_sec - 1e-3:
+            # 종료 기준은 비디오 타임라인(PTS)만 사용한다.
+            # 오디오는 비디오 종료 시점에 맞춰 함께 멈춘다.
+            at_segment_end = pts >= end_sec - 1e-3
+            if at_segment_end:
                 self._video_audio.pause()
                 cfg = self._last_config
                 log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
@@ -580,9 +583,10 @@ class ConversationStudio:
 
         item = self._data_list[index]
         path = self._resolve_video_path(str(item.get("video_path") or ""))
-        st = float(item.get("start_time", 0.0) or 0.0)
-        et_raw = item.get("end_time", -1.0)
-        et = float(et_raw) if et_raw not in (None, "") else -1.0
+        # 모드(debug/record)와 무관하게 개별 구간(start/end)을 무시하고
+        # 원본 전체를 0초부터 끝까지 사용한다.
+        st = 0.0
+        et = -1.0
         self._video_player.set_source(path, st, et)
         self._video_audio.set_source(path, st)
         self._last_applied_item_index = int(index)

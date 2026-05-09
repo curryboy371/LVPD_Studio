@@ -52,6 +52,15 @@ class SimpleVideoPlayer:
             self._cap = None
             return
         if path == self._path and self._cap is not None and self._start_time == start_time and self._end_time == end_time:
+            # 같은 소스를 연속 재생할 때도 항상 지정 시점부터 다시 시작한다.
+            # (이전 아이템 끝에서 paused된 상태가 남아 VIDEO 장면이 즉시 종료되는 현상 방지)
+            self._current_pts = start_time
+            self._paused = False
+            self._cached_pts = -1.0
+            try:
+                self._cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000.0)
+            except Exception:
+                pass
             return
         self.close()
         self._path = path
@@ -447,8 +456,8 @@ class VideoAudioPlayer:
             pos = pygame.mixer.music.get_pos()
             if pos < 0:
                 return None
-            if pos > 10000:
-                pos = pos / 1000.0
-            return self._play_start_sec + pos
+            # pygame.mixer.music.get_pos()는 밀리초를 반환한다.
+            pos_sec = float(pos) / 1000.0
+            return self._play_start_sec + pos_sec
         except Exception:
             return None
