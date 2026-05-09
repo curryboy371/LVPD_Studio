@@ -10,18 +10,21 @@ set MODE_CHOICE=
 if /I "%STUDIO%"=="conversation" goto :run
 if /I "%STUDIO%"=="vocabulary" goto :run
 if /I "%STUDIO%"=="combo" goto :run_combo
+if /I "%STUDIO%"=="text" goto :run_export_text
 
 echo [화면 출력 전용] 회화/단어 모드 선택 실행 (F5 디버그와 유사)
 echo  0^) 리소스 체크 모드 (topic 기반 누락 파일 점검)
 echo  1^) 회화 모드 (conversation)
 echo  2^) 단어 모드 (vocabulary)
 echo  3^) 녹화 결합: 지정 topic만 ^(1^) 회화 전부 1파일 ^(2^) 단어 전부 1파일 ^(3^) ffmpeg 병합
-set /p MODE_CHOICE=선택하세요 [0/1/2/3]:
+echo  4^) 텍스트 추출: 지정 topic의 sub 문장 + 단어 리스트를 `한자 : 병음` TXT 로 저장
+set /p MODE_CHOICE=선택하세요 [0/1/2/3/4]:
 
 if "%MODE_CHOICE%"=="0" set STUDIO=check
 if "%MODE_CHOICE%"=="1" set STUDIO=conversation
 if "%MODE_CHOICE%"=="2" set STUDIO=vocabulary
 if "%MODE_CHOICE%"=="3" set STUDIO=combo
+if "%MODE_CHOICE%"=="4" set STUDIO=text
 
 if not defined STUDIO (
   echo.
@@ -30,11 +33,13 @@ if not defined STUDIO (
   echo   record_output_select_mode.bat vocabulary
   echo   record_output_select_mode.bat combo
   echo   record_output_select_mode.bat check
+  echo   record_output_select_mode.bat text
   exit /b 1
 )
 
 if /I "%STUDIO%"=="combo" goto :run_combo
 if /I "%STUDIO%"=="check" goto :run_check
+if /I "%STUDIO%"=="text" goto :run_export_text
 
 :run
 echo.
@@ -78,6 +83,30 @@ if errorlevel 1 (
 )
 echo.
 echo [check] 모든 리소스가 준비되었습니다.
+pause
+exit /b 0
+
+:run_export_text
+echo.
+set "TEXT_TOPIC=%~2"
+if defined TEXT_TOPIC goto :run_export_text_ready
+set /p TEXT_TOPIC=텍스트로 추출할 topic 입력 [전체는 엔터]:
+:run_export_text_ready
+echo.
+echo [text] topic=%TEXT_TOPIC% (출력: release\text\)
+where py >nul 2>nul && (
+  py -3 -u -m tools.export_topic_text --topic "%TEXT_TOPIC%"
+) || (
+  python -u -m tools.export_topic_text --topic "%TEXT_TOPIC%"
+)
+if errorlevel 1 (
+  echo.
+  echo [text] 추출 실패. CSV 데이터/g2pM 설치 여부를 확인하세요.
+  pause
+  exit /b 1
+)
+echo.
+echo [text] TXT 추출 완료. release\text\ 폴더를 확인하세요.
 pause
 exit /b 0
 
