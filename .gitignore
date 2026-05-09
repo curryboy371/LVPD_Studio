@@ -14,13 +14,16 @@ ENV/
 # 데이터 원본 및 임시 엑셀 파일
 *.xlsx
 !video_data.xlsx  # 템플릿으로 쓸 데이터라면 제외(!)를 통해 포함 가능
+!resource/table/**/*.xlsx
 
 # 녹화 결과물
 release/
 output/
 
-#리소스
-resource
+# 리소스 (resource/table 만 버전 관리)
+resource/*
+!resource/table/
+!resource/table/**
 
 # 로그 및 환경 설정
 *.log
