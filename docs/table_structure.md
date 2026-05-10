@@ -49,7 +49,7 @@
 |------|------|------|------|
 | id | int | O | 서브 문장 ID |
 | base_id | int | O | `base_sentences.id` |
-| target_slot_order | int | O | 교체할 단어 위치(0 시작) |
+| target_slot_order | str | O | 슬롯 위치. **정수**면 해당 슬롯 통째 교체, **소수**(예 `1.1`)면 정수 부분 슬롯 **직후**에 삽입. 파이프로 다중 지정(`0\|0.1\|0.2`). 자세한 규칙은 `docs/slot_format_guide.md` §3.1 |
 | alt_word_id | int | O | 대체 단어 ID(`words.id`) |
 | alt_translation | str | - | 대체 문장 번역 |
 | alt_sound_path | str | - | 대체 문장 음성 경로 |
@@ -65,7 +65,7 @@ erDiagram
 ```
 
 - 기본 문장 단어 순서는 `raw_sentence`의 슬롯(`{}`)에서 추출합니다.
-- 활용 문장은 `sub_sentences.target_slot_order` 위치를 `alt_word_id`로 교체해 생성합니다.
+- 활용 문장은 `sub_sentences.target_slot_order`와 `alt_word_id`로 조합한다. 정수 슬롯은 **교체**, 소수 슬롯은 해당 정수 슬롯 **뒤에 삽입**한다(`slot_format_guide.md` 참고).
 
 ---
 

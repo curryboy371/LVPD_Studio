@@ -474,7 +474,11 @@ def _split_csv_multi_value(raw: Any) -> list[str]:
 
 
 def _parse_target_slot_orders(raw: Any) -> list[Union[int, str, float]]:
-    """슬롯 순서. 한 슬롯을 여러 단어로 쪼갤 때 `0|0.1|0.2`처럼 소수로 순서만 구분한다."""
+    """슬롯 순서.
+
+    - 정수(`0`, `1`, …): 해당 인덱스 슬롯 **전체**를 alt 단어로 교체.
+    - 소수(`1.1`, `1.2`, …): 정수 부분 `n`인 슬롯 **바로 뒤**(n번과 n+1번 사이)에 소수 순서대로 끼워 넣음.
+    """
     out: list[Union[int, str, float]] = []
     for token in _split_csv_multi_value(raw):
         t = token.strip().lower()
@@ -546,7 +550,12 @@ def _replace_multiple_slots_in_raw_sentence(
     *,
     replacements: list[tuple[Union[int, str, float], str]],
 ) -> str:
-    """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다."""
+    """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다.
+
+    - `target_slot_order`가 **정수**이면 해당 슬롯 내용을 alt 단어로 **통째로 교체**한다.
+    - **소수**(예: `1.1`, `1.2`)이면 정수 부분 `n`에 대해, n번 슬롯 **직후**(n과 n+1번 슬롯 사이)에
+      소수 오름차순으로 단어를 **삽입**한다. 기존 슬롯 텍스트는 유지한다.
+    """
     if not raw_sentence:
         return ""
 
@@ -567,9 +576,8 @@ def _replace_multiple_slots_in_raw_sentence(
     merged_slots = list(slot_words)
     prefix_words: list[str] = []
     suffix_words: list[str] = []
-
-    # 동일한 정수 슬롯(예: 0, 0.1, 0.2)은 순서대로 이어 붙여 한 칸을 여러 음절로 확장한다.
-    by_base: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
+    slot_replacements: dict[int, str] = {}
+    insert_after: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
 
     for slot_order, new_word in replacements:
         w = str(new_word or "").strip()
@@ -581,6 +589,11 @@ def _replace_multiple_slots_in_raw_sentence(
         if slot_order == -1:
             prefix_words.append(w)
             continue
+        if isinstance(slot_order, int) and not isinstance(slot_order, bool):
+            if slot_order < 0:
+                continue
+            slot_replacements[slot_order] = w
+            continue
         try:
             order_f = float(slot_order)
         except (TypeError, ValueError):
@@ -588,23 +601,35 @@ def _replace_multiple_slots_in_raw_sentence(
         if order_f < 0:
             continue
         base_i = int(order_f)
-        by_base[base_i].append((order_f, w))
-
-    for base_i, pairs in by_base.items():
-        if not pairs:
+        frac = order_f - base_i
+        if frac <= 0:
             continue
-        pairs.sort(key=lambda x: x[0])
-        merged = "".join(p for _, p in pairs)
-        if 0 <= base_i < len(merged_slots):
-            merged_slots[base_i] = merged
+        insert_after[base_i].append((order_f, w))
+
+    for si, w in slot_replacements.items():
+        if 0 <= si < len(merged_slots):
+            merged_slots[si] = w
         else:
-            suffix_words.append(merged)
+            suffix_words.append(w)
+
+    orphan_inserts: list[tuple[float, str]] = []
+    for k in list(insert_after.keys()):
+        if not (0 <= k < len(merged_slots)):
+            orphan_inserts.extend(insert_after.pop(k))
+    orphan_inserts.sort(key=lambda x: x[0])
+    for _, w in orphan_inserts:
+        suffix_words.append(w)
+
+    for k in insert_after:
+        insert_after[k].sort(key=lambda x: x[0])
 
     parts: list[str] = []
     parts.extend(prefix_words)
     for i, slot_word in enumerate(merged_slots):
         parts.append(literals[i])
         parts.append(slot_word)
+        for _, w in insert_after.get(i, []):
+            parts.append(w)
     parts.append(literals[-1])
     parts.extend(suffix_words)
     return "".join(parts).strip()
