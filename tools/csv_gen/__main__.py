@@ -50,7 +50,9 @@ def main() -> None:
     if DEFAULT_WORDS_TABLE_EXCEL.exists():
         try:
             p = words_table_excel_to_csv(
-                DEFAULT_WORDS_TABLE_EXCEL, DEFAULT_WORDS_TABLE_CSV
+                DEFAULT_WORDS_TABLE_EXCEL,
+                DEFAULT_WORDS_TABLE_CSV,
+                merge_all_sheets=True,
             )
             results.append(p)
         except Exception as e:
