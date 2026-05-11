@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union
 
+from utils.pinyin_masking import apply_mask_to_lexical_syllables
 from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
@@ -374,13 +375,14 @@ def _load_words_csv(csv_path: str) -> dict[int, str]:
 
 def _load_words_and_meanings_csv(
     csv_path: str,
-) -> Tuple[Dict[int, str], Dict[int, str]]:
-    """words.csv를 읽어 (word_id->word, word_id->meaning) 매핑을 만든다."""
+) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str]]:
+    """words.csv를 읽어 (word_id->word, word_id->meaning, word_id->masking) 매핑을 만든다."""
     path = Path(csv_path)
     if not path.exists():
-        return {}, {}
+        return {}, {}, {}
     words_by_id: Dict[int, str] = {}
     meanings_by_id: Dict[int, str] = {}
+    maskings_by_id: Dict[int, str] = {}
     with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -396,7 +398,8 @@ def _load_words_and_meanings_csv(
             m = str(row.get("meaning") or "").strip()
             if m:
                 meanings_by_id[wid] = m
-    return words_by_id, meanings_by_id
+            maskings_by_id[wid] = str(row.get("masking") or "").strip()
+    return words_by_id, meanings_by_id, maskings_by_id
 
 
 def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
@@ -701,11 +704,13 @@ def _attach_sub_variants_to_base_rows(
     *,
     words_by_id: dict[int, str],
     meanings_by_id: Optional[Dict[int, str]] = None,
+    maskings_by_id: Optional[Dict[int, str]] = None,
     sub_rows_by_base_id: dict[int, list[dict]],
 ) -> list[dict]:
     """base row에 학습 활용용 sub 변형 리스트(`sub_variants`)를 채운다."""
     if not base_rows or not sub_rows_by_base_id:
         return base_rows
+    pp = get_pinyin_processor()
     for row in base_rows:
         try:
             sid = int(float(row.get("id") or 0))
@@ -735,7 +740,7 @@ def _attach_sub_variants_to_base_rows(
             if not replacement_specs:
                 continue
 
-            resolved_replacements: list[tuple[Union[int, str, float], int, str, str]] = []
+            resolved_replacements: list[tuple[Union[int, str, float], int, str, str, str]] = []
             for slot_order, alt_word_id in replacement_specs:
                 alt_word = words_by_id.get(int(alt_word_id), "").strip()
                 if not alt_word:
@@ -743,7 +748,12 @@ def _attach_sub_variants_to_base_rows(
                 alt_meaning = ""
                 if meanings_by_id:
                     alt_meaning = str(meanings_by_id.get(int(alt_word_id), "") or "").strip()
-                resolved_replacements.append((slot_order, int(alt_word_id), alt_word, alt_meaning))
+                alt_masking = ""
+                if maskings_by_id:
+                    alt_masking = str(maskings_by_id.get(int(alt_word_id), "") or "").strip()
+                resolved_replacements.append(
+                    (slot_order, int(alt_word_id), alt_word, alt_meaning, alt_masking)
+                )
             if not resolved_replacements:
                 continue
             # 요청한 다중 치환은 "전부 성공"해야 한다.
@@ -760,13 +770,14 @@ def _attach_sub_variants_to_base_rows(
             replaced_sentence = _replace_multiple_slots_in_raw_sentence(
                 raw_sentence,
                 replacements=[
-                    (slot_order, alt_word) for slot_order, _wid, alt_word, _m in resolved_replacements
+                    (slot_order, alt_word)
+                    for slot_order, _wid, alt_word, _m, _mask in resolved_replacements
                 ],
             )
             if not replaced_sentence:
                 continue
 
-            primary_slot_order, primary_alt_word_id, primary_alt_word, primary_alt_meaning = (
+            primary_slot_order, primary_alt_word_id, primary_alt_word, primary_alt_meaning, _primary_masking = (
                 resolved_replacements[0]
             )
             primary_f: Optional[float] = None
@@ -793,10 +804,11 @@ def _attach_sub_variants_to_base_rows(
                 "alt_word_id": primary_alt_word_id,
                 "alt_word": primary_alt_word,
                 "alt_word_meaning": primary_alt_meaning,
-                "target_slot_orders": [slot for slot, _wid, _w, _m in resolved_replacements],
-                "alt_word_ids": [wid for _slot, wid, _w, _m in resolved_replacements],
-                "alt_words": [w for _slot, _wid, w, _m in resolved_replacements],
-                "alt_word_meanings": [m for _slot, _wid, _w, m in resolved_replacements],
+                "target_slot_orders": [slot for slot, _wid, _w, _m, _mask in resolved_replacements],
+                "alt_word_ids": [wid for _slot, wid, _w, _m, _mask in resolved_replacements],
+                "alt_words": [w for _slot, _wid, w, _m, _mask in resolved_replacements],
+                "alt_word_meanings": [m for _slot, _wid, _w, m, _mask in resolved_replacements],
+                "alt_word_maskings": [mask for _slot, _wid, _w, _m, mask in resolved_replacements],
                 "replaced_sentence": replaced_sentence,
                 "alt_translation": str(v.get("alt_translation") or "").strip(),
                 "alt_sound_path": alt_sound_path,
@@ -804,7 +816,7 @@ def _attach_sub_variants_to_base_rows(
             # 추가/치환된 단어를 모두 하이라이트할 수 있도록 span 목록을 저장한다.
             spans: list[dict[str, int]] = []
             search_pos = 0
-            for slot_order, _wid, alt_word, _m in resolved_replacements:
+            for slot_order, _wid, alt_word, _m, _mask in resolved_replacements:
                 cur_span = _find_word_span_in_display_sentence_from(
                     replaced_sentence,
                     alt_word,
@@ -833,6 +845,71 @@ def _attach_sub_variants_to_base_rows(
                 variant_dict["alt_hanzi_len"] = int(span[1])
             if spans:
                 variant_dict["alt_hanzi_spans"] = spans
+                if pp.available:
+                    try:
+                        lexical_list = pp.get_lexical_pinyin(replaced_sentence)
+                        if lexical_list:
+                            masked_lexical = list(lexical_list)
+                            for si, span_info in enumerate(spans):
+                                start_i = int(span_info.get("start", 0))
+                                len_i = int(span_info.get("len", 0))
+                                if len_i <= 0:
+                                    continue
+                                end_i = max(start_i, start_i + len_i)
+                                if start_i >= len(masked_lexical):
+                                    continue
+                                end_i = min(len(masked_lexical), end_i)
+                                if end_i <= start_i:
+                                    continue
+                                mask_raw = ""
+                                if si < len(variant_dict["alt_word_maskings"]):
+                                    mask_raw = str(variant_dict["alt_word_maskings"][si] or "").strip()
+                                if not mask_raw:
+                                    continue
+                                window = masked_lexical[start_i:end_i]
+                                masked_window = apply_mask_to_lexical_syllables(
+                                    window,
+                                    mask_raw,
+                                    processor=pp,
+                                )
+                                masked_lexical[start_i:end_i] = masked_window
+                            variant_dict["pinyin_lexical"] = " ".join(masked_lexical).strip()
+                            variant_dict["pinyin_marks"] = " ".join(
+                                pp.tone3_to_mark(syl) for syl in masked_lexical
+                            ).strip()
+                            # 발음형도 단어 masking 기준으로 계산해야 아이콘 비교가 일관된다.
+                            # (기본 g2pM 발음형 위에 동일 마스크를 다시 적용)
+                            phonetic_list = pp.get_phonetic_pinyin(replaced_sentence)
+                            if phonetic_list:
+                                masked_phonetic = list(phonetic_list)
+                                for si, span_info in enumerate(spans):
+                                    start_i = int(span_info.get("start", 0))
+                                    len_i = int(span_info.get("len", 0))
+                                    if len_i <= 0:
+                                        continue
+                                    end_i = max(start_i, start_i + len_i)
+                                    if start_i >= len(masked_phonetic):
+                                        continue
+                                    end_i = min(len(masked_phonetic), end_i)
+                                    if end_i <= start_i:
+                                        continue
+                                    mask_raw = ""
+                                    if si < len(variant_dict["alt_word_maskings"]):
+                                        mask_raw = str(variant_dict["alt_word_maskings"][si] or "").strip()
+                                    if not mask_raw:
+                                        continue
+                                    ph_window = masked_phonetic[start_i:end_i]
+                                    masked_ph_window = apply_mask_to_lexical_syllables(
+                                        ph_window,
+                                        mask_raw,
+                                        processor=pp,
+                                    )
+                                    masked_phonetic[start_i:end_i] = masked_ph_window
+                                variant_dict["pinyin_phonetic"] = " ".join(masked_phonetic).strip()
+                            else:
+                                variant_dict["pinyin_phonetic"] = ""
+                    except Exception:
+                        pass
             sub_variants.append(variant_dict)
         if sub_variants:
             # LearningScene의 전용 Stage에서 바로 사용할 공통 키.
@@ -892,6 +969,7 @@ def build_data_list(
         # 붙여야 PRACTICE의 SHOW_SUB_CONTENT 단계로 정상 전환된다.
         words_by_id: dict[int, str] = {}
         meanings_by_id: dict[int, str] = {}
+        maskings_by_id: dict[int, str] = {}
         sub_rows_by_base_id: dict[int, list[dict]] = {}
         try:
             from core.paths import (
@@ -900,7 +978,9 @@ def build_data_list(
                 DEFAULT_SUB_SENTENCES_CSV,
             )
 
-            words_by_id, meanings_by_id = _load_words_and_meanings_csv(str(DEFAULT_WORDS_TABLE_CSV))
+            words_by_id, meanings_by_id, maskings_by_id = _load_words_and_meanings_csv(
+                str(DEFAULT_WORDS_TABLE_CSV)
+            )
             sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
             base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
             raw_sentence_by_id: dict[int, str] = {}
@@ -940,6 +1020,7 @@ def build_data_list(
                     rows,
                     words_by_id=words_by_id,
                     meanings_by_id=meanings_by_id,
+                    maskings_by_id=maskings_by_id,
                     sub_rows_by_base_id=sub_rows_by_base_id,
                 )
         except Exception:
@@ -956,13 +1037,16 @@ def build_data_list(
         )
 
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
-        words_by_id, meanings_by_id = _load_words_and_meanings_csv(str(DEFAULT_WORDS_TABLE_CSV))
+        words_by_id, meanings_by_id, maskings_by_id = _load_words_and_meanings_csv(
+            str(DEFAULT_WORDS_TABLE_CSV)
+        )
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
         base_rows = _attach_words_from_raw_sentence(base_rows)
         base_rows = _attach_sub_variants_to_base_rows(
             base_rows,
             words_by_id=words_by_id,
             meanings_by_id=meanings_by_id,
+            maskings_by_id=maskings_by_id,
             sub_rows_by_base_id=sub_rows_by_base_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)

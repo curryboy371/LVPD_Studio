@@ -1,6 +1,6 @@
 """
 vocabulary_word_rows(단어장 행) 엑셀 → vocabulary_word_rows.csv 변환.
-컬럼: id, topic, word_id, pronunciation_mask, desc (table_manager / VocabularyWordRow 와 동일).
+컬럼: id, topic, word_id, desc (table_manager / VocabularyWordRow 와 동일).
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 EXCEL_EXTENSIONS = (".xlsx", ".xls")
 
-FIELDNAMES = ["id", "topic", "word_id", "pronunciation_mask", "desc"]
+FIELDNAMES = ["id", "topic", "word_id", "desc"]
 
 
 def _normalize(value: Any) -> str:
@@ -55,7 +55,6 @@ def vocabulary_word_rows_excel_to_csv(
             "id": _to_int(row.get("id"), 0),
             "topic": _normalize(row.get("topic", "")),
             "word_id": wid,
-            "pronunciation_mask": _normalize(row.get("pronunciation_mask", "")),
             "desc": _normalize(row.get("desc", "")),
         })
 

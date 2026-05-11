@@ -150,6 +150,7 @@ class Word(BaseModel):
     id: int = Field(..., description="기본키")
     word: str = Field(default="", description="한자 단어")
     pinyin: str = Field(default="", description="성조 병음 (예: píngguǒ)")
+    masking: str = Field(default="", description="성조 마스크. 비면 원래 성조, 숫자(0~5)로 음절별 강제")
     pos: str = Field(default="", description="품사 (예: 명사, 동사). 복수 시 | 구분")
     meaning: str = Field(default="", description="뜻")
     img_path: str = Field(default="", description="이미지 경로")
@@ -175,10 +176,6 @@ class VocabularyWordRow(BaseModel):
     id: int = Field(default=0, description="단어장 행 PK·표시 순서(작을수록 위; 세션 집계 시 1부터 부여)")
     topic: str = Field(default="", description="주제·단원(회화 topic 등)")
     word_id: int = Field(..., ge=1, description="words.id")
-    pronunciation_mask: str = Field(
-        default="",
-        description="발음 마스크(학습용 가림·표기 등). 비우면 화면에는 words.pinyin을 보조로 사용",
-    )
     desc: str = Field(
         default="",
         description="엑셀용 메모·설명(런타임 UI·로직에서 사용하지 않음)",

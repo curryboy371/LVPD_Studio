@@ -1,6 +1,6 @@
 """
 words(단어 마스터) 엑셀 → words.csv 변환.
-컬럼: id, word, pinyin, pos, meaning, img_path, sound_path.
+컬럼: id, word, pinyin, masking, pos, meaning, img_path, sound_path.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 EXCEL_EXTENSIONS = (".xlsx", ".xls")
 
-FIELDNAMES = ["id", "word", "pinyin", "pos", "meaning", "img_path", "sound_path"]
+FIELDNAMES = ["id", "word", "pinyin", "masking", "pos", "meaning", "img_path", "sound_path"]
 
 
 def _normalize(value: Any) -> str:
@@ -55,6 +55,7 @@ def words_table_excel_to_csv(
             "id": _to_int(row.get("id"), 0),
             "word": word,
             "pinyin": _normalize(row.get("pinyin", "")),
+            "masking": _normalize(row.get("masking", "")),
             "pos": _normalize(row.get("pos", "")),
             "meaning": _normalize(row.get("meaning", "")),
             "img_path": _normalize(row.get("img_path", "")),

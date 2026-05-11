@@ -517,10 +517,10 @@ class PracticeScene(IConversationStep):
             return item
         base_map = item
         replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
-        pinyin_marks = ""
-        pinyin_phonetic = ""
-        pinyin_lexical = ""
-        if replaced_sentence:
+        pinyin_marks = str(self._current_sub_variant.get("pinyin_marks") or "").strip()
+        pinyin_phonetic = str(self._current_sub_variant.get("pinyin_phonetic") or "").strip()
+        pinyin_lexical = str(self._current_sub_variant.get("pinyin_lexical") or "").strip()
+        if replaced_sentence and not pinyin_marks:
             try:
                 pinyin_processor = get_pinyin_processor()
                 if pinyin_processor.available:

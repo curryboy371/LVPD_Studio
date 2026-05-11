@@ -25,7 +25,7 @@ from studio.conversation.tools.fonts import (
     WHITE,
 )
 from studio.studios.components.hanzi_animator import HanziAnimator
-from utils.pinyin_processor import get_pinyin_processor
+from utils.pinyin_masking import get_masked_pinyin_marks
 from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chinese_freetype, load_font_korean
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,6 @@ def _rows_from_hanzi_strings(entries: list[str]) -> list[VocabularyWordRow]:
                 id=seq,
                 topic="",
                 word_id=w.id,
-                pronunciation_mask="",
             )
         )
     return out
@@ -367,41 +366,12 @@ class VocabularyStudio:
         w = get_word(row.word_id)
         if w is None:
             return ""
-        mask_raw = (row.pronunciation_mask or "").strip()
         hanzi = (w.word or "").strip()
         if hanzi:
             try:
-                pp = get_pinyin_processor()
-                if pp.available:
-                    lexical_list = pp.get_lexical_pinyin(hanzi)
-                    if lexical_list:
-                        # pronunciation_mask 규칙:
-                        # - 0: 해당 음절 성조 유지
-                        # - 1~5: 해당 음절 성조 강제(5=경성)
-                        # 마스크 길이가 짧으면 남은 음절은 유지한다.
-                        mask_tokens = [m for m in re.split(r"[\s,|]+", mask_raw) if m] if mask_raw else []
-                        if len(mask_tokens) == 1 and len(mask_tokens[0]) == len(lexical_list):
-                            mask_tokens = list(mask_tokens[0])
-                        adjusted: list[str] = []
-                        for i, syl in enumerate(lexical_list):
-                            base, tone = pp._split_tone(syl)  # 기존 모듈 파서 재사용
-                            if not base:
-                                adjusted.append(syl)
-                                continue
-                            cur_tone = int(tone) if tone is not None else 0
-                            if i < len(mask_tokens):
-                                tok = mask_tokens[i].strip()
-                                if tok.isdigit():
-                                    v = int(tok)
-                                    if v == 0:
-                                        pass
-                                    elif 1 <= v <= 5:
-                                        cur_tone = v
-                            adjusted_num = f"{base}{cur_tone}" if cur_tone > 0 else base
-                            adjusted.append(pp.tone3_to_mark(adjusted_num))
-                        generated = " ".join(adjusted).strip()
-                        if generated:
-                            return generated
+                generated = get_masked_pinyin_marks(hanzi, (w.masking or "").strip())
+                if generated:
+                    return generated
             except Exception:
                 pass
         if (w.pinyin or "").strip():

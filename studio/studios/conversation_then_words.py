@@ -81,7 +81,6 @@ def aggregate_vocabulary_word_rows_from_items(items: list[Any]) -> list[Vocabula
                     id=seq,
                     topic=topic,
                     word_id=master.id,
-                    pronunciation_mask="",
                 )
             )
     return out

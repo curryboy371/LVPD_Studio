@@ -215,6 +215,7 @@ def load_words_table_from_csv(
                         id=_to_int(row.get("id"), 0),
                         word=_str(row.get("word")),
                         pinyin=_str(row.get("pinyin")),
+                        masking=_str(row.get("masking")),
                         pos=_normalize_pipe_list(row.get("pos")),
                         meaning=_normalize_pipe_list(row.get("meaning")),
                         img_path=_resolve_media_path_from_name(img_raw, image_index),
@@ -358,7 +359,7 @@ def load_vocabulary_word_rows_from_csv(
     csv_path: str | Path,
     encoding: str = "utf-8-sig",
 ) -> list[VocabularyWordRow]:
-    """단어장 전용 CSV를 읽는다. 컬럼: id, topic, word_id, pronunciation_mask, desc(선택·엑셀 메모용)."""
+    """단어장 전용 CSV를 읽는다. 컬럼: id, topic, word_id, desc(선택·엑셀 메모용)."""
     path = Path(csv_path)
     if not path.exists():
         logger.warning("vocabulary word rows CSV 없음: %s", path)
@@ -378,7 +379,6 @@ def load_vocabulary_word_rows_from_csv(
                         id=_to_int(row.get("id"), 0),
                         topic=_str(row.get("topic")),
                         word_id=wid,
-                        pronunciation_mask=_str(row.get("pronunciation_mask")),
                         desc=_str(row.get("desc")),
                     )
                 )
