@@ -662,7 +662,8 @@ class PracticeScene(IConversationStep):
                 ctx=ctx,
                 tip_text=tip_text or "듣고 따라 말해보세요",
                 alpha_channel=self._tip_intro_channel,
-                scale=0.36,
+                scale_y=0.36,
+                scale_x=0.55,
             )
             if self._sub_play_phase not in ("tip_in", "tip_hold"):
                 slide_y = self._sentence_slide_y_offset_px()
@@ -1060,6 +1061,8 @@ class PracticeScene(IConversationStep):
         tip_text: str,
         alpha_channel: str | None = None,
         scale: float = 0.3,
+        scale_x: float | None = None,
+        scale_y: float | None = None,
     ) -> None:
         box = self._tip_box_surface
         if box is None:
@@ -1075,8 +1078,12 @@ class PracticeScene(IConversationStep):
         scale = float(scale)
         if scale <= 0:
             scale = base_scale
-        scale_x = scale
-        scale_y = scale
+        scale_x = float(scale_x) if scale_x is not None else scale
+        scale_y = float(scale_y) if scale_y is not None else scale
+        if scale_x <= 0:
+            scale_x = base_scale
+        if scale_y <= 0:
+            scale_y = base_scale
         tw = max(1, int(round(sw * scale_x)))
         th = max(1, int(round(sh * scale_y)))
         draw = pygame.transform.smoothscale(box, (tw, th)) if (tw != sw or th != sh) else box
@@ -1094,7 +1101,7 @@ class PracticeScene(IConversationStep):
         rendered = [self._render_tip_line(ln) for ln in lines if ln is not None]
         if not rendered:
             return
-        scale_factor = max(0.1, float(scale) / float(base_scale))
+        scale_factor = max(0.1, float(scale_y) / float(base_scale))
         line_gap = max(0, int(round(10 * scale_factor)))
         padding_left = max(0, int(round(28 * scale_factor)))
         padding_top = max(0, int(round(16 * scale_factor)))

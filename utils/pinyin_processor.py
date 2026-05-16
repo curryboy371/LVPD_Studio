@@ -152,15 +152,19 @@ class PinyinProcessor:
                 seq[i + 1]["tone"] = 5
                 seq[i + 1]["sandhi_type"] = "reduplication"
 
-        # 3성 변조: 3+3 → 앞을 2성으로 / 3+(1,2,4,5) → 앞을 반3성(3.5)으로
-        for i in range(len(seq) - 2, -1, -1):
+        # 3성 변조: (1) 인접 3+3을 문장 전체에서 먼저 처리 → 앞만 2성
+        #         (2) 그다음 남은 3성에 대해 뒤가 1·2·4·5면 반3성(3.5).
+        # 우측부터 한 루프로 (1)(2)를 섞으면 手+间 같은 패턴이 먼저 3.5가 되어
+        # 洗+手의 3+3 감지가 깨질 수 있음(예: 洗手间).
+        for i in range(len(seq) - 1):
+            if seq[i]["tone"] == 3 and seq[i + 1]["tone"] == 3:
+                seq[i]["tone"] = 2
+                seq[i]["sandhi_type"] = "tone3_2"
+        for i in range(len(seq) - 1):
             if seq[i]["tone"] == 3:
                 next_t = seq[i + 1]["tone"]
-                if next_t == 3:
-                    seq[i]["tone"] = 2  # 3+3: 앞 음절만 2성으로
-                    seq[i]["sandhi_type"] = "tone3_2"
-                elif next_t in [1, 2, 4, 5]:
-                    seq[i]["tone"] = 3.5  # 3+그 외: 반3성 (少+钱 → shao3.5)
+                if next_t in [1, 2, 4, 5]:
+                    seq[i]["tone"] = 3.5
                     seq[i]["sandhi_type"] = "tone3_half"
 
         final_seq: list[str] = []
@@ -294,6 +298,8 @@ if __name__ == "__main__":
             "你可以",
             "有点儿",
             "我很渴",
+            "洗手间",
+            "你好",
         ]
         print(f"{'원문':<10} | {'발음 숫자 표기':<20} | {'최종 성조 기호'}")
         print("-" * 60)
