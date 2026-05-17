@@ -19,7 +19,9 @@ from studio.shorts.constants import (
     shorts_hook_title_line_gap,
     shorts_hook_title_y_offset,
     shorts_middle_y_offset,
+    shorts_pinyin_hanzi_gap,
     shorts_pinyin_y_offset,
+    shorts_translation_extra_gap,
 )
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
@@ -314,6 +316,8 @@ class ShortsDrawer:
             sound_duration_sec=sound_duration_sec,
             y_offset=shorts_middle_y_offset(fh),
             pinyin_y_offset=shorts_pinyin_y_offset(fh),
+            pinyin_hanzi_gap=shorts_pinyin_hanzi_gap(fh),
+            translation_extra_gap=shorts_translation_extra_gap(fh),
         )
 
     def draw_middle_word(
@@ -338,6 +342,7 @@ class ShortsDrawer:
             y_top += img.get_height() + 12
         sub_rect = pygame.Rect(rect.left, y_top, rect.width, rect.bottom - y_top)
         data = build_sentence_render_data_with_tone_icons(item)
+        fh = screen.get_height()
         self._karaoke.draw(
             screen,
             data=data,
@@ -347,6 +352,7 @@ class ShortsDrawer:
             syllable_times=syllable_times,
             sound_duration_sec=sound_duration_sec,
             y_offset=0,
+            translation_extra_gap=shorts_translation_extra_gap(fh),
         )
 
     def draw_bottom_zone(

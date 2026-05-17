@@ -15,6 +15,7 @@ from studio.shorts.constants import (
     HOOK_FADE_IN_SEC,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
+    SHORTS_SOUND_PLAY_COUNT,
     SHORTS_VIDEO_FADE_OUT_SEC,
 )
 from studio.conversation.video_players import SimpleVideoPlayer
@@ -69,6 +70,8 @@ class ClipScene:
         self._timer = 0.0
         self._learn_elapsed = 0.0
         self._sound_duration = 0.0
+        self._sound_once_duration = 0.0
+        self._sound_play_count = 0
         self._voice_channel: Optional[pygame.mixer.Channel] = None
         self._on_clip_done: Optional[Callable[[], None]] = None
         self._is_last_clip = True
@@ -189,7 +192,10 @@ class ClipScene:
         if self._stage == ClipStage.LEARN_PLAY:
             self._learn_elapsed += max(0.0, float(dt_sec))
             if self._is_voice_finished():
-                self._enter_cta_hold()
+                if self._should_play_sound_again():
+                    self._play_sound_once()
+                else:
+                    self._enter_cta_hold()
             return
 
         if self._stage == ClipStage.CTA_HOLD:
@@ -223,11 +229,30 @@ class ClipScene:
         self._stage = ClipStage.LEARN_PLAY
         self._timer = 0.0
         self._learn_elapsed = 0.0
+        self._sound_play_count = 0
+        self._sound_once_duration = 0.0
+        self._sound_duration = 0.0
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
         path = str(self._clip.get("sound_path") or "").strip()
-        self._sound_duration = self._play_voice(path) if path else 0.0
-        if self._sound_duration <= 0 and path:
-            self._sound_duration = 3.0
+        if path:
+            self._play_sound_once()
+        else:
+            self._sound_play_count = max(1, int(SHORTS_SOUND_PLAY_COUNT))
+
+    def _play_sound_once(self) -> None:
+        path = str(self._clip.get("sound_path") or "").strip()
+        self._learn_elapsed = 0.0
+        self._sound_once_duration = self._play_voice(path) if path else 0.0
+        if self._sound_once_duration <= 0 and path:
+            self._sound_once_duration = 3.0
+        self._sound_duration = self._sound_once_duration
+        self._sound_play_count += 1
+
+    def _should_play_sound_again(self) -> bool:
+        path = str(self._clip.get("sound_path") or "").strip()
+        if not path:
+            return False
+        return self._sound_play_count < max(1, int(SHORTS_SOUND_PLAY_COUNT))
 
     def _enter_cta_hold(self) -> None:
         self._stage = ClipStage.CTA_HOLD
@@ -238,7 +263,7 @@ class ClipScene:
         ch = self._voice_channel
         if ch is not None and ch.get_busy():
             return False
-        dur = max(0.0, float(self._sound_duration))
+        dur = max(0.0, float(self._sound_once_duration))
         if dur <= 1e-6:
             return self._learn_elapsed >= 2.0
         return self._learn_elapsed >= dur + 0.15

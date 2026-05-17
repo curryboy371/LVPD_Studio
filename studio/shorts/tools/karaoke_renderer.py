@@ -80,6 +80,8 @@ class KaraokeRenderer:
         sound_duration_sec: float,
         y_offset: int = 0,
         pinyin_y_offset: int = 0,
+        pinyin_hanzi_gap: Optional[int] = None,
+        translation_extra_gap: Optional[int] = None,
     ) -> None:
         """병음·한자·번역을 rect 안에 배치하고 활성 음절을 강조한다."""
         pinyin = (data.pinyin or "").strip()
@@ -99,6 +101,8 @@ class KaraokeRenderer:
         y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
         line_gap = style.layout.line_gap_px
 
+        gap_py_hz = int(pinyin_hanzi_gap) if pinyin_hanzi_gap is not None else line_gap
+
         if pinyin and syllables:
             y = self._draw_pinyin_line(
                 screen,
@@ -109,7 +113,7 @@ class KaraokeRenderer:
                 style=style,
                 active_syl=active_syl,
             )
-            y += line_gap
+            y += gap_py_hz
 
         if hanzi:
             self._draw_hanzi_colored(
@@ -124,7 +128,12 @@ class KaraokeRenderer:
             y += line_gap
 
         if trans:
-            y += style.layout.translation_extra_gap_px
+            extra_trans = (
+                int(translation_extra_gap)
+                if translation_extra_gap is not None
+                else style.layout.translation_extra_gap_px
+            )
+            y += extra_trans
             surf = self._drawer._get_cached_translation_surf(trans, style.colors.translation_color)
             self._drawer._blit_surface(
                 screen,

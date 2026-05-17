@@ -36,7 +36,11 @@ HOOK_TITLE_LINE2_COLOR = (255, 255, 255)
 # 1080×1920 기준 — 중앙 노래방 문장 y 보정(양수 = 아래)
 SHORTS_MIDDLE_Y_OFFSET = 72
 # 1080×1920 기준 — 병음 줄 추가 y 보정(양수 = 아래)
-SHORTS_PINYIN_Y_OFFSET = 40
+SHORTS_PINYIN_Y_OFFSET = 72
+# 1080×1920 기준 — 병음↔한자 줄 간격(기본 line_gap보다 좁게)
+SHORTS_PINYIN_HANZI_GAP = 52
+# 1080×1920 기준 — 한자↔번역(뜻) 추가 간격
+SHORTS_TRANSLATION_EXTRA_GAP = 28
 
 
 def shorts_middle_y_offset(frame_height: int) -> int:
@@ -51,6 +55,20 @@ def shorts_pinyin_y_offset(frame_height: int) -> int:
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
     return int(SHORTS_PINYIN_Y_OFFSET * sy)
+
+
+def shorts_pinyin_hanzi_gap(frame_height: int) -> int:
+    """프레임 높이에 맞춘 병음·한자 줄 간격."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(8, int(SHORTS_PINYIN_HANZI_GAP * sy))
+
+
+def shorts_translation_extra_gap(frame_height: int) -> int:
+    """프레임 높이에 맞춘 한자·번역(뜻) 추가 간격."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(4, int(SHORTS_TRANSLATION_EXTRA_GAP * sy))
 
 
 def shorts_hook_title_y_offset(frame_height: int) -> int:
@@ -103,6 +121,7 @@ def shorts_brand_icon_xy(
 HOOK_FADE_IN_SEC = 1.0
 CTA_HOLD_SEC = 2.5
 CLIP_TRANSITION_FADE_SEC = 0.3
+SHORTS_SOUND_PLAY_COUNT = 2
 SHORTS_VIDEO_END_HOLD_SEC = 0.6
 SHORTS_VIDEO_FADE_OUT_SEC = 0.8
 # 페이드 후에도 비디오가 남도록 최소 알파(0=완전 숨김, 255=그대로)
@@ -110,8 +129,8 @@ SHORTS_VIDEO_AFTER_ALPHA = 30
 
 # 노래방 색상
 KARAOKE_ACTIVE_HANZI = (255, 230, 120)
-KARAOKE_PAST_HANZI = (200, 200, 210)
+KARAOKE_PAST_HANZI = (255, 255, 255)
 KARAOKE_INACTIVE_HANZI = (255, 255, 255)
-KARAOKE_ACTIVE_PINYIN = (255, 230, 120)
-KARAOKE_PAST_PINYIN = (160, 165, 180)
-KARAOKE_INACTIVE_PINYIN = (140, 145, 160)
+KARAOKE_ACTIVE_PINYIN = (255, 60, 60)
+KARAOKE_PAST_PINYIN = (255, 255, 255)
+KARAOKE_INACTIVE_PINYIN = (255, 255, 255)
