@@ -17,7 +17,7 @@ from studio.shorts.constants import (
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
     shorts_hook_title_line_gap,
-    shorts_hook_title_y_offset,
+    shorts_hook_title_y,
     shorts_middle_y_offset,
     shorts_pinyin_hanzi_gap,
     shorts_pinyin_y_offset,
@@ -225,10 +225,10 @@ class ShortsDrawer:
         if surf is None:
             return rect.top + pad
 
+        fh = screen.get_height()
         tx = rect.centerx - surf.get_width() // 2
-        ty = rect.top + max(pad, (rect.height - surf.get_height()) // 2 - pad)
-        ty += shorts_hook_title_y_offset(screen.get_height())
-        ty = max(rect.top + pad, min(ty, rect.bottom - surf.get_height() - pad))
+        ty = shorts_hook_title_y(fh)
+        ty = max(pad, min(ty, fh - surf.get_height() - pad))
         screen.blit(surf, (tx, ty))
         return ty + surf.get_height() + 12
 
@@ -241,20 +241,21 @@ class ShortsDrawer:
         channel: str,
         image_y: int,
     ) -> None:
-        """상단 30%: 판다 이미지(페이드). 타이틀은 draw_hook_title에서 처리."""
+        """판다 이미지(페이드). 타이틀 바로 아래부터 배치(상단 구역 밖으로 내려갈 수 있음)."""
         img_alpha = self.fade_alpha(channel)
         if img_alpha <= 0:
             return
 
         rect = zones.top
         pad = 16
-        img_h = max(64, rect.bottom - image_y - pad)
+        fh = screen.get_height()
+        img_h = max(64, fh - image_y - pad)
         img = self._load_hook_image(hook_image_path, rect.width - pad * 2, img_h)
         if img is None:
             return
 
         x = rect.centerx - img.get_width() // 2
-        y = min(image_y, rect.bottom - img.get_height() - pad)
+        y = max(pad, image_y)
         if img_alpha < 255:
             img = img.copy()
             img.set_alpha(img_alpha)

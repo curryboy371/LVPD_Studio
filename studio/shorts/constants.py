@@ -23,12 +23,14 @@ SHORTS_BRAND_ICON_W = 200
 SHORTS_BRAND_ICON_H = 120
 # 1080×1920 기준 하단 중앙 — 아이콘 하단 여백(해상도에 비례 스케일)
 SHORTS_BRAND_ICON_BOTTOM_MARGIN = 280
-SHORTS_BRAND_TITLE_TEXT = "중국어 여포판다 TV"
-SHORTS_BRAND_TITLE_COLOR = (255, 255, 255)
+SHORTS_BRAND_TITLE_TEXT = "#중국어 여포판다"
+SHORTS_BRAND_TITLE_COLOR = (64, 64, 64)
 SHORTS_BRAND_TITLE_FONT_SIZE = 30
 SHORTS_BRAND_TITLE_GAP_ABOVE_ICON = 10
-# 1080×1920 기준 — 상단 훅 타이틀 y 보정(양수 = 아래)
-SHORTS_HOOK_TITLE_Y_OFFSET = 215
+# 1080×1920 기준 — 훅 타이틀 Y(화면 최상단부터, 상단 30% 구역을 넘어설 수 있음)
+SHORTS_HOOK_TITLE_Y = 420
+# 하위 호환 이름
+SHORTS_HOOK_TITLE_Y_OFFSET = SHORTS_HOOK_TITLE_Y
 SHORTS_HOOK_TITLE_LINE_GAP = 0
 # 훅 타이틀 2줄: 윗줄(첫 줄) / 아랫줄(\n 이후)
 HOOK_TITLE_LINE1_COLOR = (120, 210, 255)
@@ -71,11 +73,16 @@ def shorts_translation_extra_gap(frame_height: int) -> int:
     return max(4, int(SHORTS_TRANSLATION_EXTRA_GAP * sy))
 
 
-def shorts_hook_title_y_offset(frame_height: int) -> int:
-    """프레임 높이에 맞춘 훅 타이틀 y 오프셋."""
+def shorts_hook_title_y(frame_height: int) -> int:
+    """프레임 높이에 맞춘 훅 타이틀 앵커 Y(화면 상단 기준)."""
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
-    return int(SHORTS_HOOK_TITLE_Y_OFFSET * sy)
+    return int(SHORTS_HOOK_TITLE_Y * sy)
+
+
+def shorts_hook_title_y_offset(frame_height: int) -> int:
+    """하위 호환 alias."""
+    return shorts_hook_title_y(frame_height)
 
 
 def shorts_hook_title_line_gap(frame_height: int) -> int:
