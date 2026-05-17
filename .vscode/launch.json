@@ -2,17 +2,19 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "스튜디오 (화면만)",
+      "name": "숏츠 - 상황극",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/studio/runner.py",
       "args": [
         "--studio",
-        "conversation",
+        "shorts",
         "--mode",
         "debug",
         "--topic",
-        "where"
+        "fruit_store",
+        "--shorts-type",
+        "conversation"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
@@ -25,6 +27,26 @@
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "args": ["batch"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "justMyCode": true
+    },
+    {
+      "name": "숏츠 - 단어 (별도 실행)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/studio/runner.py",
+      "args": [
+        "--studio",
+        "shorts",
+        "--mode",
+        "debug",
+        "--topic",
+        "fruit_store",
+        "--shorts-type",
+        "vocabulary"
+      ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": { "PYTHONPATH": "${workspaceFolder}" },

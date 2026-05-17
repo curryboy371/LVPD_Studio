@@ -1,10 +1,12 @@
-# 테이블 구조 (3테이블)
+# 테이블 구조
 
 회화 데이터는 아래 3개 CSV를 기준으로 운영합니다.
 
 - `base_sentences.csv`
 - `words.csv`
 - `sub_sentences.csv`
+
+숏츠 스튜디오는 회화·단어용 CSV를 **각각** 사용합니다(`shorts_conversation_clips.csv`, `shorts_vocabulary_clips.csv`).
 
 `sentence_word_map.csv`는 신규 기본 경로에서 사용하지 않습니다(레거시 폴백 전용).
 
@@ -56,11 +58,47 @@
 
 ---
 
+## 4) shorts_conversation_clips (숏츠·회화)
+
+**경로**: `resource/table/shorts_conversation_clips.xlsx` → `resource/csv/shorts_conversation_clips.csv`
+
+| 컬럼 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| id | int | O | 숏츠 클립 ID |
+| topic | str | - | 주제 (`--topic` 필터) |
+| base_id | int | O | `base_sentences.id` |
+| hook_title | str | O | 상단 후킹 타이틀 |
+| hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/conversation/{id}.png` 등 |
+| situation_subtitle | str | - | 하단 상황 설명(비우면 base 번역) |
+| cta_text | str | - | 롱폼 유도 문구 |
+| syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표). 비우면 균등 분할 |
+| sound_path | str | - | 비우면 base `sound_lv_path` |
+
+## 5) shorts_vocabulary_clips (숏츠·단어)
+
+**경로**: `resource/table/shorts_vocabulary_clips.xlsx` → `resource/csv/shorts_vocabulary_clips.csv`
+
+| 컬럼 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| id | int | O | 숏츠 클립 ID |
+| topic | str | - | 주제 (`--topic` 필터) |
+| word_id | int | O | `words.id` |
+| hook_title | str | O | 상단 후킹 타이틀 |
+| hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/vocabulary/{id}.png` 등 |
+| situation_subtitle | str | - | 하단 설명(비우면 단어 뜻) |
+| cta_text | str | - | 롱폼 유도 문구 |
+| syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표) |
+| sound_path | str | - | 비우면 `words.sound_path` |
+
+---
+
 ## 관계 요약
 
 ```mermaid
 erDiagram
     base_sentences ||--o{ sub_sentences : "base_id"
+    base_sentences ||--o{ shorts_conversation_clips : "base_id"
+    words ||--o{ shorts_vocabulary_clips : "word_id"
     words ||--o{ sub_sentences : "alt_word_id"
 ```
 

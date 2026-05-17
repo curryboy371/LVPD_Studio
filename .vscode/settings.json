@@ -1,0 +1,6 @@
+{
+  "debug.toolBarLocation": "docked",
+  "terminal.integrated.env.windows": {
+    "PYTHONPATH": "${workspaceFolder}"
+  }
+}

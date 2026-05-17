@@ -25,14 +25,19 @@ if str(_REPO_ROOT) not in sys.path:
 from core.interfaces import IStudio
 from core.paths import (
     DEFAULT_BASE_SENTENCES_CSV,
+    DEFAULT_SHORTS_CONVERSATION_CLIPS_CSV,
+    DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV,
     DEFAULT_SUB_SENTENCES_CSV,
     DEFAULT_VOCABULARY_WORD_ROWS_CSV,
     DEFAULT_WORDS_TABLE_CSV,
+    SHORTS_HEIGHT,
+    SHORTS_WIDTH,
     STUDIO_FPS,
     STUDIO_HEIGHT,
     STUDIO_WIDTH,
 )
 from data.table_manager import (
+    get_base_sentences,
     get_loaded_content,
     get_table,
     set_table,
@@ -293,6 +298,7 @@ def run(
     conversation_render: Optional[Any] = None,
     record_until_content_done: bool = False,
     record_max_sec: float = 3600.0,
+    viewport: Optional[tuple[int, int]] = None,
 ) -> None:
     """IStudio 실행. debug=화면만(녹화 없음), record=오프스크린 버퍼→인코딩만.
 
@@ -310,7 +316,8 @@ def run(
 
     pygame.mixer.pre_init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
     pygame.init()
-    config = StudioConfig(STUDIO_WIDTH, STUDIO_HEIGHT, STUDIO_FPS)
+    vw, vh = viewport if viewport else (STUDIO_WIDTH, STUDIO_HEIGHT)
+    config = StudioConfig(int(vw), int(vh), STUDIO_FPS)
     if conversation_render is not None:
         config.conversation_render = conversation_render
     clock = pygame.time.Clock()
@@ -506,6 +513,15 @@ def _parse_session_topics_arg(raw: str) -> Optional[list[str]]:
     return parts or None
 
 
+def _parse_shorts_clip_types_arg(raw: str) -> Optional[list[str]]:
+    """CLI `--shorts-type` 값: conversation | vocabulary (쉼표로 복수 가능). 비우면 전체."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    parts = [p.strip() for p in s.replace("|", ",").split(",") if p.strip()]
+    return parts or None
+
+
 def _create_studio(
     name: str,
     csv_path: str | None,
@@ -540,6 +556,17 @@ def _create_studio(
             else:
                 kw["word_rows"] = select_all_vocabulary_word_rows()
         return VocabularyStudio(**kw)
+    if name == "shorts":
+        from studio.shorts import ShortsStudio
+
+        shorts_mode: str = kw.pop("shorts_mode", "conversation")
+        clips_csv_path: str = str(kw.pop("clips_csv_path", "") or "")
+        return ShortsStudio(
+            shorts_mode=shorts_mode,
+            session_topics=session_topics,
+            clips_csv_path=clips_csv_path,
+            **kw,
+        )
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
 
@@ -550,8 +577,8 @@ def main() -> None:
         "--studio",
         type=str,
         default="conversation",
-        choices=("conversation", "conversation_then_words", "vocabulary"),
-        help="실행할 스튜디오 (기본: conversation). conversation_then_words=회화 후 집계 단어 화면",
+        choices=("conversation", "conversation_then_words", "vocabulary", "shorts"),
+        help="실행할 스튜디오 (기본: conversation). conversation_then_words=회화 후 집계 단어, shorts=9:16 숏츠",
     )
     parser.add_argument(
         "--csv",
@@ -616,8 +643,18 @@ def main() -> None:
         default="",
         metavar="TOPIC",
         help=(
-            "회화·회화+단어·단어장: base_sentences / vocabulary_word_rows의 topic과 일치하는 항목만. "
+            "회화·회화+단어·단어장·숏츠: base_sentences / vocabulary_word_rows / shorts_*_clips의 topic과 일치. "
             "여러 개는 쉼표 또는 | 로 구분. 비우면 회화는 전체, 단어장(vocabulary)은 테이블 전체."
+        ),
+    )
+    parser.add_argument(
+        "--shorts-type",
+        type=str,
+        default="",
+        metavar="TYPE",
+        help=(
+            "숏츠 전용(필수 권장): conversation → shorts_conversation_clips.csv, "
+            "vocabulary → shorts_vocabulary_clips.csv. 비우면 conversation."
         ),
     )
     args = parser.parse_args()
@@ -637,16 +674,56 @@ def main() -> None:
         load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
         load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
         content = None
+    elif args.studio == "shorts":
+        load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
+        load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+        content = None
+        if not get_base_sentences():
+            print(
+                "base_sentences.csv가 없거나 비어 있습니다. create_all_csv.bat 실행 후 "
+                f"{DEFAULT_BASE_SENTENCES_CSV} 를 확인하세요.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     else:
         content = None
 
     session_topics = _parse_session_topics_arg(getattr(args, "topic", "") or "")
+    shorts_type_list = _parse_shorts_clip_types_arg(getattr(args, "shorts_type", "") or "")
+    studio_kw: dict[str, Any] = {}
+    if session_topics:
+        studio_kw["session_topics"] = session_topics
+
+    if args.studio == "shorts":
+        from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY, normalize_clip_type
+
+        if shorts_type_list and len(shorts_type_list) > 1:
+            print(
+                "숏츠 CSV가 회화/단어로 분리되어 있습니다. "
+                "--shorts-type 은 conversation 또는 vocabulary 중 하나만 지정하세요.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        shorts_mode = normalize_clip_type(
+            shorts_type_list[0] if shorts_type_list else "conversation"
+        )
+        clips_csv = (
+            DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV
+            if shorts_mode == CLIP_TYPE_VOCABULARY
+            else DEFAULT_SHORTS_CONVERSATION_CLIPS_CSV
+        )
+        if not clips_csv.exists():
+            print(f"숏츠 CSV가 없습니다: {clips_csv}", file=sys.stderr)
+            sys.exit(1)
+        studio_kw["shorts_mode"] = shorts_mode
+        studio_kw["clips_csv_path"] = str(clips_csv)
     studio = _create_studio(
         args.studio,
         csv_path or "",
         content=content,
-        **({"session_topics": session_topics} if session_topics else {}),
+        **studio_kw,
     )
+    viewport = (SHORTS_WIDTH, SHORTS_HEIGHT) if args.studio == "shorts" else None
     run(
         studio,
         mode=args.mode,
@@ -655,6 +732,7 @@ def main() -> None:
         conversation_render=_conversation_render_from_cli_args(args),
         record_until_content_done=bool(getattr(args, "record_until_content_done", False)),
         record_max_sec=float(getattr(args, "record_max_sec", 3600.0)),
+        viewport=viewport,
     )
 
 
