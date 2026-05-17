@@ -6,7 +6,7 @@ echo   (실행 시 resource\sound\shorts 폴더 비운 뒤 생성)
 echo   -^> resource\sound\shorts\ko_set_{id}_{n}.mp3
 echo   -^> resource\sound\shorts\ko_set_{id}_adjusted.srt
 echo   -^> resource\sound\shorts\ko_set_{id}_timeline.json
-echo   -^> resource\sound\shorts\follow_along.mp3  (따라해보세요)
+echo   -^> resource\sound\shorts\follow_along.mp3  (원어민 발음 따라하기)
 echo   BG: resource\sound\background\  (1회차 학습 시)
 echo.
 echo 옵션 예: batch_ko_tts.bat --topic where

@@ -1,15 +1,17 @@
-"""숏츠 2회차 안내 음성: 따라해보세요 (TTS mp3)."""
+"""숏츠 학습 안내 음성: 원어민 발음 따라하기 (TTS mp3)."""
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
 from core.paths import DEFAULT_KO_NARRATION_SOUND_DIR
+from studio.shorts.constants import SHORTS_FOLLOW_ALONG_LABEL
 
 logger = logging.getLogger(__name__)
 
-SHORTS_FOLLOW_ALONG_TEXT = "따라해보세요"
+SHORTS_FOLLOW_ALONG_TEXT = SHORTS_FOLLOW_ALONG_LABEL
 SHORTS_FOLLOW_ALONG_MP3 = DEFAULT_KO_NARRATION_SOUND_DIR / "follow_along.mp3"
+_FOLLOW_ALONG_TEXT_STAMP = SHORTS_FOLLOW_ALONG_MP3.with_suffix(".txt")
 
 
 def ensure_follow_along_mp3() -> Path:
@@ -18,7 +20,14 @@ def ensure_follow_along_mp3() -> Path:
 
     out = SHORTS_FOLLOW_ALONG_MP3
     out.parent.mkdir(parents=True, exist_ok=True)
-    if cached_cue_audio_usable(out):
+    stamp = (_FOLLOW_ALONG_TEXT_STAMP.read_text(encoding="utf-8").strip()
+             if _FOLLOW_ALONG_TEXT_STAMP.is_file() else "")
+    if stamp != SHORTS_FOLLOW_ALONG_TEXT and out.is_file():
+        try:
+            out.unlink()
+        except OSError:
+            pass
+    if cached_cue_audio_usable(out) and stamp == SHORTS_FOLLOW_ALONG_TEXT:
         return out
     try:
         provider = resolve_tts_provider("edge")
@@ -27,6 +36,7 @@ def ensure_follow_along_mp3() -> Path:
         logger.warning("follow_along edge TTS 실패, gtts 시도: %s", ex)
         resolve_tts_provider("gtts").synthesize(SHORTS_FOLLOW_ALONG_TEXT, out_path=out)
     if not cached_cue_audio_usable(out):
-        raise RuntimeError(f"따라해보세요 TTS 생성 실패: {out}")
-    logger.info("따라해보세요 TTS: %s", out)
+        raise RuntimeError(f"follow_along TTS 생성 실패: {out}")
+    _FOLLOW_ALONG_TEXT_STAMP.write_text(SHORTS_FOLLOW_ALONG_TEXT, encoding="utf-8")
+    logger.info("follow_along TTS: %s", out)
     return out

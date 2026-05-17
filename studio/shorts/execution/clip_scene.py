@@ -21,6 +21,9 @@ from studio.shorts.constants import (
     SHORTS_SOUND_PLAY_COUNT,
     SHORTS_RECORD_END_HOLD_SEC,
     SHORTS_VIDEO_FADE_OUT_SEC,
+    SHORTS_HEIGHT,
+    SHORTS_WIDTH,
+    ZONE_MIDDLE_RATIO,
 )
 from studio.conversation.video_players import SimpleVideoPlayer
 from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION
@@ -111,6 +114,7 @@ class ClipScene:
         self._ko_started = False
         self._record_end_hold_sec = 0.0
         self._end_hold_after_learn = False
+        self._last_live_video_frame: Optional[pygame.Surface] = None
 
     def set_record_end_hold(self, seconds: float) -> None:
         """녹화 모드 tail hold(초). 0이면 비활성(debug)."""
@@ -143,6 +147,18 @@ class ClipScene:
             return
         self._start_ko_narration_sequence(during_video=True)
 
+    def _is_video_ko_narration_pending(self) -> bool:
+        """인트로 비디오 구간 KO 자막·TTS가 아직 끝나지 않았으면 True."""
+        if not self._had_video_intro or not self._ko_started or self._ko_finished:
+            return False
+        if self._stage not in (
+            ClipStage.VIDEO_PLAY,
+            ClipStage.VIDEO_HOLD,
+            ClipStage.VIDEO_FADE_OUT,
+        ):
+            return False
+        return True
+
     def _enter_hook_in(self) -> None:
         self._stage = ClipStage.HOOK_IN
         self._timer = 0.0
@@ -173,6 +189,7 @@ class ClipScene:
         self._video_inner_size = (0, 0)
         self._video_display_alpha = 255
         self._had_video_intro = False
+        self._last_live_video_frame = None
         self._ko_plan = None
         self._ko_cue_index = 0
         self._ko_current_text = ""
@@ -257,22 +274,41 @@ class ClipScene:
         if self._stage == ClipStage.VIDEO_PLAY:
             self._try_start_deferred_ko_narration()
             self._tick_ko_narration(dt_sec)
+            if self._frozen_video_frame is not None:
+                if not self._is_video_ko_narration_pending():
+                    self._enter_video_hold()
+                return
+            iw, ih = self._video_inner_size
+            if iw <= 0 or ih <= 0:
+                iw, ih = self._default_video_inner_size()
             self._video_player.tick(max(0.0, float(dt_sec)))
+            if self._video_player.has_source():
+                live = self._video_player.get_frame(iw, ih, contain=True)
+                if live is not None:
+                    self._last_live_video_frame = live.copy()
             end_sec = float(self._video_player.get_effective_end_sec())
             pts = float(self._video_player.get_pts())
             if self._video_player.is_paused() and pts >= end_sec - 1e-3:
                 self._freeze_video_frame()
+                if self._is_video_ko_narration_pending():
+                    return
                 self._enter_video_hold()
             return
 
         if self._stage == ClipStage.VIDEO_HOLD:
             self._tick_ko_narration(dt_sec)
+            if self._is_video_ko_narration_pending():
+                self._timer = 0.0
+                return
             if self._timer >= SHORTS_VIDEO_END_HOLD_SEC:
                 self._enter_video_fade_out()
             return
 
         if self._stage == ClipStage.VIDEO_FADE_OUT:
             self._tick_ko_narration(dt_sec)
+            if self._is_video_ko_narration_pending():
+                self._timer = 0.0
+                return
             dur = max(1e-6, float(SHORTS_VIDEO_FADE_OUT_SEC))
             t = max(0.0, min(1.0, self._timer / dur))
             target = max(0, min(255, int(SHORTS_VIDEO_AFTER_ALPHA)))
@@ -328,11 +364,29 @@ class ClipScene:
             if self._timer >= CLIP_TRANSITION_FADE_SEC:
                 self._finish_clip()
 
+    def _default_video_inner_size(self) -> tuple[int, int]:
+        pad = 32
+        w = max(1, int(SHORTS_WIDTH) - pad * 2)
+        h = max(1, int(SHORTS_HEIGHT * ZONE_MIDDLE_RATIO) - pad * 2)
+        return w, h
+
     def _freeze_video_frame(self) -> None:
+        if self._frozen_video_frame is not None:
+            if self._video_player.has_source():
+                self._video_player.close()
+            return
         w, h = self._video_inner_size
-        if w > 0 and h > 0:
-            self._frozen_video_frame = self._video_player.get_frame(w, h, contain=True)
-        self._video_player.close()
+        if w <= 0 or h <= 0:
+            w, h = self._default_video_inner_size()
+        frame = None
+        if self._video_player.has_source():
+            frame = self._video_player.get_frame(w, h, contain=True)
+        if frame is None and self._last_live_video_frame is not None:
+            frame = self._last_live_video_frame
+        if frame is not None:
+            self._frozen_video_frame = frame.copy()
+        if self._video_player.has_source():
+            self._video_player.close()
 
     def _enter_video_hold(self) -> None:
         self._stage = ClipStage.VIDEO_HOLD
@@ -712,7 +766,9 @@ class ClipScene:
             if inner.width > 0 and inner.height > 0:
                 self._video_inner_size = (inner.width, inner.height)
             self._draw_hook_layers(screen, zones)
-            if self._stage == ClipStage.VIDEO_PLAY:
+            if self._frozen_video_frame is not None:
+                self._draw_pinned_video(screen, zones)
+            elif self._stage == ClipStage.VIDEO_PLAY and self._video_player.has_source():
                 self._drawer.draw_center_video(
                     screen,
                     self._video_player,
@@ -720,7 +776,7 @@ class ClipScene:
                     alpha=self._video_display_alpha,
                     frame_inner_size=self._video_frame_inner_size(),
                 )
-            else:
+            elif self._stage in (ClipStage.VIDEO_HOLD, ClipStage.VIDEO_FADE_OUT):
                 self._draw_pinned_video(screen, zones)
             self._draw_ko_subtitle_if_any(screen, zones)
             situation = self._situation_subtitle_for_bottom()
