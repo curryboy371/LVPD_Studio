@@ -113,10 +113,15 @@ class ShortsStudio(IStudio):
             dt_sec=self._dt_sec(config),
         )
         self._drawer.draw_background(screen, ctx)
-        if not self._clips or self._scene is None:
-            self._draw_empty(screen, ctx)
-            return
-        self._scene.draw(screen, ctx)
+        try:
+            if not self._clips or self._scene is None:
+                self._draw_empty(screen, ctx)
+            else:
+                self._scene.draw(screen, ctx)
+        finally:
+            from studio.shorts.brand_icon import draw_brand_icon
+
+            draw_brand_icon(screen)
 
     def get_recording_prefix(self) -> Optional[str]:
         return "SHORTS_REC"

@@ -340,10 +340,40 @@ def run(
     pygame.quit()
 
 
+def _is_shorts_studio(studio: IStudio) -> bool:
+    """isinstance 대신 prefix로 판별 (debugpy 이중 로드 시에도 동작)."""
+    try:
+        return studio.get_recording_prefix() == "SHORTS_REC"
+    except Exception:
+        return False
+
+
+def _warm_shorts_brand_icon(studio: IStudio, pygame) -> None:
+    if not _is_shorts_studio(studio):
+        return
+    from studio.shorts.brand_icon import invalidate_brand_icon_cache, warm_brand_icon
+
+    invalidate_brand_icon_cache()
+    warm_brand_icon()
+    drawer = getattr(studio, "_drawer", None)
+    if drawer is not None and getattr(drawer, "_bg_surface", None) is not None:
+        drawer._bg_surface = None
+
+
+def _draw_shorts_brand_icon(studio: IStudio, screen) -> None:
+    """debug/record 공통: 매 프레임 맨 위에 브랜드 아이콘 보장."""
+    if not _is_shorts_studio(studio):
+        return
+    from studio.shorts.brand_icon import draw_brand_icon
+
+    draw_brand_icon(screen)
+
+
 def _run_debug(studio: IStudio, config: StudioConfig, clock, pygame) -> None:
     """디버그 모드: 창에만 출력, 녹화 없음. FPS 등 디버그 정보는 config에 설정됨."""
     screen = pygame.display.set_mode((config.width, config.height))
     pygame.display.set_caption(studio.get_title())
+    _warm_shorts_brand_icon(studio, pygame)
 
     running = True
     while running:
@@ -362,6 +392,7 @@ def _run_debug(studio: IStudio, config: StudioConfig, clock, pygame) -> None:
             break
         studio.update(config)
         studio.draw(screen, config)
+        _draw_shorts_brand_icon(studio, screen)
         pygame.display.flip()
         clock.tick(config.fps)
 
@@ -385,6 +416,7 @@ def _run_record(
     pygame.display.set_mode((1, 1))  # 최소 디스플레이 (폰트 등 동작용)
     pygame.display.set_caption(studio.get_title())
     buffer = pygame.Surface((config.width, config.height))
+    _warm_shorts_brand_icon(studio, pygame)
     recorder = SimpleRecordingManager()
     prefix = studio.get_recording_prefix() or "rec"
     recorder.start(prefix, float(config.fps), (config.width, config.height))
@@ -426,6 +458,7 @@ def _run_record(
             config.dt_sec = 1.0 / config.fps
             studio.update(config)
             studio.draw(buffer, config)
+            _draw_shorts_brand_icon(studio, buffer)
             if np is not None:
                 buf = pygame.surfarray.array3d(buffer)
                 frame = np.transpose(buf, (1, 0, 2))

@@ -12,6 +12,7 @@ from studio.conversation.tools.common_drawer import CommonDrawer
 from studio.conversation.tools.fade_controller import FadeController
 from studio.conversation.tools.fonts import WHITE
 from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
+from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import SHORTS_BG_DEFAULT
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
@@ -64,6 +65,7 @@ class ShortsDrawer:
             except Exception:
                 pass
         self._bg_surface = surf
+        brand_icon_module.draw_brand_icon(self._bg_surface)
 
     def draw_background(self, screen: pygame.Surface, ctx: FrameContext) -> None:
         screen.set_clip(None)
@@ -79,9 +81,16 @@ class ShortsDrawer:
         if not path or not Path(path).exists():
             return None
         try:
-            img = pygame.image.load(path).convert_alpha()
+            raw = pygame.image.load(path)
         except Exception:
             return None
+        try:
+            img = raw.convert_alpha()
+        except pygame.error:
+            try:
+                img = raw.convert()
+            except pygame.error:
+                img = raw
         sw, sh = img.get_width(), img.get_height()
         if sw <= 0 or sh <= 0:
             return None
@@ -111,6 +120,13 @@ class ShortsDrawer:
             if surf is not None and surf.get_width() > 0:
                 return surf
         return None
+
+    def draw_brand_icon(self, screen: pygame.Surface) -> bool:
+        """브랜드 아이콘 — brand_icon 모듈 단일 경로."""
+        return brand_icon_module.draw_brand_icon(screen)
+
+    def warm_brand_icon(self) -> None:
+        brand_icon_module.warm_brand_icon()
 
     def draw_hook_title(
         self,
