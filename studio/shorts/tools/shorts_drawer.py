@@ -18,6 +18,10 @@ from studio.shorts.constants import (
     HOOK_TITLE_LINE2_COLOR,
     KO_KARAOKE_ACTIVE,
     KO_KARAOKE_INACTIVE,
+    KO_SUBTITLE_BG_PAD_X,
+    KO_SUBTITLE_BG_PAD_Y,
+    KO_SUBTITLE_BG_RGBA,
+    shorts_ko_subtitle_video_bottom_margin,
     shorts_hook_title_line_gap,
     shorts_hook_title_y,
     shorts_middle_y_offset,
@@ -42,6 +46,7 @@ class ShortsDrawer:
         size = int(font_sizes.hook_title)
         self._hook_font = load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="bold")
         self._bottom_font = load_font_korean(int(font_sizes.bottom_kr), WHITE)
+        self._ko_subtitle_font = load_font_korean(int(font_sizes.ko_subtitle_kr), WHITE)
         self._cta_font = load_font_korean(int(font_sizes.cta), (200, 210, 255))
         self._bg_surface: Optional[pygame.Surface] = None
         self._hook_image_cache: dict[str, pygame.Surface] = {}
@@ -59,6 +64,29 @@ class ShortsDrawer:
 
     def fade_alpha(self, channel: str) -> int:
         return self._fade.alpha(channel)
+
+    def _draw_ko_subtitle_background(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        text_w: int,
+        text_h: int,
+        fade_alpha: int,
+    ) -> None:
+        """TTS 자막: 검정 배경 + 알파(채널 페이드와 곱)."""
+        if text_w <= 0 or text_h <= 0:
+            return
+        pad_x = KO_SUBTITLE_BG_PAD_X
+        pad_y = KO_SUBTITLE_BG_PAD_Y
+        bg_w = text_w + pad_x * 2
+        bg_h = text_h + pad_y * 2
+        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        _, _, _, base_a = KO_SUBTITLE_BG_RGBA
+        a = max(0, min(255, int(base_a * fade_alpha / 255)))
+        bg.fill((0, 0, 0, a))
+        screen.blit(bg, (center_x - bg_w // 2, y - pad_y))
 
     def _ensure_bg(self, width: int, height: int) -> None:
         if self._bg_surface is not None and self._bg_surface.get_size() == (width, height):
@@ -177,6 +205,31 @@ class ShortsDrawer:
     def warm_brand_icon(self) -> None:
         brand_icon_module.warm_brand_icon()
 
+    def compute_center_video_frame_rect(
+        self,
+        rect: pygame.Rect,
+        *,
+        pad: int = 16,
+        player: Any = None,
+        frozen_frame: Optional[pygame.Surface] = None,
+        frame_inner_size: Optional[tuple[int, int]] = None,
+    ) -> Optional[pygame.Rect]:
+        """contain 배치된 비디오 프레임의 화면 Rect (자막 앵커용)."""
+        inner = rect.inflate(-pad * 2, -pad * 2)
+        if inner.width <= 0 or inner.height <= 0:
+            return None
+        iw, ih = frame_inner_size or (inner.width, inner.height)
+        iw, ih = max(1, int(iw)), max(1, int(ih))
+        frame = frozen_frame
+        if frame is None and player is not None:
+            frame = player.get_frame(iw, ih, contain=True)
+        if frame is None:
+            return None
+        fw, fh = frame.get_width(), frame.get_height()
+        x = inner.centerx - fw // 2
+        y = inner.centery - fh // 2
+        return pygame.Rect(x, y, fw, fh)
+
     def draw_center_video(
         self,
         screen: pygame.Surface,
@@ -186,27 +239,79 @@ class ShortsDrawer:
         pad: int = 16,
         frozen_frame: Optional[pygame.Surface] = None,
         alpha: int = 255,
-    ) -> None:
-        """중앙 구역에 비율 유지(contain)로 비디오 프레임만 출력(오디오 없음)."""
-        inner = rect.inflate(-pad * 2, -pad * 2)
-        if inner.width <= 0 or inner.height <= 0:
-            return
+        frame_inner_size: Optional[tuple[int, int]] = None,
+    ) -> Optional[pygame.Rect]:
+        """중앙 구역에 비율 유지(contain)로 비디오 프레임만 출력. 반환: 프레임 Rect."""
+        frame_rect = self.compute_center_video_frame_rect(
+            rect,
+            pad=pad,
+            player=player,
+            frozen_frame=frozen_frame,
+            frame_inner_size=frame_inner_size,
+        )
+        if frame_rect is None:
+            return None
         frame = frozen_frame
         if frame is None and player is not None:
-            frame = player.get_frame(inner.width, inner.height, contain=True)
+            inner = rect.inflate(-pad * 2, -pad * 2)
+            iw, ih = frame_inner_size or (inner.width, inner.height)
+            frame = player.get_frame(max(1, int(iw)), max(1, int(ih)), contain=True)
         if frame is None:
-            return
-        x = inner.centerx - frame.get_width() // 2
-        y = inner.centery - frame.get_height() // 2
+            return None
         a = max(0, min(255, int(alpha)))
         if a <= 0:
-            return
+            return None
         if a < 255:
             frame = frame.copy()
             frame.set_alpha(a)
-            screen.blit(frame, (x, y))
-        else:
-            screen.blit(frame, (x, y))
+        screen.blit(frame, frame_rect.topleft)
+        return frame_rect
+
+    def draw_ko_subtitle_overlay(
+        self,
+        screen: pygame.Surface,
+        *,
+        anchor_rect: pygame.Rect,
+        text: str,
+        fade_alpha: int = 255,
+        subtitle_progress: Optional[float] = None,
+    ) -> None:
+        """TTS 자막을 비디오(또는 middle) 하단에 겹쳐 그린다."""
+        sub = (text or "").strip()
+        if not sub or fade_alpha <= 0:
+            return
+        alpha = max(0, min(255, int(fade_alpha)))
+        cx = anchor_rect.centerx
+        margin = shorts_ko_subtitle_video_bottom_margin(screen.get_height())
+
+        if subtitle_progress is not None:
+            surf_in = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_INACTIVE)
+            surf_ac = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
+            tw, th = surf_in.get_width(), surf_in.get_height()
+            y = anchor_rect.bottom - margin - th
+            self._draw_ko_subtitle_background(
+                screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
+            )
+            if alpha < 255:
+                surf_in = surf_in.copy()
+                surf_ac = surf_ac.copy()
+                surf_in.set_alpha(alpha)
+                surf_ac.set_alpha(alpha)
+            blit_horizontal_karaoke_wipe(
+                screen, surf_in, surf_ac, center_x=cx, y=y, progress=subtitle_progress
+            )
+            return
+
+        surf = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
+        tw, th = surf.get_width(), surf.get_height()
+        y = anchor_rect.bottom - margin - th
+        self._draw_ko_subtitle_background(
+            screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
+        )
+        if alpha < 255:
+            surf = surf.copy()
+            surf.set_alpha(alpha)
+        screen.blit(surf, (cx - tw // 2, y))
 
     def draw_hook_title(
         self,
@@ -377,31 +482,13 @@ class ShortsDrawer:
         pad = 20
         y = rect.top + pad
         sub = (situation_subtitle or "").strip()
-        if sub:
-            if highlight_subtitle and subtitle_progress is not None:
-                surf_in = self._bottom_font.render(sub, True, KO_KARAOKE_INACTIVE)
-                surf_ac = self._bottom_font.render(sub, True, KO_KARAOKE_ACTIVE)
-                if alpha < 255:
-                    surf_in = surf_in.copy()
-                    surf_ac = surf_ac.copy()
-                    surf_in.set_alpha(alpha)
-                    surf_ac.set_alpha(alpha)
-                blit_horizontal_karaoke_wipe(
-                    screen,
-                    surf_in,
-                    surf_ac,
-                    center_x=rect.centerx,
-                    y=y,
-                    progress=subtitle_progress,
-                )
-                y += surf_in.get_height() + 16
-            else:
-                sub_color = (255, 240, 180) if highlight_subtitle else (220, 225, 235)
-                surf = self._bottom_font.render(sub, True, sub_color)
-                if alpha < 255:
-                    surf.set_alpha(alpha)
-                screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
-                y += surf.get_height() + 16
+        if sub and not highlight_subtitle:
+            sub_color = (220, 225, 235)
+            surf = self._bottom_font.render(sub, True, sub_color)
+            if alpha < 255:
+                surf.set_alpha(alpha)
+            screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
+            y += surf.get_height() + 16
         if show_cta:
             cta = (cta_text or "").strip()
             if cta:

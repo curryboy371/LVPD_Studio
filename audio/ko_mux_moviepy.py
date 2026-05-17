@@ -57,7 +57,9 @@ def _make_text_clip_pil(
         line_heights.append(lh)
     img_h = sum(line_heights) + pad * 2 + max(0, len(lines) - 1) * 8
     img_w = min(width, max_w + pad * 2)
-    img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 160))
+    from studio.shorts.constants import KO_SUBTITLE_BG_RGBA
+
+    img = Image.new("RGBA", (img_w, img_h), KO_SUBTITLE_BG_RGBA)
     draw = ImageDraw.Draw(img)
     y = pad
     for line in lines:
@@ -70,7 +72,15 @@ def _make_text_clip_pil(
     arr = np.array(img)
     clip = ImageClip(arr).set_duration(max(0.05, float(duration)))
     clip = clip.set_start(max(0.0, float(start)))
-    clip = clip.set_position(("center", height - img_h - 80))
+    from studio.shorts.constants import (
+        ZONE_MIDDLE_RATIO,
+        ZONE_TOP_RATIO,
+        shorts_ko_subtitle_video_bottom_margin,
+    )
+
+    mid_bottom = int(height * (ZONE_TOP_RATIO + ZONE_MIDDLE_RATIO))
+    y_pos = mid_bottom - img_h - shorts_ko_subtitle_video_bottom_margin(height)
+    clip = clip.set_position(("center", max(0, y_pos)))
     return clip
 
 
@@ -101,7 +111,15 @@ def _make_subtitle_clip(
         clip = TextClip(**kwargs)
         clip = clip.set_duration(max(0.05, float(duration)))
         clip = clip.set_start(max(0.0, float(start)))
-        clip = clip.set_position(("center", video_h - 220))
+        from studio.shorts.constants import (
+            ZONE_MIDDLE_RATIO,
+            ZONE_TOP_RATIO,
+            shorts_ko_subtitle_video_bottom_margin,
+        )
+
+        mid_bottom = int(video_h * (ZONE_TOP_RATIO + ZONE_MIDDLE_RATIO))
+        y_pos = mid_bottom - shorts_ko_subtitle_video_bottom_margin(video_h) - 48
+        clip = clip.set_position(("center", max(0, y_pos)))
         return clip
     except Exception as ex:
         logger.debug("TextClip 실패, PIL 폴백: %s", ex)
@@ -122,7 +140,7 @@ def mux_ko_narration_on_video(
     output_path: str | Path,
     *,
     keep_base_audio: bool = True,
-    fontsize: int = 42,
+    fontsize: int = 0,
 ) -> str:
     """베이스 영상에 TTS·자막을 합성해 저장."""
     from moviepy.editor import AudioFileClip, CompositeAudioClip, CompositeVideoClip, VideoFileClip
@@ -138,8 +156,11 @@ def mux_ko_narration_on_video(
     if not ko_audio_path or not os.path.isfile(ko_audio_path):
         raise FileNotFoundError(f"합성 TTS 오디오 없음: {ko_audio_path}")
 
+    from studio.shorts.constants import shorts_ko_subtitle_font_size
+
     font_path = _repo_font_path()
     video = VideoFileClip(str(video_path))
+    fs = int(fontsize) if int(fontsize) > 0 else shorts_ko_subtitle_font_size(int(video.h))
     overlays = []
     try:
         for cue in plan.cues:
@@ -150,7 +171,7 @@ def mux_ko_narration_on_video(
                     video_w=int(video.w),
                     video_h=int(video.h),
                     font_path=font_path,
-                    fontsize=fontsize,
+                    fontsize=fs,
                     duration=dur,
                     start=cue.start_sec,
                 )

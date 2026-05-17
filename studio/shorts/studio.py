@@ -16,6 +16,8 @@ from studio.shorts.tools.fonts import (
     DEFAULT_SHORTS_RENDER_SETTINGS,
     resolve_shorts_render_settings,
 )
+from studio.shorts.bg_audio import ShortsBackgroundPlayer
+from studio.shorts.follow_along_tts import ensure_follow_along_mp3
 from studio.shorts.tools.shorts_drawer import ShortsDrawer
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class ShortsStudio(IStudio):
         self._scene: Optional[ClipScene] = None
         self._last_config: Any = None
         self._recording_done = False
+        self._bg_player: Optional[ShortsBackgroundPlayer] = None
         csv_name = (
             "shorts_vocabulary_clips.csv"
             if self._shorts_mode == CLIP_TYPE_VOCABULARY
@@ -69,6 +72,10 @@ class ShortsStudio(IStudio):
             config.shorts_render = settings
 
         self._drawer = ShortsDrawer(font_sizes=settings.font_sizes)
+        self._bg_player = ShortsBackgroundPlayer(
+            on_bg_started=self._on_learn_bg_started,
+            is_recording=self._is_recording_mode,
+        )
         style = SentenceStyleConfig(
             colors=ColorStyle(
                 hanzi_color=(255, 255, 255),
@@ -82,6 +89,9 @@ class ShortsStudio(IStudio):
             drawer=self._drawer,
             style=style,
             play_voice=self._make_play_voice(),
+            start_learn_background=self._start_learn_background,
+            stop_learn_background=self._stop_learn_background,
+            follow_along_mp3=self._follow_along_mp3_path,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
         if self._clips:
@@ -138,6 +148,24 @@ class ShortsStudio(IStudio):
             dt = 1.0 / max(1.0, fps)
         return dt
 
+    def _is_recording_mode(self) -> bool:
+        cfg = self._last_config
+        return getattr(cfg, "recording_log_event", None) is not None
+
+    def _on_learn_bg_started(self, path: str, duration_sec: float) -> None:
+        self._record_insert_sound(path, duration_sec=max(1.0, float(duration_sec)))
+
+    def _start_learn_background(self, duration_hint_sec: float) -> None:
+        if self._bg_player is not None:
+            self._bg_player.start_loop(duration_hint_sec=float(duration_hint_sec))
+
+    def _stop_learn_background(self) -> None:
+        if self._bg_player is not None:
+            self._bg_player.stop()
+
+    def _follow_along_mp3_path(self) -> str:
+        return str(ensure_follow_along_mp3())
+
     def _make_play_voice(self) -> Callable[[str], float]:
         def _play(path: str) -> float:
             if not path:
@@ -170,7 +198,13 @@ class ShortsStudio(IStudio):
 
         return _play
 
-    def _record_insert_sound(self, path: str, *, snd: Any, duration_sec: float) -> None:
+    def _record_insert_sound(
+        self,
+        path: str,
+        *,
+        snd: Any = None,
+        duration_sec: float = 0.0,
+    ) -> None:
         cfg = self._last_config
         log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
         if log is None:

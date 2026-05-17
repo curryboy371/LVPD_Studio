@@ -17,6 +17,7 @@ class ShortsFontSizes:
     kr: int = 36
     hook_title: int = 72
     bottom_kr: int = 32
+    ko_subtitle_kr: int = 46
     cta: int = 28
 
 

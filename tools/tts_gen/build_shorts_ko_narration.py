@@ -66,6 +66,14 @@ def main() -> int:
                 sid, tts_cli=args.tts, tts_voice_cli=args.tts_voice
             )
             logger.info("  set_id=%s 음성=%s", sid, format_tts_log_label(engine, voice))
+    try:
+        from studio.shorts.follow_along_tts import ensure_follow_along_mp3
+
+        ensure_follow_along_mp3()
+        logger.info("따라해보세요 mp3 준비: resource/sound/shorts/follow_along.mp3")
+    except Exception as ex:
+        logger.warning("따라해보세요 TTS 생성 실패: %s", ex)
+
     ok, skip, fail = batch_build_shorts_ko_narration(
         shorts_mode=args.shorts_type,
         csv_path=args.csv or None,

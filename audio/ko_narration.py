@@ -236,6 +236,11 @@ def _cue_audio_path_for_set(set_id: int, index: int) -> Path:
     return KO_SOUND_DIR / f"{_ko_sound_basename(set_id, index)}.mp3"
 
 
+def cached_cue_audio_usable(path: Path | str) -> bool:
+    """TTS mp3 캐시가 재생 가능한지."""
+    return _cached_cue_audio_usable(Path(path))
+
+
 def _cached_cue_audio_usable(path: Path) -> bool:
     """0바이트·길이 0 mp3는 실패 캐시로 보고 재생성."""
     if not path.is_file():

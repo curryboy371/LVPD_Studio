@@ -129,6 +129,10 @@ HOOK_FADE_IN_SEC = 1.0
 CTA_HOLD_SEC = 2.5
 CLIP_TRANSITION_FADE_SEC = 0.3
 SHORTS_SOUND_PLAY_COUNT = 2
+SHORTS_FOLLOW_ALONG_LABEL = "따라해보세요"
+# 3단계: 따라해보세요 이후 bg 연습 구간(초). 문장 길이에 비례해 최소값 적용
+SHORTS_BG_PRACTICE_MIN_SEC = 4.0
+SHORTS_BG_PRACTICE_SCALE = 1.35
 SHORTS_VIDEO_END_HOLD_SEC = 0.6
 SHORTS_VIDEO_FADE_OUT_SEC = 0.8
 # 페이드 후에도 비디오가 남도록 최소 알파(0=완전 숨김, 255=그대로)
@@ -139,6 +143,24 @@ KARAOKE_ACTIVE_HANZI = (255, 230, 120)
 KARAOKE_INACTIVE_HANZI = (120, 125, 140)
 KARAOKE_ACTIVE_PINYIN = (255, 60, 60)
 KARAOKE_INACTIVE_PINYIN = (120, 125, 140)
-# 한국어 내레이션 하단 자막
+# 한국어 내레이션(TTS) 하단 자막
 KO_KARAOKE_ACTIVE = (255, 240, 180)
 KO_KARAOKE_INACTIVE = (120, 125, 140)
+KO_SUBTITLE_BG_RGBA = (0, 0, 0, 160)
+KO_SUBTITLE_BG_PAD_X = 20
+KO_SUBTITLE_BG_PAD_Y = 10
+# TTS 자막: 실제 비디오 프레임 하단에서 위로 올리는 여백 (1080×1920 기준 px)
+SHORTS_KO_SUBTITLE_VIDEO_BOTTOM_MARGIN = 28
+SHORTS_KO_SUBTITLE_FONT_SIZE = 46
+
+
+def shorts_ko_subtitle_video_bottom_margin(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(8, int(SHORTS_KO_SUBTITLE_VIDEO_BOTTOM_MARGIN * sy))
+
+
+def shorts_ko_subtitle_font_size(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(28, int(SHORTS_KO_SUBTITLE_FONT_SIZE * sy))
