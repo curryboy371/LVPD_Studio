@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import queue
 import sys
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Any, Literal, Optional
 
 try:
@@ -426,6 +429,13 @@ def _run_record(
     config.recording_time_sec = 0.0
     config.recording_log_event = lambda ev: recording_events.append(ev)
     config.show_debug_overlay = False
+
+    _begin_rec = getattr(studio, "begin_recording_session", None)
+    if callable(_begin_rec):
+        try:
+            _begin_rec(config)
+        except Exception as ex:
+            logger.warning("begin_recording_session 실패: %s", ex)
 
     target_frames = (
         record_frames

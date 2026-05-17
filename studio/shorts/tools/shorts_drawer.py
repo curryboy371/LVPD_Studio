@@ -47,7 +47,6 @@ class ShortsDrawer:
         self._hook_font = load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="bold")
         self._bottom_font = load_font_korean(int(font_sizes.bottom_kr), WHITE)
         self._ko_subtitle_font = load_font_korean(int(font_sizes.ko_subtitle_kr), WHITE)
-        self._cta_font = load_font_korean(int(font_sizes.cta), (200, 210, 255))
         self._bg_surface: Optional[pygame.Surface] = None
         self._hook_image_cache: dict[str, pygame.Surface] = {}
 
@@ -469,10 +468,7 @@ class ShortsDrawer:
         *,
         zones: ShortsLayoutZones,
         situation_subtitle: str,
-        cta_text: str,
         channel: str,
-        show_cta: bool,
-        highlight_subtitle: bool = False,
         subtitle_progress: Optional[float] = None,
     ) -> None:
         alpha = self.fade_alpha(channel)
@@ -482,22 +478,9 @@ class ShortsDrawer:
         pad = 20
         y = rect.top + pad
         sub = (situation_subtitle or "").strip()
-        if sub and not highlight_subtitle:
+        if sub:
             sub_color = (220, 225, 235)
             surf = self._bottom_font.render(sub, True, sub_color)
             if alpha < 255:
                 surf.set_alpha(alpha)
             screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
-            y += surf.get_height() + 16
-        if show_cta:
-            cta = (cta_text or "").strip()
-            if cta:
-                surf = self._cta_font.render(cta, True, (180, 200, 255))
-                if alpha < 255:
-                    surf.set_alpha(alpha)
-                screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
-                y += surf.get_height() + 12
-            arrow = self._cta_font.render("⬇", True, (255, 220, 100))
-            if alpha < 255:
-                arrow.set_alpha(alpha)
-            screen.blit(arrow, (rect.centerx - arrow.get_width() // 2, y))

@@ -19,6 +19,7 @@ from studio.shorts.constants import (
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
+    SHORTS_RECORD_END_HOLD_SEC,
     SHORTS_VIDEO_FADE_OUT_SEC,
 )
 from studio.conversation.video_players import SimpleVideoPlayer
@@ -53,6 +54,7 @@ class ClipStage(Enum):
     LEARN_PLAY = auto()
     KO_NARRATION = auto()
     CTA_HOLD = auto()
+    END_HOLD = auto()
     DONE = auto()
     TRANSITION_OUT = auto()
 
@@ -107,6 +109,12 @@ class ClipScene:
         self._ko_cue_duration = 0.0
         self._ko_finished = False
         self._ko_started = False
+        self._record_end_hold_sec = 0.0
+        self._end_hold_after_learn = False
+
+    def set_record_end_hold(self, seconds: float) -> None:
+        """녹화 모드 tail hold(초). 0이면 비활성(debug)."""
+        self._record_end_hold_sec = max(0.0, float(seconds))
 
     @property
     def stage(self) -> ClipStage:
@@ -122,6 +130,18 @@ class ClipScene:
 
     def set_on_clip_done(self, callback: Optional[Callable[[], None]]) -> None:
         self._on_clip_done = callback
+
+    def _try_start_deferred_ko_narration(self) -> None:
+        """비디오 구간 KO TTS는 첫 update에서 시작(녹화 로거 준비 후 InsertSound 기록)."""
+        if self._ko_started or self._ko_plan is None or not self._had_video_intro:
+            return
+        if self._stage not in (
+            ClipStage.VIDEO_PLAY,
+            ClipStage.VIDEO_HOLD,
+            ClipStage.VIDEO_FADE_OUT,
+        ):
+            return
+        self._start_ko_narration_sequence(during_video=True)
 
     def _enter_hook_in(self) -> None:
         self._stage = ClipStage.HOOK_IN
@@ -173,8 +193,6 @@ class ClipScene:
                 fade = self._drawer.fade
                 fade.fade_on(_CHANNEL_HOOK, 0.0)
                 fade.fade_on(_CHANNEL_BOTTOM, 0.0)
-                if self._ko_plan is not None:
-                    self._start_ko_narration_sequence(during_video=True)
                 return
             self._video_player.close()
 
@@ -237,6 +255,7 @@ class ClipScene:
         self._timer += max(0.0, float(dt_sec))
 
         if self._stage == ClipStage.VIDEO_PLAY:
+            self._try_start_deferred_ko_narration()
             self._tick_ko_narration(dt_sec)
             self._video_player.tick(max(0.0, float(dt_sec)))
             end_sec = float(self._video_player.get_effective_end_sec())
@@ -275,7 +294,10 @@ class ClipScene:
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
                     self._stop_learn_background_only()
-                    self._finish_learn_sequence()
+                    if self._should_post_follow_along_hold():
+                        self._enter_post_follow_along_hold()
+                    else:
+                        self._finish_learn_sequence()
                 return
             if self._is_voice_finished():
                 self._advance_learn_voice_step()
@@ -291,6 +313,15 @@ class ClipScene:
                     self._finish_clip()
                 else:
                     self.begin_transition_out()
+            return
+
+        if self._stage == ClipStage.END_HOLD:
+            if self._timer >= self._record_end_hold_sec:
+                if self._end_hold_after_learn:
+                    self._end_hold_after_learn = False
+                    self._finish_learn_sequence()
+                else:
+                    self._finish_clip()
             return
 
         if self._stage == ClipStage.TRANSITION_OUT:
@@ -531,6 +562,18 @@ class ClipScene:
         self._timer = 0.0
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
 
+    def _should_post_follow_along_hold(self) -> bool:
+        if self._record_end_hold_sec <= 1e-6:
+            return False
+        return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_CONVERSATION
+
+    def _enter_post_follow_along_hold(self) -> None:
+        """녹화·회화: 따라해보세요(BG) 직후 tail hold."""
+        self._end_hold_after_learn = True
+        self._stage = ClipStage.END_HOLD
+        self._timer = 0.0
+        self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
+
     def _is_voice_finished(self) -> bool:
         ch = self._voice_channel
         if ch is not None and ch.get_busy():
@@ -574,8 +617,16 @@ class ClipScene:
     def _karaoke_elapsed_sec(self) -> float:
         return self._learn_karaoke_timing()[0]
 
-    def _learn_bottom_subtitle(self) -> str:
-        if self._stage == ClipStage.LEARN_PLAY and self._learn_round >= 3:
+    def _situation_subtitle_for_bottom(self) -> str:
+        """하단 situation 문구 — 따라해보세요(3·4단계) 포함 학습이 끝난 뒤에만."""
+        if self._stage == ClipStage.LEARN_PLAY:
+            return ""
+        if self._stage in (
+            ClipStage.VIDEO_PLAY,
+            ClipStage.VIDEO_HOLD,
+            ClipStage.VIDEO_FADE_OUT,
+            ClipStage.HOOK_IN,
+        ):
             return ""
         return str(self._clip.get("situation_subtitle") or "").strip()
 
@@ -584,6 +635,7 @@ class ClipScene:
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
             ClipStage.CTA_HOLD,
+            ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
         )
 
@@ -671,23 +723,21 @@ class ClipScene:
             else:
                 self._draw_pinned_video(screen, zones)
             self._draw_ko_subtitle_if_any(screen, zones)
-            situation = str(self._clip.get("situation_subtitle") or "")
+            situation = self._situation_subtitle_for_bottom()
             if not self._overlay_subtitle_text():
                 self._drawer.draw_bottom_zone(
                     screen,
                     zones=zones,
                     situation_subtitle=situation,
-                    cta_text="",
                     channel=_CHANNEL_BOTTOM,
-                    show_cta=False,
                 )
             return
-        show_cta = self._stage in (ClipStage.CTA_HOLD, ClipStage.TRANSITION_OUT)
         show_karaoke = self._should_show_learn_karaoke()
         show_bottom = self._stage in (
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
             ClipStage.CTA_HOLD,
+            ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
         )
         overlay_sub = self._overlay_subtitle_text()
@@ -714,18 +764,12 @@ class ClipScene:
         if overlay_sub:
             self._draw_ko_subtitle_if_any(screen, zones)
         if show_bottom:
-            situation = self._learn_bottom_subtitle() if self._stage == ClipStage.LEARN_PLAY else (
-                str(self._clip.get("situation_subtitle") or "")
-            )
-            if overlay_sub:
-                situation = ""
+            situation = self._situation_subtitle_for_bottom()
             self._drawer.draw_bottom_zone(
                 screen,
                 zones=zones,
                 situation_subtitle=situation,
-                cta_text=str(self._clip.get("cta_text") or ""),
                 channel=_CHANNEL_BOTTOM,
-                show_cta=show_cta,
             )
 
         screen.set_clip(None)

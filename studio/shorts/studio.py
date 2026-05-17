@@ -17,6 +17,7 @@ from studio.shorts.tools.fonts import (
     resolve_shorts_render_settings,
 )
 from studio.shorts.bg_audio import ShortsBackgroundPlayer
+from studio.shorts.constants import SHORTS_RECORD_END_HOLD_SEC
 from studio.shorts.follow_along_tts import ensure_follow_along_mp3
 from studio.shorts.tools.shorts_drawer import ShortsDrawer
 
@@ -94,6 +95,7 @@ class ShortsStudio(IStudio):
             follow_along_mp3=self._follow_along_mp3_path,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
+        self._scene.set_record_end_hold(0.0)
         if self._clips:
             self._start_current_clip()
 
@@ -138,6 +140,17 @@ class ShortsStudio(IStudio):
 
     def should_stop_recording(self) -> bool:
         return bool(self._recording_done)
+
+    def begin_recording_session(self, config: Any) -> None:
+        """녹화 루프 직전: init 시점에 쌓인 재생 상태를 버리고 클립 0부터 다시 시작."""
+        self._last_config = config
+        self._recording_done = False
+        self._stop_learn_audio()
+        if self._scene is not None:
+            self._scene.set_record_end_hold(SHORTS_RECORD_END_HOLD_SEC)
+        if self._scene is not None and self._clips:
+            self._clip_index = 0
+            self._start_current_clip()
 
     def _dt_sec(self, config: Any) -> float:
         dt = 1.0 / 30.0

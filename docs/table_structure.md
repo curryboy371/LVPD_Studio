@@ -74,7 +74,6 @@
 | hook_title | str | O | 상단 후킹 타이틀 |
 | hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/conversation/{id}.png` 등 |
 | situation_subtitle | str | - | 하단 상황 설명(비우면 base 번역) |
-| cta_text | str | - | 롱폼 유도 문구 |
 | ko_narration_id | int | - | `ko_narration_sets.id` 참조. 비우면 한국어 내레이션 없음 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표). 비우면 균등 분할 |
 | sound_path | str | - | 비우면 base `sound_lv_path` |
@@ -91,7 +90,6 @@
 | hook_title | str | O | 상단 후킹 타이틀 |
 | hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/vocabulary/{id}.png` 등 |
 | situation_subtitle | str | - | 하단 설명(비우면 단어 뜻) |
-| cta_text | str | - | 롱폼 유도 문구 |
 | ko_narration_id | int | - | `ko_narration_sets.id` 참조 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표) |
 | sound_path | str | - | 비우면 `words.sound_path` |

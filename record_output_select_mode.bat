@@ -11,20 +11,28 @@ if /I "%STUDIO%"=="conversation" goto :run
 if /I "%STUDIO%"=="vocabulary" goto :run
 if /I "%STUDIO%"=="combo" goto :run_combo
 if /I "%STUDIO%"=="text" goto :run_export_text
+if /I "%STUDIO%"=="shorts_conversation" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_vocabulary" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_conv" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_vocab" goto :run_shorts_record
 
-echo [화면 출력 전용] 회화/단어 모드 선택 실행 (F5 디버그와 유사)
+echo [실행 모드 선택] 회화/단어/숏츠
 echo  0^) 리소스 체크 모드 (topic 기반 누락 파일 점검)
-echo  1^) 회화 모드 (conversation)
-echo  2^) 단어 모드 (vocabulary)
+echo  1^) 회화 모드 (conversation, 화면 debug)
+echo  2^) 단어 모드 (vocabulary, 화면 debug)
 echo  3^) 녹화 결합: 지정 topic만 ^(1^) 회화 전부 1파일 ^(2^) 단어 전부 1파일 ^(3^) ffmpeg 병합
 echo  4^) 텍스트 추출: 지정 topic의 sub 문장 + 단어 리스트를 `한자 : 병음` TXT 로 저장
-set /p MODE_CHOICE=선택하세요 [0/1/2/3/4]:
+echo  5^) 숏츠 회화 (shorts conversation, 9:16 녹화)
+echo  6^) 숏츠 단어 (shorts vocabulary, 9:16 녹화)
+set /p MODE_CHOICE=선택하세요 [0/1/2/3/4/5/6]:
 
 if "%MODE_CHOICE%"=="0" set STUDIO=check
 if "%MODE_CHOICE%"=="1" set STUDIO=conversation
 if "%MODE_CHOICE%"=="2" set STUDIO=vocabulary
 if "%MODE_CHOICE%"=="3" set STUDIO=combo
 if "%MODE_CHOICE%"=="4" set STUDIO=text
+if "%MODE_CHOICE%"=="5" set STUDIO=shorts_conversation
+if "%MODE_CHOICE%"=="6" set STUDIO=shorts_vocabulary
 
 if not defined STUDIO (
   echo.
@@ -34,12 +42,18 @@ if not defined STUDIO (
   echo   record_output_select_mode.bat combo
   echo   record_output_select_mode.bat check
   echo   record_output_select_mode.bat text
+  echo   record_output_select_mode.bat shorts_conversation [topic]
+  echo   record_output_select_mode.bat shorts_vocabulary [topic]
   exit /b 1
 )
 
 if /I "%STUDIO%"=="combo" goto :run_combo
 if /I "%STUDIO%"=="check" goto :run_check
 if /I "%STUDIO%"=="text" goto :run_export_text
+if /I "%STUDIO%"=="shorts_conversation" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_vocabulary" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_conv" goto :run_shorts_record
+if /I "%STUDIO%"=="shorts_vocab" goto :run_shorts_record
 
 :run
 echo.
@@ -59,6 +73,42 @@ if errorlevel 1 (
 )
 
 echo.
+pause
+exit /b 0
+
+:run_shorts_record
+echo.
+if /I "%STUDIO%"=="shorts_vocabulary" (
+  set "SHORTS_TYPE=vocabulary"
+) else if /I "%STUDIO%"=="shorts_vocab" (
+  set "SHORTS_TYPE=vocabulary"
+) else (
+  set "SHORTS_TYPE=conversation"
+)
+set "SHORTS_MAX_SEC=900"
+set "RECORD_TOPIC=%~2"
+if not defined RECORD_TOPIC (
+  set /p RECORD_TOPIC=숏츠 녹화 topic [엔터=where]: 
+)
+if "%RECORD_TOPIC%"=="" set "RECORD_TOPIC=where"
+echo.
+echo [shorts/%SHORTS_TYPE%] topic=%RECORD_TOPIC% 1080x1920 녹화 (클립 끝까지)
+echo   CSV: shorts_%SHORTS_TYPE%_clips.csv  /  KO TTS: batch_ko_tts.bat
+echo.
+if not exist "release" mkdir "release"
+where py >nul 2>nul && (
+  py -3 -u -m studio.runner --studio shorts --shorts-type %SHORTS_TYPE% --mode record --record-until-content-done --record-max-sec %SHORTS_MAX_SEC% --topic "%RECORD_TOPIC%"
+) || (
+  python -u -m studio.runner --studio shorts --shorts-type %SHORTS_TYPE% --mode record --record-until-content-done --record-max-sec %SHORTS_MAX_SEC% --topic "%RECORD_TOPIC%"
+)
+if errorlevel 1 (
+  echo.
+  echo [오류] 숏츠 녹화 실패. CSV/에셋/TTS/edge-tts 등을 확인하세요.
+  pause
+  exit /b 1
+)
+echo.
+echo [완료] release\ 폴더의 SHORTS_REC*.mp4 를 확인하세요.
 pause
 exit /b 0
 

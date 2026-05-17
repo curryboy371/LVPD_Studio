@@ -220,7 +220,6 @@ def _common_clip_fields(
         "hook_title": resolve_hook_title(row),
         "hook_image_path": hook_image,
         "situation_subtitle": (row.get("situation_subtitle") or "").strip(),
-        "cta_text": (row.get("cta_text") or "더 많은 내용은 본편에서!").strip(),
         "ko_narration_id": _parse_ko_narration_id(row),
         "sound_path": sound_path,
         "syllable_times": parse_syllable_times_ms(times_raw),
