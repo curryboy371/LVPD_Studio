@@ -1,7 +1,13 @@
 """
-csv_gen: 엑셀 → 테이블 CSV 생성 (base_sentences, words, sub_sentences, vocabulary_word_rows, shorts_*).
-실행: python -m tools.csv_gen (또는 create_all_csv.bat)
+csv_gen: 엑셀 → 테이블 CSV 생성.
+
+base_sentences, words, sub_sentences, vocabulary_word_rows,
+ko_narration_sets, ko_narration_lines, shorts_conversation_clips, shorts_vocabulary_clips
+
+실행: python -m tools.csv_gen (또는 create_all_csv.bat / create_csv.bat)
 """
+from tools.csv_gen.ko_narration_lines_excel_to_csv import ko_narration_lines_excel_to_csv
+from tools.csv_gen.ko_narration_sets_excel_to_csv import ko_narration_sets_excel_to_csv
 from tools.csv_gen.base_sentences_excel_to_csv import base_sentences_excel_to_csv
 from tools.csv_gen.shorts_conversation_clips_excel_to_csv import shorts_conversation_clips_excel_to_csv
 from tools.csv_gen.shorts_vocabulary_clips_excel_to_csv import shorts_vocabulary_clips_excel_to_csv
@@ -10,6 +16,8 @@ from tools.csv_gen.vocabulary_word_rows_excel_to_csv import vocabulary_word_rows
 from tools.csv_gen.words_table_excel_to_csv import words_table_excel_to_csv
 
 __all__ = [
+    "ko_narration_sets_excel_to_csv",
+    "ko_narration_lines_excel_to_csv",
     "base_sentences_excel_to_csv",
     "words_table_excel_to_csv",
     "sub_sentences_excel_to_csv",

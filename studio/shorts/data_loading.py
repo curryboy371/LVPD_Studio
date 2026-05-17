@@ -186,6 +186,13 @@ def resolve_hook_title(data: dict[str, Any] | Any) -> str:
     return ""
 
 
+def _parse_ko_narration_id(row: dict[str, str]) -> int:
+    try:
+        return int(float(row.get("ko_narration_id") or "0"))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _topic_matches(topic: str, topic_set: Optional[set[str]]) -> bool:
     if topic_set is None:
         return True
@@ -214,6 +221,7 @@ def _common_clip_fields(
         "hook_image_path": hook_image,
         "situation_subtitle": (row.get("situation_subtitle") or "").strip(),
         "cta_text": (row.get("cta_text") or "더 많은 내용은 본편에서!").strip(),
+        "ko_narration_id": _parse_ko_narration_id(row),
         "sound_path": sound_path,
         "syllable_times": parse_syllable_times_ms(times_raw),
         "sentence": [],
@@ -363,6 +371,13 @@ def build_shorts_clip_list(
     session_topics: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     """shorts_mode에 맞는 전용 CSV에서 클립 목록을 만든다."""
+    try:
+        from data.ko_narration_loader import load_ko_narration_tables
+
+        load_ko_narration_tables()
+    except Exception as ex:
+        logger.debug("ko_narration 테이블 로드 생략: %s", ex)
+
     mode = normalize_clip_type(shorts_mode)
     if mode == CLIP_TYPE_VOCABULARY:
         return build_shorts_vocabulary_clip_list(csv_path, session_topics=session_topics)

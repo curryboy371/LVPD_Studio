@@ -8,7 +8,11 @@
 
 숏츠 스튜디오는 회화·단어용 CSV를 **각각** 사용합니다(`shorts_conversation_clips.csv`, `shorts_vocabulary_clips.csv`).
 
+한국어 TTS·자막은 전용 테이블 `ko_narration_sets.csv`, `ko_narration_lines.csv`에 문장을 넣고, 숏츠 CSV의 `ko_narration_id`로 세트를 참조합니다.
+
 `sentence_word_map.csv`는 신규 기본 경로에서 사용하지 않습니다(레거시 폴백 전용).
+
+**CSV 일괄 생성**: 프로젝트 루트에서 `create_all_csv.bat` 또는 `create_csv.bat` → `python -m tools.csv_gen` (위 테이블 엑셀→CSV 포함).
 
 ---
 
@@ -71,6 +75,7 @@
 | hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/conversation/{id}.png` 등 |
 | situation_subtitle | str | - | 하단 상황 설명(비우면 base 번역) |
 | cta_text | str | - | 롱폼 유도 문구 |
+| ko_narration_id | int | - | `ko_narration_sets.id` 참조. 비우면 한국어 내레이션 없음 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표). 비우면 균등 분할 |
 | sound_path | str | - | 비우면 base `sound_lv_path` |
 
@@ -87,8 +92,33 @@
 | hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/vocabulary/{id}.png` 등 |
 | situation_subtitle | str | - | 하단 설명(비우면 단어 뜻) |
 | cta_text | str | - | 롱폼 유도 문구 |
+| ko_narration_id | int | - | `ko_narration_sets.id` 참조 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표) |
 | sound_path | str | - | 비우면 `words.sound_path` |
+
+## 6) ko_narration_sets (한국어 TTS·세트)
+
+**경로**: `resource/table/ko_narration_sets.xlsx` → `resource/csv/ko_narration_sets.csv`
+
+| 컬럼 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| id | int | O | 내레이션 세트 ID (`shorts_*_clips.ko_narration_id`가 참조) |
+| title | str | - | 메모·제목 |
+| srt_path | str | - | (선택) 세트 전체 SRT. 있으면 `ko_narration_lines` 대신 사용 |
+
+## 7) ko_narration_lines (한국어 TTS·문장)
+
+**경로**: `resource/table/ko_narration_lines.xlsx` → `resource/csv/ko_narration_lines.csv`
+
+| 컬럼 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| id | int | O | 문장 행 ID |
+| set_id | int | O | `ko_narration_sets.id` |
+| seq | int | O | 재생 순서(오름차순) |
+| text | str | O | 한국어 문장 1줄 (TTS·자막 1큐) |
+
+**배치 TTS**: `python main.py batch-shorts-ko --topic where`  
+→ `resource/sound/ko_set_{set_id}_{n}.mp3`, `resource/sound/ko_set_{set_id}_timeline.json`
 
 ---
 
@@ -100,6 +130,9 @@ erDiagram
     base_sentences ||--o{ shorts_conversation_clips : "base_id"
     words ||--o{ shorts_vocabulary_clips : "word_id"
     words ||--o{ sub_sentences : "alt_word_id"
+    ko_narration_sets ||--o{ ko_narration_lines : "set_id"
+    ko_narration_sets ||--o{ shorts_conversation_clips : "ko_narration_id"
+    ko_narration_sets ||--o{ shorts_vocabulary_clips : "ko_narration_id"
 ```
 
 - 기본 문장 단어 순서는 `raw_sentence`의 슬롯(`{}`)에서 추출합니다.

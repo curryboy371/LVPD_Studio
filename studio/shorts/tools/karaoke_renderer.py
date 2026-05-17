@@ -1,8 +1,8 @@
-"""음성 동기 노래방 스타일 한자·병음 하이라이트."""
+"""음성 동기 노래방 스타일 한자·병음 하이라이트 (좌→우 진행 채움)."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import pygame
 
@@ -13,53 +13,38 @@ from studio.shorts.constants import (
     KARAOKE_ACTIVE_PINYIN,
     KARAOKE_INACTIVE_HANZI,
     KARAOKE_INACTIVE_PINYIN,
-    KARAOKE_PAST_HANZI,
-    KARAOKE_PAST_PINYIN,
 )
 
 
-def _split_pinyin_syllables(pinyin: str) -> list[str]:
-    return [s for s in (pinyin or "").split() if s]
+def compute_karaoke_progress(elapsed_sec: float, duration_sec: float) -> float:
+    """0..1 재생 진행률. duration 없으면 재생 시작 전 0, 경과 후 1."""
+    dur = max(0.0, float(duration_sec))
+    if dur <= 1e-6:
+        return 1.0 if float(elapsed_sec) > 1e-6 else 0.0
+    return max(0.0, min(1.0, float(elapsed_sec) / dur))
 
 
-def _hanzi_char_indices(sentence: str) -> list[int]:
-    """한자·문자 단위 인덱스(구두점은 음절 카운트에서 제외할 수 있음)."""
-    return list(range(len(sentence or "")))
-
-
-def compute_active_syllable_index(times: list[float], elapsed_sec: float) -> int:
-    """마지막 t <= elapsed 인 음절 인덱스. times 비면 -1."""
-    if not times:
-        return -1
-    active = -1
-    for i, t in enumerate(times):
-        if float(t) <= float(elapsed_sec) + 1e-6:
-            active = i
-        else:
-            break
-    return active
-
-
-def build_even_syllable_times(count: int, duration_sec: float) -> list[float]:
-    """음절 수 count에 대해 0..duration 균등 분할."""
-    n = max(0, int(count))
-    dur = max(0.01, float(duration_sec))
-    if n <= 0:
-        return []
-    if n == 1:
-        return [0.0]
-    step = dur / float(n)
-    return [i * step for i in range(n)]
-
-
-def map_syllable_to_hanzi_index(sentence: str, syllable_index: int) -> int:
-    """음절 인덱스를 한자 문자열 인덱스에 매핑(단순: 비한자 제외 후 순서)."""
-    hanzi_positions = [i for i, ch in enumerate(sentence) if not ch.isspace()]
-    if syllable_index < 0 or not hanzi_positions:
-        return -1
-    if syllable_index >= len(hanzi_positions):
-        return hanzi_positions[-1]
-    return hanzi_positions[syllable_index]
+def blit_horizontal_karaoke_wipe(
+    screen: pygame.Surface,
+    surf_inactive: pygame.Surface,
+    surf_active: pygame.Surface,
+    *,
+    center_x: int,
+    y: int,
+    progress: float,
+) -> None:
+    """비활성 색 전체 + 활성 색을 왼쪽부터 progress 비율만큼 덮어 그린다."""
+    progress = max(0.0, min(1.0, float(progress)))
+    w = surf_inactive.get_width()
+    h = surf_inactive.get_height()
+    if w <= 0 or h <= 0:
+        return
+    x = center_x - w // 2
+    screen.blit(surf_inactive, (x, y))
+    if progress <= 0:
+        return
+    fill_w = w if progress >= 1.0 else max(1, int(round(w * progress)))
+    screen.blit(surf_active, (x, y), area=pygame.Rect(0, 0, fill_w, h))
 
 
 class KaraokeRenderer:
@@ -83,19 +68,12 @@ class KaraokeRenderer:
         pinyin_hanzi_gap: Optional[int] = None,
         translation_extra_gap: Optional[int] = None,
     ) -> None:
-        """병음·한자·번역을 rect 안에 배치하고 활성 음절을 강조한다."""
+        """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다."""
+        del syllable_times  # 음절 단위 하이라이트 미사용
         pinyin = (data.pinyin or "").strip()
         hanzi = (data.sentence or "").strip()
         trans = (data.translation or "").strip()
-        syllables = _split_pinyin_syllables(pinyin)
-        n_syl = len(syllables) if syllables else max(1, len([c for c in hanzi if c.strip()]))
-
-        times = list(syllable_times) if syllable_times else []
-        if not times and sound_duration_sec > 0 and n_syl > 0:
-            times = build_even_syllable_times(n_syl, sound_duration_sec)
-
-        active_syl = compute_active_syllable_index(times, elapsed_sec)
-        active_hanzi_idx = map_syllable_to_hanzi_index(hanzi, active_syl)
+        progress = compute_karaoke_progress(elapsed_sec, sound_duration_sec)
 
         center_x = rect.centerx
         y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
@@ -103,27 +81,26 @@ class KaraokeRenderer:
 
         gap_py_hz = int(pinyin_hanzi_gap) if pinyin_hanzi_gap is not None else line_gap
 
-        if pinyin and syllables:
-            y = self._draw_pinyin_line(
+        if pinyin:
+            y = self._draw_pinyin_wipe(
                 screen,
-                syllables=syllables,
+                pinyin=pinyin,
                 center_x=center_x,
                 y=y,
                 rect=rect,
                 style=style,
-                active_syl=active_syl,
+                progress=progress,
             )
             y += gap_py_hz
 
         if hanzi:
-            self._draw_hanzi_colored(
+            self._draw_hanzi_wipe(
                 screen,
                 hanzi=hanzi,
                 center_x=center_x,
                 y=y,
                 style=style,
-                active_hanzi_idx=active_hanzi_idx,
-                active_syl=active_syl,
+                progress=progress,
             )
             y += line_gap
 
@@ -144,43 +121,60 @@ class KaraokeRenderer:
                 align="center",
             )
 
-    def _draw_pinyin_line(
+    def _draw_cached_wipe(
         self,
         screen: pygame.Surface,
         *,
-        syllables: list[str],
+        cache: Any,
+        font_ft: Any,
+        font_pg: Any,
+        text: str,
+        center_x: int,
+        y: int,
+        progress: float,
+        inactive_color: tuple[int, int, int],
+        active_color: tuple[int, int, int],
+    ) -> int:
+        if not text:
+            return y
+        surf_in, _ = self._drawer._get_cached_text_pair(
+            cache, font_ft, font_pg, text, inactive_color
+        )
+        surf_ac, _ = self._drawer._get_cached_text_pair(
+            cache, font_ft, font_pg, text, active_color
+        )
+        blit_horizontal_karaoke_wipe(
+            screen, surf_in, surf_ac, center_x=center_x, y=y, progress=progress
+        )
+        return y + max(surf_in.get_height(), surf_ac.get_height())
+
+    def _draw_pinyin_wipe(
+        self,
+        screen: pygame.Surface,
+        *,
+        pinyin: str,
         center_x: int,
         y: int,
         rect: pygame.Rect,
         style: SentenceStyleConfig,
-        active_syl: int,
+        progress: float,
     ) -> int:
+        del rect
         fonts = self._drawer._fonts
-        cache = self._drawer._cache_pinyin
-        surfs: list[pygame.Surface] = []
-        for i, syl in enumerate(syllables):
-            if i < active_syl:
-                color = KARAOKE_PAST_PINYIN
-            elif i == active_syl:
-                color = KARAOKE_ACTIVE_PINYIN
-            else:
-                color = KARAOKE_INACTIVE_PINYIN
-            surf, _ = self._drawer._get_cached_text_pair(
-                cache, fonts.pinyin_ft, fonts.pinyin_pg, syl + " ", color
-            )
-            surfs.append(surf)
-        if not surfs:
-            return y
-        gap = 4
-        total_w = sum(s.get_width() for s in surfs) + gap * (len(surfs) - 1)
-        x = center_x - total_w // 2
-        x = max(rect.left + style.layout.min_margin_x, x)
-        for surf in surfs:
-            screen.blit(surf, (x, y))
-            x += surf.get_width() + gap
-        return y + max(s.get_height() for s in surfs)
+        return self._draw_cached_wipe(
+            screen,
+            cache=self._drawer._cache_pinyin,
+            font_ft=fonts.pinyin_ft,
+            font_pg=fonts.pinyin_pg,
+            text=pinyin,
+            center_x=center_x,
+            y=y,
+            progress=progress,
+            inactive_color=KARAOKE_INACTIVE_PINYIN,
+            active_color=KARAOKE_ACTIVE_PINYIN,
+        )
 
-    def _draw_hanzi_colored(
+    def _draw_hanzi_wipe(
         self,
         screen: pygame.Surface,
         *,
@@ -188,54 +182,19 @@ class KaraokeRenderer:
         center_x: int,
         y: int,
         style: SentenceStyleConfig,
-        active_hanzi_idx: int,
-        active_syl: int,
+        progress: float,
     ) -> None:
+        del style
         fonts = self._drawer._fonts
-        cache = self._drawer._cache_hanzi
-        hanzi_positions = [i for i, ch in enumerate(hanzi) if not ch.isspace()]
-
-        segments: list[tuple[str, tuple[int, int, int]]] = []
-        cur = ""
-        cur_color: Optional[tuple[int, int, int]] = None
-
-        def _color_for_char(i: int) -> tuple[int, int, int]:
-            if active_syl < 0:
-                return KARAOKE_INACTIVE_HANZI
-            if i == active_hanzi_idx:
-                return KARAOKE_ACTIVE_HANZI
-            if i in hanzi_positions:
-                pos_in_hanzi = hanzi_positions.index(i)
-                if pos_in_hanzi < active_syl:
-                    return KARAOKE_PAST_HANZI
-            return KARAOKE_INACTIVE_HANZI
-
-        for i, ch in enumerate(hanzi):
-            col = _color_for_char(i)
-            if cur_color is None:
-                cur_color = col
-                cur = ch
-                continue
-            if col == cur_color:
-                cur += ch
-            else:
-                segments.append((cur, cur_color))
-                cur = ch
-                cur_color = col
-        if cur:
-            segments.append((cur, cur_color))
-
-        seg_surfs: list[pygame.Surface] = []
-        for text, color in segments:
-            surf, _ = self._drawer._get_cached_text_pair(
-                cache, fonts.hanzi_ft, fonts.hanzi_pg, text, color
-            )
-            seg_surfs.append(surf)
-        if not seg_surfs:
-            return
-        gap = 0
-        total_w = sum(s.get_width() for s in seg_surfs)
-        x = center_x - total_w // 2
-        for surf in seg_surfs:
-            screen.blit(surf, (x, y))
-            x += surf.get_width() + gap
+        self._draw_cached_wipe(
+            screen,
+            cache=self._drawer._cache_hanzi,
+            font_ft=fonts.hanzi_ft,
+            font_pg=fonts.hanzi_pg,
+            text=hanzi,
+            center_x=center_x,
+            y=y,
+            progress=progress,
+            inactive_color=KARAOKE_INACTIVE_HANZI,
+            active_color=KARAOKE_ACTIVE_HANZI,
+        )

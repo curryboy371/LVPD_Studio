@@ -1,7 +1,11 @@
 """
 배치/CLI: 테이블 엑셀 → CSV 일괄 생성.
-resource/table/*.xlsx -^> resource/csv/*.csv (숏츠 회화/단어 포함)
-실행: python -m tools.csv_gen (또는 create_all_csv.bat)
+resource/table/*.xlsx → resource/csv/*.csv
+
+포함 테이블: base_sentences, words, sub_sentences, vocabulary_word_rows,
+ko_narration_sets, ko_narration_lines, shorts_conversation_clips, shorts_vocabulary_clips
+
+실행: python -m tools.csv_gen (또는 create_all_csv.bat / create_csv.bat)
 """
 import logging
 import sys
@@ -19,6 +23,10 @@ def main() -> None:
     from core.paths import (
         DEFAULT_BASE_SENTENCES_CSV,
         DEFAULT_BASE_SENTENCES_EXCEL,
+        DEFAULT_KO_NARRATION_LINES_CSV,
+        DEFAULT_KO_NARRATION_LINES_EXCEL,
+        DEFAULT_KO_NARRATION_SETS_CSV,
+        DEFAULT_KO_NARRATION_SETS_EXCEL,
         DEFAULT_SHORTS_CONVERSATION_CLIPS_CSV,
         DEFAULT_SHORTS_CONVERSATION_CLIPS_EXCEL,
         DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV,
@@ -30,7 +38,10 @@ def main() -> None:
         DEFAULT_WORDS_TABLE_CSV,
         DEFAULT_WORDS_TABLE_EXCEL,
     )
+    from tools.csv_gen._bootstrap_excel import bootstrap_excel_from_csv
     from tools.csv_gen import (
+        ko_narration_lines_excel_to_csv,
+        ko_narration_sets_excel_to_csv,
         base_sentences_excel_to_csv,
         shorts_conversation_clips_excel_to_csv,
         shorts_vocabulary_clips_excel_to_csv,
@@ -40,6 +51,9 @@ def main() -> None:
     )
 
     results: list[str] = []
+
+    bootstrap_excel_from_csv(DEFAULT_KO_NARRATION_SETS_EXCEL, DEFAULT_KO_NARRATION_SETS_CSV)
+    bootstrap_excel_from_csv(DEFAULT_KO_NARRATION_LINES_EXCEL, DEFAULT_KO_NARRATION_LINES_CSV)
 
     if DEFAULT_BASE_SENTENCES_EXCEL.exists():
         try:
@@ -90,6 +104,30 @@ def main() -> None:
             sys.exit(1)
     else:
         logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_VOCABULARY_WORD_ROWS_EXCEL)
+
+    if DEFAULT_KO_NARRATION_SETS_EXCEL.exists():
+        try:
+            p = ko_narration_sets_excel_to_csv(
+                DEFAULT_KO_NARRATION_SETS_EXCEL, DEFAULT_KO_NARRATION_SETS_CSV
+            )
+            results.append(p)
+        except Exception as e:
+            logger.exception("ko_narration_sets CSV 생성 실패: %s", e)
+            sys.exit(1)
+    else:
+        logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_KO_NARRATION_SETS_EXCEL)
+
+    if DEFAULT_KO_NARRATION_LINES_EXCEL.exists():
+        try:
+            p = ko_narration_lines_excel_to_csv(
+                DEFAULT_KO_NARRATION_LINES_EXCEL, DEFAULT_KO_NARRATION_LINES_CSV
+            )
+            results.append(p)
+        except Exception as e:
+            logger.exception("ko_narration_lines CSV 생성 실패: %s", e)
+            sys.exit(1)
+    else:
+        logger.info("엑셀 없음, 건너뜀: %s", DEFAULT_KO_NARRATION_LINES_EXCEL)
 
     if DEFAULT_SHORTS_CONVERSATION_CLIPS_EXCEL.exists():
         try:

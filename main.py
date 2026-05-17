@@ -3,6 +3,7 @@
 
   python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). 기본 topic은 fruit store. --mode record 로 오프스크린 녹화
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
+  python main.py batch-shorts-ko → ko_narration_* 테이블 기준 문장별 TTS 사전 생성
 
 시작 시 create_all_csv.bat를 한 번 실행한 뒤 studio/batch로 진행한다(SKIP_PAUSE=1로 pause 생략).
 """
@@ -412,11 +413,61 @@ def _add_studio_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _cmd_batch_shorts_ko(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """숏츠 클립의 ko_narration_id → 세트별 문장 TTS·timeline JSON 배치 생성."""
+    from audio.ko_narration import batch_build_shorts_ko_narration
+
+    topics = [t.strip() for t in (args.topic or []) if t and str(t).strip()] or None
+    ok, skip, fail = batch_build_shorts_ko_narration(
+        shorts_mode=args.shorts_type,
+        csv_path=args.csv or None,
+        session_topics=topics,
+        tts=args.tts,
+        force_tts=bool(args.force),
+        clip_id=int(args.clip_id or 0),
+        with_composite=bool(args.with_composite),
+        set_id=int(args.set_id or 0),
+    )
+    print(f"batch-shorts-ko 완료: 생성={ok} 스킵={skip} 실패={fail}")
+    if fail:
+        sys.exit(1)
+
+
 def _add_batch_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("batch", help="신규 테이블 CSV 기반 배치 영상 제작 → output/")
     p.add_argument("--csv", type=str, default="", help="(미사용, 호환용)")
     p.add_argument("--output-dir", type=str, default="", help="출력 디렉터리. 비우면 output.")
     p.set_defaults(func=_cmd_batch)
+
+
+def _add_batch_shorts_ko_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "batch-shorts-ko",
+        help="ko_narration_sets/lines + shorts ko_narration_id → 문장별 TTS mp3·타임라인 사전 생성",
+    )
+    p.set_defaults(func=_cmd_batch_shorts_ko)
+    p.add_argument(
+        "--shorts-type",
+        choices=("conversation", "vocabulary"),
+        default="conversation",
+        help="shorts_conversation_clips | shorts_vocabulary_clips",
+    )
+    p.add_argument("--csv", type=str, default="", help="클립 CSV 경로(비우면 기본)")
+    p.add_argument(
+        "--topic",
+        action="append",
+        default=[],
+        help="topic 필터(반복 가능). 비우면 전체.",
+    )
+    p.add_argument("--tts", choices=("gtts", "edge"), default="gtts", help="TTS 엔진")
+    p.add_argument("--force", action="store_true", help="캐시 무시하고 TTS 재생성")
+    p.add_argument("--clip-id", type=int, default=0, help="특정 clip_id만 처리")
+    p.add_argument(
+        "--with-composite",
+        action="store_true",
+        help="문장별 mp3 외 composite mp3도 생성(MoviePy mux용)",
+    )
+    p.add_argument("--set-id", type=int, default=0, help="ko_narration_sets.id 만 TTS 생성")
 
 
 def _run_create_all_csv_at_startup() -> None:
@@ -451,6 +502,7 @@ def main() -> None:
 
     _add_studio_parser(subparsers)
     _add_batch_parser(subparsers)
+    _add_batch_shorts_ko_parser(subparsers)
 
     args = parser.parse_args()
     _run_create_all_csv_at_startup()

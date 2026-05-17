@@ -22,9 +22,16 @@ from studio.conversation.video_players import SimpleVideoPlayer
 from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION
 from studio.shorts.data_loading import resolve_hook_title
 from studio.shorts.layout import ShortsLayoutZones
+from studio.shorts.tools.karaoke_renderer import compute_karaoke_progress
 from studio.shorts.tools.shorts_drawer import ShortsDrawer
 
 logger = logging.getLogger(__name__)
+
+try:
+    from audio.ko_narration import KoNarrationPlan, try_load_cached_ko_plan
+except ImportError:
+    KoNarrationPlan = None  # type: ignore[misc, assignment]
+    try_load_cached_ko_plan = None  # type: ignore[assignment]
 
 _CHANNEL_HOOK = "shorts_hook"
 _CHANNEL_BOTTOM = "shorts_bottom"
@@ -36,6 +43,7 @@ class ClipStage(Enum):
     VIDEO_FADE_OUT = auto()
     HOOK_IN = auto()
     LEARN_PLAY = auto()
+    KO_NARRATION = auto()
     CTA_HOLD = auto()
     DONE = auto()
     TRANSITION_OUT = auto()
@@ -75,6 +83,11 @@ class ClipScene:
         self._voice_channel: Optional[pygame.mixer.Channel] = None
         self._on_clip_done: Optional[Callable[[], None]] = None
         self._is_last_clip = True
+        self._ko_plan: Optional[Any] = None
+        self._ko_cue_index = 0
+        self._ko_current_text = ""
+        self._ko_cue_elapsed = 0.0
+        self._ko_cue_duration = 0.0
 
     @property
     def stage(self) -> ClipStage:
@@ -116,6 +129,12 @@ class ClipScene:
         self._video_inner_size = (0, 0)
         self._video_display_alpha = 255
         self._had_video_intro = False
+        self._ko_plan = None
+        self._ko_cue_index = 0
+        self._ko_current_text = ""
+        self._ko_cue_elapsed = 0.0
+        self._ko_cue_duration = 0.0
+        self._resolve_ko_plan()
 
         clip_type = str(self._clip.get("clip_type") or "").strip()
         video_path = str(self._clip.get("video_path") or "").strip()
@@ -132,6 +151,22 @@ class ClipScene:
             self._video_player.close()
 
         self._enter_hook_in()
+
+    def _resolve_ko_plan(self) -> None:
+        """재생 전 배치로 만든 문장별 mp3·timeline만 로드(녹화 중 TTS 생성 없음)."""
+        if try_load_cached_ko_plan is None:
+            return
+        plan = try_load_cached_ko_plan(self._clip)
+        if plan is None and int(self._clip.get("ko_narration_id") or 0) > 0:
+            logger.warning(
+                "ko 내레이션 캐시 없음 clip_id=%s set_id=%s — "
+                "ko_narration_lines 작성 후 python main.py batch-shorts-ko 실행.",
+                self._clip.get("clip_id"),
+                self._clip.get("ko_narration_id"),
+            )
+        self._ko_plan = plan
+        if plan is not None:
+            self._clip["_ko_plan"] = plan
 
     def _finish_clip(self) -> None:
         self._stage = ClipStage.DONE
@@ -194,8 +229,16 @@ class ClipScene:
             if self._is_voice_finished():
                 if self._should_play_sound_again():
                     self._play_sound_once()
+                elif self._ko_plan is not None:
+                    self._enter_ko_narration()
                 else:
                     self._enter_cta_hold()
+            return
+
+        if self._stage == ClipStage.KO_NARRATION:
+            self._ko_cue_elapsed += max(0.0, float(dt_sec))
+            if self._is_ko_cue_voice_finished():
+                self._advance_ko_cue()
             return
 
         if self._stage == ClipStage.CTA_HOLD:
@@ -253,6 +296,59 @@ class ClipScene:
         if not path:
             return False
         return self._sound_play_count < max(1, int(SHORTS_SOUND_PLAY_COUNT))
+
+    def _enter_ko_narration(self) -> None:
+        """문장 단위 순차 재생: 재생 중인 큐 텍스트만 자막으로 표시(test.md 패턴)."""
+        self._stage = ClipStage.KO_NARRATION
+        self._timer = 0.0
+        self._ko_cue_index = 0
+        self._ko_current_text = ""
+        self._ko_cue_elapsed = 0.0
+        self._ko_cue_duration = 0.0
+        self._voice_channel = None
+        self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
+        plan = self._ko_plan
+        if plan is None or not getattr(plan, "cues", None):
+            self._enter_cta_hold()
+            return
+        self._play_ko_cue_at(0)
+
+    def _play_ko_cue_at(self, index: int) -> None:
+        plan = self._ko_plan
+        if plan is None:
+            self._enter_cta_hold()
+            return
+        cues = list(getattr(plan, "cues", None) or [])
+        if index >= len(cues):
+            self._enter_cta_hold()
+            return
+        cue = cues[index]
+        self._ko_cue_index = index
+        self._ko_current_text = str(getattr(cue, "text", "") or "")
+        self._ko_cue_elapsed = 0.0
+        path = str(getattr(cue, "audio_path", "") or "").strip()
+        self._ko_cue_duration = self._play_voice(path) if path else 0.0
+        if self._ko_cue_duration <= 0 and path:
+            self._ko_cue_duration = 3.0
+        elif self._ko_cue_duration <= 0:
+            self._ko_cue_duration = 2.0
+
+    def _advance_ko_cue(self) -> None:
+        self._play_ko_cue_at(self._ko_cue_index + 1)
+
+    def _is_ko_cue_voice_finished(self) -> bool:
+        if self._ko_cue_elapsed < 0.04:
+            return False
+        ch = self._voice_channel
+        if ch is not None and ch.get_busy():
+            return False
+        dur = max(0.0, float(self._ko_cue_duration))
+        if dur <= 1e-6:
+            return self._ko_cue_elapsed >= 0.5
+        return self._ko_cue_elapsed >= dur + 0.1
+
+    def _active_ko_subtitle(self) -> str:
+        return (self._ko_current_text or "").strip()
 
     def _enter_cta_hold(self) -> None:
         self._stage = ClipStage.CTA_HOLD
@@ -330,9 +426,16 @@ class ClipScene:
         show_karaoke = self._stage in (ClipStage.LEARN_PLAY, ClipStage.CTA_HOLD)
         show_bottom = self._stage in (
             ClipStage.LEARN_PLAY,
+            ClipStage.KO_NARRATION,
             ClipStage.CTA_HOLD,
             ClipStage.TRANSITION_OUT,
         )
+        ko_subtitle = self._active_ko_subtitle() if self._stage == ClipStage.KO_NARRATION else ""
+        ko_subtitle_progress: Optional[float] = None
+        if ko_subtitle:
+            ko_subtitle_progress = compute_karaoke_progress(
+                self._ko_cue_elapsed, self._ko_cue_duration
+            )
 
         if self._frozen_video_frame is not None:
             self._draw_pinned_video(screen, zones)
@@ -354,13 +457,18 @@ class ClipScene:
                 screen.set_clip(None)
 
         if show_bottom:
+            situation = str(self._clip.get("situation_subtitle") or "")
+            if ko_subtitle:
+                situation = ko_subtitle
             self._drawer.draw_bottom_zone(
                 screen,
                 zones=zones,
-                situation_subtitle=str(self._clip.get("situation_subtitle") or ""),
+                situation_subtitle=situation,
                 cta_text=str(self._clip.get("cta_text") or ""),
                 channel=_CHANNEL_BOTTOM,
                 show_cta=show_cta,
+                highlight_subtitle=bool(ko_subtitle),
+                subtitle_progress=ko_subtitle_progress,
             )
 
         screen.set_clip(None)

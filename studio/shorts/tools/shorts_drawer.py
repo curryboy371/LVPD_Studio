@@ -16,6 +16,8 @@ from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import (
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
+    KO_KARAOKE_ACTIVE,
+    KO_KARAOKE_INACTIVE,
     shorts_hook_title_line_gap,
     shorts_hook_title_y,
     shorts_middle_y_offset,
@@ -25,7 +27,7 @@ from studio.shorts.constants import (
 )
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
-from studio.shorts.tools.karaoke_renderer import KaraokeRenderer
+from studio.shorts.tools.karaoke_renderer import KaraokeRenderer, blit_horizontal_karaoke_wipe
 from utils.fonts import load_font_korean
 
 class ShortsDrawer:
@@ -365,6 +367,8 @@ class ShortsDrawer:
         cta_text: str,
         channel: str,
         show_cta: bool,
+        highlight_subtitle: bool = False,
+        subtitle_progress: Optional[float] = None,
     ) -> None:
         alpha = self.fade_alpha(channel)
         if alpha <= 0:
@@ -374,11 +378,30 @@ class ShortsDrawer:
         y = rect.top + pad
         sub = (situation_subtitle or "").strip()
         if sub:
-            surf = self._bottom_font.render(sub, True, (220, 225, 235))
-            if alpha < 255:
-                surf.set_alpha(alpha)
-            screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
-            y += surf.get_height() + 16
+            if highlight_subtitle and subtitle_progress is not None:
+                surf_in = self._bottom_font.render(sub, True, KO_KARAOKE_INACTIVE)
+                surf_ac = self._bottom_font.render(sub, True, KO_KARAOKE_ACTIVE)
+                if alpha < 255:
+                    surf_in = surf_in.copy()
+                    surf_ac = surf_ac.copy()
+                    surf_in.set_alpha(alpha)
+                    surf_ac.set_alpha(alpha)
+                blit_horizontal_karaoke_wipe(
+                    screen,
+                    surf_in,
+                    surf_ac,
+                    center_x=rect.centerx,
+                    y=y,
+                    progress=subtitle_progress,
+                )
+                y += surf_in.get_height() + 16
+            else:
+                sub_color = (255, 240, 180) if highlight_subtitle else (220, 225, 235)
+                surf = self._bottom_font.render(sub, True, sub_color)
+                if alpha < 255:
+                    surf.set_alpha(alpha)
+                screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
+                y += surf.get_height() + 16
         if show_cta:
             cta = (cta_text or "").strip()
             if cta:

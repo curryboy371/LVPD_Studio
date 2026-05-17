@@ -17,3 +17,10 @@ ffpyplayer
 
 # SVG 사전 렌더(Chromium)
 playwright
+
+# 한국어 TTS·자막 (숏츠 ko_narration)
+pysrt
+gtts
+moviepy
+mutagen
+# optional: edge-tts  # pip install edge-tts
