@@ -12,7 +12,13 @@ _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from audio.ko_narration import batch_build_shorts_ko_narration
+from audio.ko_narration import (
+    batch_build_shorts_ko_narration,
+    collect_ko_narration_set_ids_from_shorts_csv,
+    format_tts_log_label,
+    resolve_tts_config_for_set,
+)
+from data.ko_narration_loader import load_ko_narration_tables
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,7 +34,12 @@ def main() -> int:
     )
     parser.add_argument("--csv", default="", help="클립 CSV 경로(비우면 기본)")
     parser.add_argument("--topic", action="append", default=[], help="topic 필터(반복 가능)")
-    parser.add_argument("--tts", choices=("gtts", "edge"), default="gtts", help="TTS 엔진")
+    parser.add_argument("--tts", choices=("gtts", "edge"), default="gtts", help="TTS 엔진(세트 tts 비어 있을 때)")
+    parser.add_argument(
+        "--tts-voice",
+        default="",
+        help="Edge 목소리 ID(세트 tts_voice 비어 있을 때). 예: ko-KR-InJoonNeural",
+    )
     parser.add_argument("--force", action="store_true", help="캐시 무시하고 TTS 재생성")
     parser.add_argument("--clip-id", type=int, default=0, help="특정 clip_id만 처리")
     parser.add_argument(
@@ -40,11 +51,27 @@ def main() -> int:
     args = parser.parse_args()
 
     topics = [t for t in args.topic if t.strip()] or None
+    load_ko_narration_tables()
+    target_ids = collect_ko_narration_set_ids_from_shorts_csv(
+        shorts_mode=args.shorts_type,
+        csv_path=args.csv or None,
+        session_topics=topics,
+        clip_id=args.clip_id,
+        set_id=args.set_id,
+    )
+    if target_ids:
+        logger.info("TTS 배치 대상 %d개 세트", len(target_ids))
+        for sid in target_ids:
+            engine, voice = resolve_tts_config_for_set(
+                sid, tts_cli=args.tts, tts_voice_cli=args.tts_voice
+            )
+            logger.info("  set_id=%s 음성=%s", sid, format_tts_log_label(engine, voice))
     ok, skip, fail = batch_build_shorts_ko_narration(
         shorts_mode=args.shorts_type,
         csv_path=args.csv or None,
         session_topics=topics,
         tts=args.tts,
+        tts_voice=args.tts_voice,
         force_tts=args.force,
         clip_id=args.clip_id,
         with_composite=args.with_composite,

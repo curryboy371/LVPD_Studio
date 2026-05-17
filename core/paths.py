@@ -26,6 +26,9 @@ DEFAULT_KO_NARRATION_SETS_EXCEL = _RESOURCE_TABLE_DIR / "ko_narration_sets.xlsx"
 DEFAULT_KO_NARRATION_SETS_CSV = _RESOURCE_CSV_DIR / "ko_narration_sets.csv"
 DEFAULT_KO_NARRATION_LINES_EXCEL = _RESOURCE_TABLE_DIR / "ko_narration_lines.xlsx"
 DEFAULT_KO_NARRATION_LINES_CSV = _RESOURCE_CSV_DIR / "ko_narration_lines.csv"
+# 숏츠 한국어 TTS 배치(batch_ko_tts) 산출 mp3·timeline JSON
+DEFAULT_KO_NARRATION_SOUND_DIR = _REPO_ROOT / "resource" / "sound" / "shorts"
+LEGACY_KO_NARRATION_SOUND_DIR = _REPO_ROOT / "resource" / "sound"
 
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "output"
 

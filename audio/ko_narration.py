@@ -7,17 +7,23 @@ import json
 import logging
 import os
 import re
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from core.paths import get_repo_root
+from core.paths import (
+    DEFAULT_KO_NARRATION_SOUND_DIR,
+    LEGACY_KO_NARRATION_SOUND_DIR,
+    get_repo_root,
+)
 
 logger = logging.getLogger(__name__)
 
 _REPO = get_repo_root()
-# TTS mp3·타임라인·SRT 모두 resource/sound 하위
-KO_SOUND_DIR = _REPO / "resource" / "sound"
+# TTS mp3·타임라인·SRT — resource/sound/shorts (batch_ko_tts)
+KO_SOUND_DIR = DEFAULT_KO_NARRATION_SOUND_DIR
+_LEGACY_KO_SOUND_DIR = LEGACY_KO_NARRATION_SOUND_DIR
 
 DEFAULT_KO_CUE_GAP_SEC = 0.15
 
@@ -141,11 +147,42 @@ class EdgeTtsProvider:
         return out_path
 
 
-def resolve_tts_provider(name: str = "gtts") -> ITtsProvider:
+def resolve_tts_provider(name: str = "gtts", *, voice: str = "") -> ITtsProvider:
     key = (name or "gtts").strip().lower()
     if key in ("edge", "edge-tts", "edge_tts"):
-        return EdgeTtsProvider()
+        v = (voice or "ko-KR-SunHiNeural").strip()
+        return EdgeTtsProvider(voice=v)
     return GttsProvider()
+
+
+def resolve_tts_config_for_set(
+    set_id: int,
+    *,
+    tts_cli: str = "gtts",
+    tts_voice_cli: str = "",
+) -> tuple[str, str]:
+    """세트 테이블(tts, tts_voice) 우선, 비어 있으면 CLI 기본값."""
+    from data.ko_narration_loader import get_ko_narration_set
+
+    engine = (tts_cli or "gtts").strip().lower()
+    voice = (tts_voice_cli or "").strip()
+    ko_set = get_ko_narration_set(int(set_id))
+    if ko_set is not None:
+        if ko_set.tts:
+            engine = ko_set.tts.strip().lower()
+        if ko_set.tts_voice:
+            voice = ko_set.tts_voice.strip()
+    if not voice and engine in ("edge", "edge-tts", "edge_tts"):
+        voice = "ko-KR-SunHiNeural"
+    return engine, voice
+
+
+def format_tts_log_label(engine: str, voice: str = "") -> str:
+    """로그용 음성 타입 문자열 (engine + edge 목소리 ID)."""
+    key = (engine or "gtts").strip().lower()
+    if key in ("edge", "edge-tts", "edge_tts"):
+        return f"edge / {(voice or 'ko-KR-SunHiNeural').strip()}"
+    return "gtts"
 
 
 def _resolve_repo_path(raw: str) -> Path:
@@ -199,6 +236,18 @@ def _cue_audio_path_for_set(set_id: int, index: int) -> Path:
     return KO_SOUND_DIR / f"{_ko_sound_basename(set_id, index)}.mp3"
 
 
+def _cached_cue_audio_usable(path: Path) -> bool:
+    """0바이트·길이 0 mp3는 실패 캐시로 보고 재생성."""
+    if not path.is_file():
+        return False
+    try:
+        if path.stat().st_size < 64:
+            return False
+    except OSError:
+        return False
+    return measure_audio_duration_sec(path) > 1e-3
+
+
 def _cue_audio_path(clip_type: str, clip_id: int, index: int) -> Path:
     stem = _cache_stem(clip_type, clip_id)
     return KO_SOUND_DIR / f"ko_{stem}_{index}.mp3"
@@ -218,11 +267,24 @@ def synthesize_cue_audios(
     paths: list[Path] = []
     for i, text in enumerate(texts):
         out = _cue_audio_path_for_set(set_id, i) if set_id > 0 else _cue_audio_path(clip_type, clip_id, i)
-        if out.is_file() and not force:
+        if not force and _cached_cue_audio_usable(out):
             paths.append(out)
             continue
+        if out.is_file() and not _cached_cue_audio_usable(out):
+            logger.warning("손상된 TTS 캐시 삭제 후 재생성: %s", out)
+            try:
+                out.unlink()
+            except OSError as ex:
+                logger.debug("캐시 삭제 실패 %s: %s", out, ex)
         try:
             provider.synthesize(text, lang=lang, out_path=out)
+            if not _cached_cue_audio_usable(out):
+                logger.warning("TTS 산출물이 비어 있음: %s", out)
+                try:
+                    out.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
             paths.append(out)
         except Exception as ex:
             logger.exception("TTS 실패 set_id=%s idx=%s: %s", set_id, i, ex)
@@ -379,8 +441,41 @@ def clip_has_ko_narration(clip: dict[str, Any]) -> bool:
     return ko_narration_id_from_clip(clip) > 0
 
 
+def adjusted_srt_path_for_set(set_id: int) -> Path:
+    """배치 산출 자막: resource/sound/shorts/ko_set_{id}_adjusted.srt"""
+    stem = _cache_stem_for_set(set_id)
+    return KO_SOUND_DIR / f"ko_{stem}_adjusted.srt"
+
+
+def clear_ko_shorts_sound_output() -> None:
+    """batch_ko_tts 시작 시 resource/sound/shorts 비우기."""
+    KO_SOUND_DIR.mkdir(parents=True, exist_ok=True)
+    removed = 0
+    for entry in KO_SOUND_DIR.iterdir():
+        try:
+            if entry.is_file():
+                entry.unlink()
+                removed += 1
+            elif entry.is_dir():
+                shutil.rmtree(entry)
+                removed += 1
+        except OSError as ex:
+            logger.warning("shorts 출력 삭제 실패 %s: %s", entry, ex)
+    logger.info("shorts TTS 출력 폴더 비움: %s (%d개)", KO_SOUND_DIR, removed)
+
+
 def cached_timeline_json_path_for_set(set_id: int) -> Path:
     return KO_SOUND_DIR / f"ko_{_cache_stem_for_set(set_id)}_timeline.json"
+
+
+def _timeline_json_candidates_for_set(set_id: int) -> list[Path]:
+    """신규 shorts 경로 우선, 이전 resource/sound 캐시 폴백."""
+    name = f"ko_{_cache_stem_for_set(set_id)}_timeline.json"
+    paths = [KO_SOUND_DIR / name]
+    legacy = _LEGACY_KO_SOUND_DIR / name
+    if legacy != paths[0]:
+        paths.append(legacy)
+    return paths
 
 
 def cached_timeline_json_path(clip_type: str, clip_id: int) -> Path:
@@ -400,12 +495,10 @@ def try_load_cached_ko_plan(clip: dict[str, Any]) -> Optional[KoNarrationPlan]:
     set_id = ko_narration_id_from_clip(clip)
     if set_id < 1:
         return None
-    json_path = cached_timeline_json_path_for_set(set_id)
-    plan = load_ko_narration_plan_from_json(json_path)
-    if plan is None:
-        return None
-    if plan_cue_audios_ready(plan):
-        return plan
+    for json_path in _timeline_json_candidates_for_set(set_id):
+        plan = load_ko_narration_plan_from_json(json_path)
+        if plan is not None and plan_cue_audios_ready(plan):
+            return plan
     return None
 
 
@@ -413,6 +506,7 @@ def batch_build_ko_narration_set(
     set_id: int,
     *,
     tts: str = "gtts",
+    tts_voice: str = "",
     force_tts: bool = False,
     with_composite: bool = False,
     clip_type: str = "",
@@ -430,6 +524,7 @@ def batch_build_ko_narration_set(
     return build_ko_narration_plan(
         fake_clip,
         tts=tts,
+        tts_voice=tts_voice,
         force_tts=force_tts,
         skip_composite=not with_composite,
     )
@@ -489,6 +584,7 @@ def batch_build_shorts_ko_narration(
     csv_path: str | Path | None = None,
     session_topics: Optional[list[str]] = None,
     tts: str = "gtts",
+    tts_voice: str = "",
     force_tts: bool = False,
     clip_id: int = 0,
     set_id: int = 0,
@@ -502,6 +598,7 @@ def batch_build_shorts_ko_narration(
     from data.ko_narration_loader import load_ko_narration_tables
 
     load_ko_narration_tables()
+    clear_ko_shorts_sound_output()
     target_ids = collect_ko_narration_set_ids_from_shorts_csv(
         shorts_mode=shorts_mode,
         csv_path=csv_path,
@@ -518,22 +615,29 @@ def batch_build_shorts_ko_narration(
         return 0, 0, 1
 
     for sid in target_ids:
+        engine, voice = resolve_tts_config_for_set(sid, tts_cli=tts, tts_voice_cli=tts_voice)
+        tts_label = format_tts_log_label(engine, voice)
+        logger.info("배치 시작 set_id=%s 음성=%s", sid, tts_label)
         plan = batch_build_ko_narration_set(
             sid,
             tts=tts,
+            tts_voice=tts_voice,
             force_tts=force_tts,
             with_composite=with_composite,
         )
         if plan is None or not plan_cue_audios_ready(plan):
             fail += 1
-            logger.warning("배치 TTS 실패 set_id=%s", sid)
+            logger.warning("배치 TTS 실패 set_id=%s 음성=%s", sid, tts_label)
             continue
         ok += 1
+        srt_out = adjusted_srt_path_for_set(plan.set_id)
         logger.info(
-            "set_id=%s 문장 %d개 → %s",
+            "set_id=%s 문장 %d개 음성=%s → %s / %s",
             plan.set_id,
             len(plan.cues),
+            tts_label,
             plan.timeline_json_path,
+            srt_out,
         )
     return ok, skip, fail
 
@@ -542,6 +646,7 @@ def build_ko_narration_plan(
     clip: dict[str, Any],
     *,
     tts: str = "gtts",
+    tts_voice: str = "",
     lang: str = "ko",
     gap_sec: float = DEFAULT_KO_CUE_GAP_SEC,
     start_offset_sec: float = 0.0,
@@ -564,7 +669,9 @@ def build_ko_narration_plan(
     clip_type = str(clip.get("clip_type") or "clip").strip()
     clip_id = int(clip.get("clip_id") or 0)
 
-    provider = resolve_tts_provider(tts)
+    engine, voice = resolve_tts_config_for_set(set_id, tts_cli=tts, tts_voice_cli=tts_voice)
+    provider = resolve_tts_provider(engine, voice=voice)
+    logger.info("TTS set_id=%s 음성=%s", set_id, format_tts_log_label(engine, voice))
     audio_paths = synthesize_cue_audios(
         texts,
         set_id=set_id,
@@ -587,9 +694,9 @@ def build_ko_narration_plan(
     if not cues:
         return None
 
-    stem = _cache_stem_for_set(set_id)
     KO_SOUND_DIR.mkdir(parents=True, exist_ok=True)
-    adjusted_srt = KO_SOUND_DIR / f"ko_{stem}_adjusted.srt"
+    adjusted_srt = adjusted_srt_path_for_set(set_id)
+    stem = _cache_stem_for_set(set_id)
     timeline_json = KO_SOUND_DIR / f"ko_{stem}_timeline.json"
     composite_path = KO_SOUND_DIR / f"ko_{stem}_composite.mp3"
 

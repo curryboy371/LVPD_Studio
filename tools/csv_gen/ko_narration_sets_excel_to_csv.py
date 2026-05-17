@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 EXCEL_EXTENSIONS = (".xlsx", ".xls")
 
-FIELDNAMES = ["id", "title", "srt_path"]
+FIELDNAMES = ["id", "title", "tts", "tts_voice"]
 
 
 def _normalize(value: Any) -> str:
@@ -44,7 +44,8 @@ def ko_narration_sets_excel_to_csv(
         final_rows.append({
             "id": sid,
             "title": _normalize(row.get("title")),
-            "srt_path": _normalize(row.get("srt_path")),
+            "tts": _normalize(row.get("tts")).lower(),
+            "tts_voice": _normalize(row.get("tts_voice")),
         })
 
     out_path = Path(csv_path)

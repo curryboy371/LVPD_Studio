@@ -423,6 +423,7 @@ def _cmd_batch_shorts_ko(parser: argparse.ArgumentParser, args: argparse.Namespa
         csv_path=args.csv or None,
         session_topics=topics,
         tts=args.tts,
+        tts_voice=str(getattr(args, "tts_voice", "") or ""),
         force_tts=bool(args.force),
         clip_id=int(args.clip_id or 0),
         with_composite=bool(args.with_composite),
@@ -459,7 +460,12 @@ def _add_batch_shorts_ko_parser(subparsers: argparse._SubParsersAction) -> None:
         default=[],
         help="topic 필터(반복 가능). 비우면 전체.",
     )
-    p.add_argument("--tts", choices=("gtts", "edge"), default="gtts", help="TTS 엔진")
+    p.add_argument("--tts", choices=("gtts", "edge"), default="gtts", help="TTS 엔진(세트 tts 비어 있을 때)")
+    p.add_argument(
+        "--tts-voice",
+        default="",
+        help="Edge 목소리 ID(세트 tts_voice 비어 있을 때). 예: ko-KR-InJoonNeural",
+    )
     p.add_argument("--force", action="store_true", help="캐시 무시하고 TTS 재생성")
     p.add_argument("--clip-id", type=int, default=0, help="특정 clip_id만 처리")
     p.add_argument(
