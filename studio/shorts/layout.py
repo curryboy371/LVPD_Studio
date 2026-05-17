@@ -45,3 +45,22 @@ class ShortsLayoutZones:
             w = max(1, int(getattr(ctx, "width", 1080) or 1080))
             h = max(1, int(getattr(ctx, "height", 1920) or 1920))
         return cls.from_frame(w, h)
+
+
+def compute_contain_frame_rect(
+    zone_middle: pygame.Rect,
+    media_size: tuple[int, int],
+    *,
+    pad: int = 16,
+) -> pygame.Rect:
+    """middle 구역 contain 배치 시 미디어 프레임 Rect (자막·mux 앵커)."""
+    inner = zone_middle.inflate(-pad * 2, -pad * 2)
+    mw, mh = max(1, int(media_size[0])), max(1, int(media_size[1]))
+    if inner.width <= 0 or inner.height <= 0:
+        return inner
+    scale = min(inner.width / mw, inner.height / mh)
+    fw = max(1, int(mw * scale))
+    fh = max(1, int(mh * scale))
+    x = inner.centerx - fw // 2
+    y = inner.centery - fh // 2
+    return pygame.Rect(x, y, fw, fh)

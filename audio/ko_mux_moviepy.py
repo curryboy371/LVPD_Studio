@@ -72,14 +72,12 @@ def _make_text_clip_pil(
     arr = np.array(img)
     clip = ImageClip(arr).set_duration(max(0.05, float(duration)))
     clip = clip.set_start(max(0.0, float(start)))
-    from studio.shorts.constants import (
-        ZONE_MIDDLE_RATIO,
-        ZONE_TOP_RATIO,
-        shorts_ko_subtitle_video_bottom_margin,
-    )
+    from studio.shorts.constants import shorts_ko_subtitle_below_video_gap
+    from studio.shorts.layout import ShortsLayoutZones, compute_contain_frame_rect
 
-    mid_bottom = int(height * (ZONE_TOP_RATIO + ZONE_MIDDLE_RATIO))
-    y_pos = mid_bottom - img_h - shorts_ko_subtitle_video_bottom_margin(height)
+    zones = ShortsLayoutZones.from_frame(width, height)
+    frame_rect = compute_contain_frame_rect(zones.middle, (width, height))
+    y_pos = frame_rect.bottom + shorts_ko_subtitle_below_video_gap(height)
     clip = clip.set_position(("center", max(0, y_pos)))
     return clip
 
@@ -111,14 +109,12 @@ def _make_subtitle_clip(
         clip = TextClip(**kwargs)
         clip = clip.set_duration(max(0.05, float(duration)))
         clip = clip.set_start(max(0.0, float(start)))
-        from studio.shorts.constants import (
-            ZONE_MIDDLE_RATIO,
-            ZONE_TOP_RATIO,
-            shorts_ko_subtitle_video_bottom_margin,
-        )
+        from studio.shorts.constants import shorts_ko_subtitle_below_video_gap
+        from studio.shorts.layout import ShortsLayoutZones, compute_contain_frame_rect
 
-        mid_bottom = int(video_h * (ZONE_TOP_RATIO + ZONE_MIDDLE_RATIO))
-        y_pos = mid_bottom - shorts_ko_subtitle_video_bottom_margin(video_h) - 48
+        zones = ShortsLayoutZones.from_frame(video_w, video_h)
+        frame_rect = compute_contain_frame_rect(zones.middle, (video_w, video_h))
+        y_pos = frame_rect.bottom + shorts_ko_subtitle_below_video_gap(video_h)
         clip = clip.set_position(("center", max(0, y_pos)))
         return clip
     except Exception as ex:

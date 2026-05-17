@@ -130,9 +130,9 @@ CTA_HOLD_SEC = 2.5
 CLIP_TRANSITION_FADE_SEC = 0.3
 SHORTS_SOUND_PLAY_COUNT = 2
 SHORTS_FOLLOW_ALONG_LABEL = "따라해보세요"
-# 3단계: 따라해보세요 이후 bg 연습 구간(초). 문장 길이에 비례해 최소값 적용
+# 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
+SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC = 1.5
 SHORTS_BG_PRACTICE_MIN_SEC = 4.0
-SHORTS_BG_PRACTICE_SCALE = 1.35
 SHORTS_VIDEO_END_HOLD_SEC = 0.6
 SHORTS_VIDEO_FADE_OUT_SEC = 0.8
 # 페이드 후에도 비디오가 남도록 최소 알파(0=완전 숨김, 255=그대로)
@@ -149,15 +149,15 @@ KO_KARAOKE_INACTIVE = (120, 125, 140)
 KO_SUBTITLE_BG_RGBA = (0, 0, 0, 160)
 KO_SUBTITLE_BG_PAD_X = 20
 KO_SUBTITLE_BG_PAD_Y = 10
-# TTS 자막: 실제 비디오 프레임 하단에서 위로 올리는 여백 (1080×1920 기준 px)
-SHORTS_KO_SUBTITLE_VIDEO_BOTTOM_MARGIN = 28
+# TTS 자막: 비디오 프레임 하단과 자막 상단 사이 간격 (1080×1920 기준 px)
+SHORTS_KO_SUBTITLE_BELOW_VIDEO_GAP = 8
 SHORTS_KO_SUBTITLE_FONT_SIZE = 46
 
 
-def shorts_ko_subtitle_video_bottom_margin(frame_height: int) -> int:
+def shorts_ko_subtitle_below_video_gap(frame_height: int) -> int:
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
-    return max(8, int(SHORTS_KO_SUBTITLE_VIDEO_BOTTOM_MARGIN * sy))
+    return max(4, int(SHORTS_KO_SUBTITLE_BELOW_VIDEO_GAP * sy))
 
 
 def shorts_ko_subtitle_font_size(frame_height: int) -> int:

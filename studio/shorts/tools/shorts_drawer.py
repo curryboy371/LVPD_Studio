@@ -21,7 +21,7 @@ from studio.shorts.constants import (
     KO_SUBTITLE_BG_PAD_X,
     KO_SUBTITLE_BG_PAD_Y,
     KO_SUBTITLE_BG_RGBA,
-    shorts_ko_subtitle_video_bottom_margin,
+    shorts_ko_subtitle_below_video_gap,
     shorts_hook_title_line_gap,
     shorts_hook_title_y,
     shorts_middle_y_offset,
@@ -276,19 +276,19 @@ class ShortsDrawer:
         fade_alpha: int = 255,
         subtitle_progress: Optional[float] = None,
     ) -> None:
-        """TTS 자막을 비디오(또는 middle) 하단에 겹쳐 그린다."""
+        """TTS 자막을 비디오 프레임 바로 아래에 그린다."""
         sub = (text or "").strip()
         if not sub or fade_alpha <= 0:
             return
         alpha = max(0, min(255, int(fade_alpha)))
         cx = anchor_rect.centerx
-        margin = shorts_ko_subtitle_video_bottom_margin(screen.get_height())
+        gap = shorts_ko_subtitle_below_video_gap(screen.get_height())
 
         if subtitle_progress is not None:
             surf_in = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_INACTIVE)
             surf_ac = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
             tw, th = surf_in.get_width(), surf_in.get_height()
-            y = anchor_rect.bottom - margin - th
+            y = anchor_rect.bottom + gap
             self._draw_ko_subtitle_background(
                 screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
             )
@@ -304,7 +304,7 @@ class ShortsDrawer:
 
         surf = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
         tw, th = surf.get_width(), surf.get_height()
-        y = anchor_rect.bottom - margin - th
+        y = anchor_rect.bottom + gap
         self._draw_ko_subtitle_background(
             screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
         )

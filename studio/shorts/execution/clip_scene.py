@@ -13,8 +13,8 @@ from studio.shorts.constants import (
     CLIP_TRANSITION_FADE_SEC,
     CTA_HOLD_SEC,
     HOOK_FADE_IN_SEC,
+    SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC,
     SHORTS_BG_PRACTICE_MIN_SEC,
-    SHORTS_BG_PRACTICE_SCALE,
     SHORTS_FOLLOW_ALONG_LABEL,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
@@ -331,7 +331,7 @@ class ClipScene:
             self._start_follow_along_voice()
 
     def _start_sentence_play(self, *, play_index: int) -> None:
-        """sound_path 1·2회차. 1회만 병음·한자 노래방 동기."""
+        """sound_path 1·2회차. 병음·한자 노래방 동기."""
         path = str(self._clip.get("sound_path") or "").strip()
         self._learn_round = int(play_index)
         self._learn_elapsed = 0.0
@@ -363,14 +363,12 @@ class ClipScene:
         self._sound_once_duration = dur
 
     def _start_bg_practice(self) -> None:
-        """따라해보세요 다음: bg만 재생하며 연습 구간."""
+        """따라해보세요 다음: bg + 병음·한자(sound_path보다 1.5초 느린 노래방)."""
         self._learn_round = 4
         self._learn_elapsed = 0.0
         base = max(0.0, float(self._sentence_sound_duration))
-        self._bg_practice_duration = max(
-            float(SHORTS_BG_PRACTICE_MIN_SEC),
-            base * float(SHORTS_BG_PRACTICE_SCALE),
-        )
+        slow_karaoke = base + float(SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC)
+        self._bg_practice_duration = max(float(SHORTS_BG_PRACTICE_MIN_SEC), slow_karaoke)
         if self._start_learn_background is not None:
             try:
                 self._start_learn_background(self._bg_practice_duration + 2.0)
@@ -500,11 +498,32 @@ class ClipScene:
             return ""
         return (self._ko_current_text or "").strip()
 
+    def _follow_along_overlay_subtitle(self) -> str:
+        """학습 3·4단계: 따라해보세요 TTS·BG 구간 비디오 하단 자막."""
+        if self._stage == ClipStage.LEARN_PLAY and self._learn_round in (3, 4):
+            return SHORTS_FOLLOW_ALONG_LABEL
+        return ""
+
+    def _overlay_subtitle_text(self) -> str:
+        ko = self._active_ko_subtitle()
+        if ko:
+            return ko
+        return self._follow_along_overlay_subtitle()
+
     def _ko_subtitle_progress(self) -> Optional[float]:
         text = self._active_ko_subtitle()
         if not text:
             return None
         return compute_karaoke_progress(self._ko_cue_elapsed, self._ko_cue_duration)
+
+    def _overlay_subtitle_progress(self) -> Optional[float]:
+        if self._active_ko_subtitle():
+            return self._ko_subtitle_progress()
+        if self._stage == ClipStage.LEARN_PLAY and self._learn_round == 3:
+            dur = max(0.0, float(self._sound_once_duration))
+            if dur > 1e-6:
+                return compute_karaoke_progress(self._learn_elapsed, dur)
+        return None
 
     def _enter_cta_hold(self) -> None:
         self._stop_learn_audio()
@@ -521,22 +540,43 @@ class ClipScene:
             return self._learn_elapsed >= 2.0
         return self._learn_elapsed >= dur + 0.15
 
+    def _sentence_karaoke_duration(self) -> float:
+        base = max(0.0, float(self._sentence_sound_duration or self._sound_duration))
+        if base > 1e-6:
+            return base
+        return max(0.0, float(self._sound_once_duration))
+
+    def _learn_karaoke_timing(self) -> tuple[float, float]:
+        """노래방 (elapsed, duration). progress = elapsed/duration."""
+        base = self._sentence_karaoke_duration()
+        if self._stage != ClipStage.LEARN_PLAY:
+            if base > 1e-6:
+                return base, base
+            return max(0.0, float(self._learn_elapsed)), 1.0
+
+        if self._learn_round in (1, 2) and not self._is_voice_finished():
+            dur = base if base > 1e-6 else 3.0
+            return max(0.0, float(self._learn_elapsed)), dur
+
+        if self._learn_round == 3:
+            if base > 1e-6:
+                return base, base
+            return max(0.0, float(self._learn_elapsed)), 1.0
+
+        if self._learn_round == 4:
+            slow = base + float(SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC) if base > 1e-6 else 4.5
+            return max(0.0, float(self._learn_elapsed)), slow
+
+        if base > 1e-6:
+            return base, base
+        return max(0.0, float(self._learn_elapsed)), 1.0
+
     def _karaoke_elapsed_sec(self) -> float:
-        """노래방 진행. 1회차만 음성 동기, 이후·종료 후 활성 유지."""
-        dur = max(0.0, float(self._sentence_sound_duration or self._sound_duration))
-        if (
-            self._stage == ClipStage.LEARN_PLAY
-            and self._learn_round == 1
-            and not self._is_voice_finished()
-        ):
-            return self._learn_elapsed
-        if dur > 1e-6:
-            return dur
-        return max(0.0, float(self._learn_elapsed))
+        return self._learn_karaoke_timing()[0]
 
     def _learn_bottom_subtitle(self) -> str:
         if self._stage == ClipStage.LEARN_PLAY and self._learn_round >= 3:
-            return SHORTS_FOLLOW_ALONG_LABEL
+            return ""
         return str(self._clip.get("situation_subtitle") or "").strip()
 
     def _should_show_learn_karaoke(self) -> bool:
@@ -571,15 +611,15 @@ class ClipScene:
         return fallback if fallback.width > 0 and fallback.height > 0 else zones.middle
 
     def _draw_ko_subtitle_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
-        ko_sub = self._active_ko_subtitle()
-        if not ko_sub:
+        sub = self._overlay_subtitle_text()
+        if not sub:
             return
         self._drawer.draw_ko_subtitle_overlay(
             screen,
             anchor_rect=self._ko_subtitle_anchor_rect(zones),
-            text=ko_sub,
+            text=sub,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
-            subtitle_progress=self._ko_subtitle_progress(),
+            subtitle_progress=self._overlay_subtitle_progress(),
         )
 
     def _draw_pinned_video(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
@@ -632,7 +672,7 @@ class ClipScene:
                 self._draw_pinned_video(screen, zones)
             self._draw_ko_subtitle_if_any(screen, zones)
             situation = str(self._clip.get("situation_subtitle") or "")
-            if not self._active_ko_subtitle():
+            if not self._overlay_subtitle_text():
                 self._drawer.draw_bottom_zone(
                     screen,
                     zones=zones,
@@ -650,38 +690,35 @@ class ClipScene:
             ClipStage.CTA_HOLD,
             ClipStage.TRANSITION_OUT,
         )
-        ko_subtitle = self._active_ko_subtitle()
+        overlay_sub = self._overlay_subtitle_text()
 
         if self._frozen_video_frame is not None:
             self._draw_pinned_video(screen, zones)
 
         if show_karaoke:
-            elapsed = self._karaoke_elapsed_sec()
+            k_elapsed, k_dur = self._learn_karaoke_timing()
             screen.set_clip(zones.middle)
             try:
                 self._drawer.draw_middle(
                     screen,
                     zones=zones,
                     item=self._clip,
-                    elapsed_sec=elapsed,
+                    elapsed_sec=k_elapsed,
                     syllable_times=list(self._clip.get("syllable_times") or []),
-                    sound_duration_sec=float(self._sound_duration or 0.0),
+                    sound_duration_sec=k_dur,
                     style=self._style,
                 )
             finally:
                 screen.set_clip(None)
 
-        if ko_subtitle:
+        if overlay_sub:
             self._draw_ko_subtitle_if_any(screen, zones)
         if show_bottom:
             situation = self._learn_bottom_subtitle() if self._stage == ClipStage.LEARN_PLAY else (
                 str(self._clip.get("situation_subtitle") or "")
             )
-            if ko_subtitle:
+            if overlay_sub:
                 situation = ""
-            highlight_bottom = (
-                self._stage == ClipStage.LEARN_PLAY and self._learn_round >= 3 and bool(situation)
-            )
             self._drawer.draw_bottom_zone(
                 screen,
                 zones=zones,
@@ -689,7 +726,6 @@ class ClipScene:
                 cta_text=str(self._clip.get("cta_text") or ""),
                 channel=_CHANNEL_BOTTOM,
                 show_cta=show_cta,
-                highlight_subtitle=highlight_bottom,
             )
 
         screen.set_clip(None)
