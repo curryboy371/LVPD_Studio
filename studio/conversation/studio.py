@@ -199,7 +199,7 @@ class ConversationStudio:
             drawer=self._drawer,
             video_player=self._video_player,
             style=learn_style,
-            hold_sec=float(getattr(settings, "learning_hold_sec", 2.0) or 2.0),
+            hold_sec=float(getattr(settings, "learning_hold_sec", 1.0) or 1.0),
             play_voice=_play_insert_voice,
             title_text=str(
                 getattr(settings, "learning_title_text", "문장 이해하기") or "문장 이해하기"
@@ -248,7 +248,7 @@ class ConversationStudio:
                 getattr(settings, "practice_tip_box_intro_fade_out_sec", 1.25) or 1.25
             ),
             tip_intro_hold_sec=float(
-                getattr(settings, "practice_tip_intro_hold_sec", 3.0) or 3.0
+                getattr(settings, "practice_tip_intro_hold_sec", 1.5) or 1.5
             ),
             sentence_intro_hold_sec=float(
                 getattr(settings, "practice_sentence_intro_hold_sec", 2.0) or 2.0

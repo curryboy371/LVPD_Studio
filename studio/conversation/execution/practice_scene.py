@@ -108,7 +108,7 @@ class PracticeScene(IConversationStep):
         tip_box_intro_fade_in_sec: float = 0.5,
         sentence_intro_fade_in_sec: float = 0.55,
         tip_box_intro_fade_out_sec: float = 1.25,
-        tip_intro_hold_sec: float = 1.0,
+        tip_intro_hold_sec: float = 1.5,
         sentence_intro_hold_sec: float = 2.0,
         content_hold_sec: float = 3.0,
         base_to_sub_slide_out_sec: float = 0.55,
@@ -151,7 +151,7 @@ class PracticeScene(IConversationStep):
         # SHOW_SUB_CONTENT 단계에서 sub 문장 간 자동 전환 대기 시간(초).
         self._sub_content_hold_sec = 3.0
         # 듣기 게이지 완료 후 말하기 게이지 시작 전 대기(초).
-        self._listen_to_speak_gap_sec = 2.0
+        self._listen_to_speak_gap_sec = 1.0
         # 말하기(주황) 게이지 완료 후 다음 sub/전환 전 대기(초).
         self._speak_complete_hold_sec = 1.5
         self._sub_content_wait_remaining_sec = 0.0

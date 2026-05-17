@@ -58,7 +58,7 @@ class LearningScene(FSMConversationStep):
         drawer,
         video_player,
         style: SentenceStyleConfig,
-        hold_sec: float = 2.0,
+        hold_sec: float = 1.0,
         play_voice: Callable[..., None] | None = None,
         title_text: str = "문장 이해하기",
         title_fade_in_sec: float = 1.0,
@@ -220,7 +220,7 @@ class LearningScene(FSMConversationStep):
 
     def _enter_intro_tip_hold(self) -> float:
         """팁 페이드 인 완료 후 대기(문장은 아직 숨김)."""
-        return 3.0
+        return 1.5
 
     def _enter_intro_sentence_in(self) -> float:
         self.drawer.fade_on(self.sentence_channel, self.sentence_intro_fade_in_sec)
