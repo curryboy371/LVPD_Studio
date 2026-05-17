@@ -78,15 +78,19 @@ def _capture_inprocess() -> dict:
         print("FAIL: plate load")
         return {"bright": 0, "max_luma": 0, "area": 0}
     pw, ph = plate.get_size()
-    ix, iy = shorts_brand_icon_xy(config.width, config.height)
+    ix, iy = shorts_brand_icon_xy(
+        config.width, config.height, icon_width=pw, icon_height=ph
+    )
     stats = _icon_region_stats(
         buffer, ix, iy, max(pw, SHORTS_BRAND_ICON_W) + 8, max(ph, SHORTS_BRAND_ICON_H) + 8
     )
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     pygame.image.save(buffer, str(OUT_PATH))
-    crop = buffer.subsurface(
-        pygame.Rect(ix, iy, min(340, config.width - ix), min(220, config.height - iy))
-    )
+    crop_w = min(pw + 40, config.width)
+    crop_h = min(ph + 40, config.height)
+    crop_x = max(0, ix + pw // 2 - crop_w // 2)
+    crop_y = max(0, iy + ph // 2 - crop_h // 2)
+    crop = buffer.subsurface(pygame.Rect(crop_x, crop_y, crop_w, crop_h))
     pygame.image.save(crop, str(CROP_PATH))
     return stats
 

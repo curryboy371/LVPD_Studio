@@ -41,6 +41,34 @@ def _resolve_path(repo: Path, raw: str) -> str:
     return str(repo / p.replace("\\", "/"))
 
 
+def _resolve_conversation_video_path(
+    row: dict[str, str],
+    *,
+    clip_id: int,
+    topic: str,
+    base: Any,
+    repo: Path,
+) -> str:
+    """회화 클립 비디오 경로. CSV → topic/id.mp4 → base.media 순."""
+    video_path = _resolve_path(repo, row.get("video_path") or "")
+    if not video_path or not os.path.exists(video_path):
+        if topic:
+            cand = repo / "resource" / "video" / topic / f"{clip_id}.mp4"
+            if cand.is_file():
+                video_path = str(cand)
+            else:
+                video_path = ""
+        else:
+            video_path = ""
+    if not video_path and base is not None:
+        vp = (getattr(getattr(base, "media", None), "video_path", None) or "").strip()
+        if vp:
+            video_path = _resolve_path(repo, vp)
+    if video_path and not os.path.exists(video_path):
+        return ""
+    return video_path
+
+
 def _default_hook_image(clip_id: int, *, subdir: str = "") -> str:
     if subdir:
         return str(SHORTS_PANDA_DIR / subdir / f"{clip_id}.png")
@@ -254,6 +282,9 @@ def build_shorts_conversation_clip_list(
             logger.warning("shorts conversation clip id=%s: base_id=%s 없음", clip_id, base_id)
             continue
         _merge_base_into_clip(clip, base, repo)
+        clip["video_path"] = _resolve_conversation_video_path(
+            row, clip_id=clip_id, topic=topic, base=base, repo=repo
+        )
         if not clip["sentence"]:
             continue
         out.append(clip)

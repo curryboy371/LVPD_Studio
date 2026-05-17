@@ -12,7 +12,7 @@
         "--mode",
         "debug",
         "--topic",
-        "fruit_store",
+        "where",
         "--shorts-type",
         "conversation"
       ],
@@ -43,7 +43,7 @@
         "--mode",
         "debug",
         "--topic",
-        "fruit_store",
+        "where",
         "--shorts-type",
         "vocabulary"
       ],

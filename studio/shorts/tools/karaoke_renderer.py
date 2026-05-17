@@ -78,6 +78,8 @@ class KaraokeRenderer:
         elapsed_sec: float,
         syllable_times: list[float],
         sound_duration_sec: float,
+        y_offset: int = 0,
+        pinyin_y_offset: int = 0,
     ) -> None:
         """병음·한자·번역을 rect 안에 배치하고 활성 음절을 강조한다."""
         pinyin = (data.pinyin or "").strip()
@@ -94,7 +96,7 @@ class KaraokeRenderer:
         active_hanzi_idx = map_syllable_to_hanzi_index(hanzi, active_syl)
 
         center_x = rect.centerx
-        y = rect.top + 12
+        y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
         line_gap = style.layout.line_gap_px
 
         if pinyin and syllables:

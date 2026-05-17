@@ -1,11 +1,11 @@
-"""숏츠 좌상단 브랜드 icon.png 로드·캐시·그리기 (단일 진입점)."""
+"""숏츠 하단 중앙 브랜드 icon.png 로드·캐시·그리기 (단일 진입점)."""
 
 from __future__ import annotations
 
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pygame
 
@@ -14,19 +14,29 @@ from studio.shorts.constants import (
     SHORTS_BRAND_ICON,
     SHORTS_BRAND_ICON_H,
     SHORTS_BRAND_ICON_W,
+    SHORTS_BRAND_TITLE_COLOR,
+    SHORTS_BRAND_TITLE_TEXT,
     shorts_brand_icon_xy,
+    shorts_brand_title_font_size,
+    shorts_brand_title_gap,
 )
+from utils.fonts import load_font_korean
 
 logger = logging.getLogger(__name__)
 
 _icon_cache: Optional[pygame.Surface] = None
+_title_surf_cache: Optional[pygame.Surface] = None
+_title_font_size_cached: int = 0
 _resolved_path: Optional[Path] = None
 _draw_announced = False
 
 
 def invalidate_brand_icon_cache() -> None:
-    global _icon_cache, _resolved_path, _draw_announced
+    global _icon_cache, _title_surf_cache, _title_font_size_cached
+    global _resolved_path, _draw_announced
     _icon_cache = None
+    _title_surf_cache = None
+    _title_font_size_cached = 0
     _resolved_path = None
     _draw_announced = False
 
@@ -147,8 +157,56 @@ def load_brand_icon_plate() -> Optional[pygame.Surface]:
     return load_brand_icon_surface()
 
 
+def _brand_title_font(size: int) -> Any:
+    for weight in ("bold", "regular"):
+        font = load_font_korean(size, SHORTS_BRAND_TITLE_COLOR, weight=weight)
+        if font is not None:
+            return font
+    return None
+
+
+def _render_brand_title_surface(frame_height: int) -> Optional[pygame.Surface]:
+    """하단 브랜드 타이틀 Surface 캐시."""
+    global _title_surf_cache, _title_font_size_cached
+
+    text = (SHORTS_BRAND_TITLE_TEXT or "").strip()
+    if not text:
+        return None
+
+    size = shorts_brand_title_font_size(frame_height)
+    if _title_surf_cache is not None and _title_font_size_cached == size:
+        return _title_surf_cache
+
+    font = _brand_title_font(size)
+    if font is None:
+        return None
+    try:
+        surf = font.render(text, True, SHORTS_BRAND_TITLE_COLOR)
+    except Exception:
+        return None
+    if surf is None or surf.get_width() <= 0:
+        return None
+
+    _title_surf_cache = surf
+    _title_font_size_cached = size
+    return _title_surf_cache
+
+
+def _draw_brand_title(screen: pygame.Surface, *, icon_y: int) -> bool:
+    fh = screen.get_height()
+    title = _render_brand_title_surface(fh)
+    if title is None:
+        return False
+
+    gap = shorts_brand_title_gap(fh)
+    tx = (screen.get_width() - title.get_width()) // 2
+    ty = max(0, icon_y - gap - title.get_height())
+    screen.blit(title, (tx, ty))
+    return True
+
+
 def draw_brand_icon(screen: pygame.Surface) -> bool:
-    """좌상단 고정 좌표에 icon.png 출력(배경 투명). 성공 시 True."""
+    """하단 중앙: 브랜드 타이틀 + icon.png (배경 투명). 성공 시 True."""
     global _draw_announced
 
     screen.set_clip(None)
@@ -158,7 +216,8 @@ def draw_brand_icon(screen: pygame.Surface) -> bool:
 
     fw, fh = screen.get_width(), screen.get_height()
     iw, ih = icon.get_width(), icon.get_height()
-    x, y = shorts_brand_icon_xy(fw, fh)
+    x, y = shorts_brand_icon_xy(fw, fh, icon_width=iw, icon_height=ih)
+    _draw_brand_title(screen, icon_y=y)
     try:
         screen.blit(icon, (x, y), special_flags=pygame.BLEND_ALPHA_SDL2)
     except Exception:
@@ -168,7 +227,7 @@ def draw_brand_icon(screen: pygame.Surface) -> bool:
         _draw_announced = True
         p = resolve_brand_icon_path()
         print(
-            f"[shorts] brand icon ON top-left ({x},{y}) "
+            f"[shorts] brand icon ON bottom-center ({x},{y}) "
             f"size {iw}x{ih} frame {fw}x{fh} path={p}",
             flush=True,
         )

@@ -13,14 +13,18 @@ from studio.conversation.tools.fade_controller import FadeController
 from studio.conversation.tools.fonts import WHITE
 from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
 from studio.shorts import brand_icon as brand_icon_module
-from studio.shorts.constants import SHORTS_BG_DEFAULT
+from studio.shorts.constants import (
+    HOOK_TITLE_LINE1_COLOR,
+    HOOK_TITLE_LINE2_COLOR,
+    shorts_hook_title_line_gap,
+    shorts_hook_title_y_offset,
+    shorts_middle_y_offset,
+    shorts_pinyin_y_offset,
+)
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
 from studio.shorts.tools.karaoke_renderer import KaraokeRenderer
 from utils.fonts import load_font_korean
-
-_HOOK_TITLE_COLOR = (255, 232, 140)
-
 
 class ShortsDrawer:
     """상단 훅·중앙 학습·하단 CTA 렌더."""
@@ -32,7 +36,7 @@ class ShortsDrawer:
         self._fade = FadeController()
         self._karaoke = KaraokeRenderer(drawer=self._drawer)
         size = int(font_sizes.hook_title)
-        self._hook_font = load_font_korean(size, _HOOK_TITLE_COLOR, weight="bold")
+        self._hook_font = load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="bold")
         self._bottom_font = load_font_korean(int(font_sizes.bottom_kr), WHITE)
         self._cta_font = load_font_korean(int(font_sizes.cta), (200, 210, 255))
         self._bg_surface: Optional[pygame.Surface] = None
@@ -56,14 +60,7 @@ class ShortsDrawer:
         if self._bg_surface is not None and self._bg_surface.get_size() == (width, height):
             return
         surf = pygame.Surface((width, height))
-        surf.fill((18, 20, 28))
-        if SHORTS_BG_DEFAULT.exists():
-            try:
-                img = pygame.image.load(str(SHORTS_BG_DEFAULT)).convert()
-                img = pygame.transform.smoothscale(img, (width, height))
-                surf.blit(img, (0, 0))
-            except Exception:
-                pass
+        surf.fill((0, 0, 0))
         self._bg_surface = surf
         brand_icon_module.draw_brand_icon(self._bg_surface)
 
@@ -101,25 +98,73 @@ class ShortsDrawer:
         self._hook_image_cache[key] = scaled
         return scaled
 
-    def _render_hook_title(self, title: str) -> Optional[pygame.Surface]:
-        text = (title or "").strip()
-        if not text:
-            return None
+    def _hook_title_font(self) -> Any:
         size = int(self._font_sizes.hook_title)
         for font in (
-            self._bottom_font,
             self._hook_font,
-            load_font_korean(size, _HOOK_TITLE_COLOR, weight="regular"),
+            load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="regular"),
         ):
-            if font is None:
-                continue
-            try:
-                surf = font.render(text, True, _HOOK_TITLE_COLOR)
-            except Exception:
-                continue
-            if surf is not None and surf.get_width() > 0:
-                return surf
+            if font is not None:
+                return font
         return None
+
+    @staticmethod
+    def _parse_hook_title_lines(title: str) -> tuple[str, str]:
+        text = (title or "").replace("\\n", "\n").strip()
+        if not text:
+            return "", ""
+        parts = text.split("\n", 1)
+        line1 = parts[0].strip()
+        line2 = parts[1].strip() if len(parts) > 1 else ""
+        return line1, line2
+
+    def _render_hook_title_line(
+        self,
+        font: Any,
+        text: str,
+        color: tuple[int, int, int],
+    ) -> Optional[pygame.Surface]:
+        if not text:
+            return None
+        try:
+            surf = font.render(text, True, color)
+        except Exception:
+            return None
+        if surf is not None and surf.get_width() > 0:
+            return surf
+        return None
+
+    def _render_hook_title(self, title: str, *, frame_height: int) -> Optional[pygame.Surface]:
+        line1, line2 = self._parse_hook_title_lines(title)
+        if not line1 and not line2:
+            return None
+        font = self._hook_title_font()
+        if font is None:
+            return None
+
+        rows: list[pygame.Surface] = []
+        if line1:
+            surf = self._render_hook_title_line(font, line1, HOOK_TITLE_LINE1_COLOR)
+            if surf is not None:
+                rows.append(surf)
+        if line2:
+            surf = self._render_hook_title_line(font, line2, HOOK_TITLE_LINE2_COLOR)
+            if surf is not None:
+                rows.append(surf)
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return rows[0]
+
+        line_gap = shorts_hook_title_line_gap(frame_height)
+        total_w = max(s.get_width() for s in rows)
+        total_h = sum(s.get_height() for s in rows) + line_gap * (len(rows) - 1)
+        out = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
+        y = 0
+        for surf in rows:
+            out.blit(surf, ((total_w - surf.get_width()) // 2, y))
+            y += surf.get_height() + line_gap
+        return out
 
     def draw_brand_icon(self, screen: pygame.Surface) -> bool:
         """브랜드 아이콘 — brand_icon 모듈 단일 경로."""
@@ -127,6 +172,37 @@ class ShortsDrawer:
 
     def warm_brand_icon(self) -> None:
         brand_icon_module.warm_brand_icon()
+
+    def draw_center_video(
+        self,
+        screen: pygame.Surface,
+        player: Any,
+        rect: pygame.Rect,
+        *,
+        pad: int = 16,
+        frozen_frame: Optional[pygame.Surface] = None,
+        alpha: int = 255,
+    ) -> None:
+        """중앙 구역에 비율 유지(contain)로 비디오 프레임만 출력(오디오 없음)."""
+        inner = rect.inflate(-pad * 2, -pad * 2)
+        if inner.width <= 0 or inner.height <= 0:
+            return
+        frame = frozen_frame
+        if frame is None and player is not None:
+            frame = player.get_frame(inner.width, inner.height, contain=True)
+        if frame is None:
+            return
+        x = inner.centerx - frame.get_width() // 2
+        y = inner.centery - frame.get_height() // 2
+        a = max(0, min(255, int(alpha)))
+        if a <= 0:
+            return
+        if a < 255:
+            frame = frame.copy()
+            frame.set_alpha(a)
+            screen.blit(frame, (x, y))
+        else:
+            screen.blit(frame, (x, y))
 
     def draw_hook_title(
         self,
@@ -143,12 +219,13 @@ class ShortsDrawer:
         if not title:
             return rect.top + pad
 
-        surf = self._render_hook_title(title)
+        surf = self._render_hook_title(title, frame_height=screen.get_height())
         if surf is None:
             return rect.top + pad
 
         tx = rect.centerx - surf.get_width() // 2
         ty = rect.top + max(pad, (rect.height - surf.get_height()) // 2 - pad)
+        ty += shorts_hook_title_y_offset(screen.get_height())
         ty = max(rect.top + pad, min(ty, rect.bottom - surf.get_height() - pad))
         screen.blit(surf, (tx, ty))
         return ty + surf.get_height() + 12
@@ -226,6 +303,7 @@ class ShortsDrawer:
         style: Any,
     ) -> None:
         data = build_sentence_render_data_with_tone_icons(item)
+        fh = screen.get_height()
         self._karaoke.draw(
             screen,
             data=data,
@@ -234,6 +312,8 @@ class ShortsDrawer:
             elapsed_sec=elapsed_sec,
             syllable_times=syllable_times,
             sound_duration_sec=sound_duration_sec,
+            y_offset=shorts_middle_y_offset(fh),
+            pinyin_y_offset=shorts_pinyin_y_offset(fh),
         )
 
     def draw_middle_word(
@@ -249,9 +329,10 @@ class ShortsDrawer:
     ) -> None:
         """단어 숏츠: 연상 이미지 + 노래방(한 글자/음절)."""
         rect = zones.middle
+        y_off = shorts_middle_y_offset(screen.get_height())
         img_path = str(item.get("word_img_path") or "").strip()
         img = self._load_hook_image(img_path, int(rect.width * 0.5), int(rect.height * 0.35))
-        y_top = rect.top + 8
+        y_top = rect.top + 8 + y_off
         if img is not None:
             screen.blit(img, (rect.centerx - img.get_width() // 2, y_top))
             y_top += img.get_height() + 12
@@ -265,6 +346,7 @@ class ShortsDrawer:
             elapsed_sec=elapsed_sec,
             syllable_times=syllable_times,
             sound_duration_sec=sound_duration_sec,
+            y_offset=0,
         )
 
     def draw_bottom_zone(
