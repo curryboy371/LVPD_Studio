@@ -1,4 +1,4 @@
-"""숏츠 학습 안내 음성: 원어민 발음 따라하기 (TTS mp3)."""
+"""숏츠 학습 3단계 안내 음성 (follow_along.mp3 → SHORTS_FOLLOW_ALONG_LABEL)."""
 from __future__ import annotations
 
 import logging

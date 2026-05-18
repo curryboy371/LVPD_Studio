@@ -16,6 +16,7 @@ from studio.shorts.constants import (
     SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC,
     SHORTS_BG_PRACTICE_MIN_SEC,
     SHORTS_FOLLOW_ALONG_LABEL,
+    SHORTS_NATIVE_LISTEN_LABEL,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
@@ -583,9 +584,13 @@ class ClipScene:
             return ""
         return (self._ko_current_text or "").strip()
 
-    def _follow_along_overlay_subtitle(self) -> str:
-        """학습 3·4단계: 따라해보세요 TTS·BG 구간 비디오 하단 자막."""
-        if self._stage == ClipStage.LEARN_PLAY and self._learn_round in (3, 4):
+    def _learn_overlay_subtitle(self) -> str:
+        """학습 구간 비디오 하단 안내 자막( KO 내레이션 cue 와 별도 )."""
+        if self._stage != ClipStage.LEARN_PLAY:
+            return ""
+        if self._learn_round in (1, 2):
+            return SHORTS_NATIVE_LISTEN_LABEL
+        if self._learn_round in (3, 4):
             return SHORTS_FOLLOW_ALONG_LABEL
         return ""
 
@@ -593,7 +598,7 @@ class ClipScene:
         ko = self._active_ko_subtitle()
         if ko:
             return ko
-        return self._follow_along_overlay_subtitle()
+        return self._learn_overlay_subtitle()
 
     def _ko_subtitle_progress(self) -> Optional[float]:
         text = self._active_ko_subtitle()
@@ -672,7 +677,7 @@ class ClipScene:
         return self._learn_karaoke_timing()[0]
 
     def _situation_subtitle_for_bottom(self) -> str:
-        """하단 situation 문구 — 따라해보세요(3·4단계) 포함 학습이 끝난 뒤에만."""
+        """하단 situation 문구 — 학습(1~4단계) 중에는 숨기고, 학습 끝난 뒤에만."""
         if self._stage == ClipStage.LEARN_PLAY:
             return ""
         if self._stage in (

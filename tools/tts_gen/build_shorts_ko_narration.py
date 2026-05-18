@@ -47,7 +47,12 @@ def main() -> int:
         action="store_true",
         help="문장별 mp3 외 composite mp3도 생성(MoviePy mux용)",
     )
-    parser.add_argument("--set-id", type=int, default=0, help="ko_narration_sets.id 만 처리")
+    parser.add_argument(
+        "--set-id",
+        type=int,
+        default=0,
+        help="ko_narration_sets.id (지정 시 해당 set 산출물만 삭제 후 재생성)",
+    )
     args = parser.parse_args()
 
     topics = [t for t in args.topic if t.strip()] or None
@@ -66,13 +71,14 @@ def main() -> int:
                 sid, tts_cli=args.tts, tts_voice_cli=args.tts_voice
             )
             logger.info("  set_id=%s 음성=%s", sid, format_tts_log_label(engine, voice))
-    try:
-        from studio.shorts.follow_along_tts import ensure_follow_along_mp3
+    if int(args.set_id) <= 0:
+        try:
+            from studio.shorts.follow_along_tts import ensure_follow_along_mp3
 
-        ensure_follow_along_mp3()
-        logger.info("follow_along mp3 준비: resource/sound/shorts/follow_along.mp3")
-    except Exception as ex:
-        logger.warning("follow_along TTS 생성 실패: %s", ex)
+            ensure_follow_along_mp3()
+            logger.info("follow_along mp3 준비: resource/sound/shorts/follow_along.mp3")
+        except Exception as ex:
+            logger.warning("follow_along TTS 생성 실패: %s", ex)
 
     ok, skip, fail = batch_build_shorts_ko_narration(
         shorts_mode=args.shorts_type,

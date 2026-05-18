@@ -32,7 +32,7 @@ from studio.shorts.constants import (
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
 from studio.shorts.tools.karaoke_renderer import KaraokeRenderer, blit_horizontal_karaoke_wipe
-from utils.fonts import load_font_korean
+from utils.fonts import load_font_korean, load_font_kr_chinese
 
 class ShortsDrawer:
     """상단 훅·중앙 학습·하단 CTA 렌더."""
@@ -45,7 +45,10 @@ class ShortsDrawer:
         self._karaoke = KaraokeRenderer(drawer=self._drawer)
         size = int(font_sizes.hook_title)
         self._hook_font = load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="bold")
-        self._bottom_font = load_font_korean(int(font_sizes.bottom_kr), WHITE)
+        bottom_pt = int(font_sizes.bottom_kr)
+        self._bottom_font = load_font_kr_chinese(bottom_pt, WHITE) or load_font_korean(
+            bottom_pt, WHITE
+        )
         self._ko_subtitle_font = load_font_korean(int(font_sizes.ko_subtitle_kr), WHITE)
         self._bg_surface: Optional[pygame.Surface] = None
         self._hook_image_cache: dict[str, pygame.Surface] = {}

@@ -298,3 +298,100 @@ def load_font_korean(
     except Exception:
         pass
     return None
+
+
+# 한글+한자 혼합(숏츠 situation_subtitle 등)
+_KR_CN_FONT_STEM_PRIORITY = (
+    "notosanscjkkr",
+    "notosanscjk-kr",
+    "sourcehansanskr",
+    "sourcehansansk",
+    "notosanscjk",
+    "sourcehansans",
+)
+
+
+def find_kr_cn_font_paths_in_dir(font_dir: Path) -> list[Path]:
+    """resource/font 에서 한글·한자(간체) 모두 커버 가능한 폰트 후보."""
+    if not font_dir.is_dir():
+        return []
+    candidates: list[Path] = []
+    for ext in ("*.ttf", "*.otf", "*.ttc"):
+        for p in font_dir.glob(ext):
+            stem = p.stem.lower().replace(" ", "").replace("-", "")
+            if any(x in stem for x in ("jp", "japanese", "tc", "traditional", "hk", "tw")):
+                continue
+            if "sc" in stem and "kr" not in stem and "cjk" not in stem:
+                continue
+            if any(x in stem for x in ("cjk", "sourcehan", "notosanscjk")):
+                candidates.append(p)
+            elif "kr" in stem and "noto" in stem and "sans" in stem:
+                candidates.append(p)
+    if not candidates:
+        return []
+
+    def rank(path: Path) -> tuple[int, str]:
+        s = path.stem.lower().replace(" ", "").replace("-", "")
+        for i, key in enumerate(_KR_CN_FONT_STEM_PRIORITY):
+            if key in s:
+                return i, s
+        return len(_KR_CN_FONT_STEM_PRIORITY), s
+
+    candidates.sort(key=rank)
+    return candidates
+
+
+def _sysfont_kr_chinese(size: int, fgcolor: Tuple[int, int, int]) -> "Optional[pygame.font.Font]":
+    if pygame is None:
+        return None
+    names = [
+        "noto sans cjk kr",
+        "noto sans cjk sc",
+        "source han sans kr",
+        "source han sans k",
+        "malgun gothic",
+        "microsoft yahei",
+    ]
+    for name in names:
+        try:
+            font = pygame.font.SysFont(name, size)
+            if font is not None:
+                logger.info("한글·한자 혼합 시스템 폰트: %s (size=%d)", name, size)
+                return attach_font_fgcolor(font, fgcolor)
+        except Exception:
+            continue
+    return None
+
+
+def load_font_kr_chinese(
+    size: int,
+    fgcolor: Tuple[int, int, int],
+    *,
+    weight: str = "regular",
+) -> "Optional[pygame.font.Font]":
+    """한글·한자 혼합 텍스트용 (숏츠 situation_subtitle 등)."""
+    from core.paths import DEFAULT_FONT_DIR, FONT_SITUATION_FILENAMES
+
+    if pygame is None:
+        return None
+    for name in FONT_SITUATION_FILENAMES:
+        font = _load_font_at(DEFAULT_FONT_DIR / name, size)
+        if font is not None:
+            return attach_font_fgcolor(font, fgcolor)
+    for path in find_kr_cn_font_paths_in_dir(DEFAULT_FONT_DIR):
+        font = _load_font_at(path, size)
+        if font is not None:
+            return attach_font_fgcolor(font, fgcolor)
+    font = load_font_chinese(size, fgcolor, weight=weight)
+    if font is not None:
+        return font
+    font = load_font_korean(size, fgcolor, weight=weight)
+    if font is not None:
+        return font
+    font = _sysfont_kr_chinese(size, fgcolor)
+    if font is not None:
+        return font
+    logger.warning(
+        "한글·한자 혼합 폰트 없음. resource/font 에 NotoSansCJKkr-Regular.otf 권장."
+    )
+    return None

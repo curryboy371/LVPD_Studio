@@ -452,8 +452,45 @@ def adjusted_srt_path_for_set(set_id: int) -> Path:
     return KO_SOUND_DIR / f"ko_{stem}_adjusted.srt"
 
 
+def _ko_set_output_glob_patterns(set_id: int) -> list[str]:
+    stem = _cache_stem_for_set(set_id)
+    return [f"ko_{stem}_*"]
+
+
+def clear_ko_set_sound_output(set_id: int) -> int:
+    """지정 ko_narration set_id 산출물만 삭제 (ko_set_{id}_*.mp3/json/srt 등)."""
+    sid = int(set_id)
+    if sid < 1:
+        return 0
+    removed = 0
+    dirs = [KO_SOUND_DIR]
+    if _LEGACY_KO_SOUND_DIR != KO_SOUND_DIR:
+        dirs.append(_LEGACY_KO_SOUND_DIR)
+    for directory in dirs:
+        if not directory.is_dir():
+            continue
+        for pattern in _ko_set_output_glob_patterns(sid):
+            for entry in directory.glob(pattern):
+                try:
+                    if entry.is_file():
+                        entry.unlink()
+                        removed += 1
+                    elif entry.is_dir():
+                        shutil.rmtree(entry)
+                        removed += 1
+                except OSError as ex:
+                    logger.warning("set_id=%s 삭제 실패 %s: %s", sid, entry, ex)
+    logger.info(
+        "set_id=%s TTS 산출물 삭제: %d개 (ko_set_%s_*)",
+        sid,
+        removed,
+        sid,
+    )
+    return removed
+
+
 def clear_ko_shorts_sound_output() -> None:
-    """batch_ko_tts 시작 시 resource/sound/shorts 비우기."""
+    """전체 shorts 출력 비우기 (--set-id 없이 전체 배치할 때만)."""
     KO_SOUND_DIR.mkdir(parents=True, exist_ok=True)
     removed = 0
     for entry in KO_SOUND_DIR.iterdir():
@@ -603,7 +640,10 @@ def batch_build_shorts_ko_narration(
     from data.ko_narration_loader import load_ko_narration_tables
 
     load_ko_narration_tables()
-    clear_ko_shorts_sound_output()
+    if int(set_id) > 0:
+        clear_ko_set_sound_output(int(set_id))
+    else:
+        clear_ko_shorts_sound_output()
     target_ids = collect_ko_narration_set_ids_from_shorts_csv(
         shorts_mode=shorts_mode,
         csv_path=csv_path,
