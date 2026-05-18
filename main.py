@@ -2,6 +2,7 @@
 단일 진입점. 명령별 실행:
 
   python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). 기본 topic은 fruit store. --mode record 로 오프스크린 녹화
+  F5(디버그)            → .vscode/launch.json 기본: 숏츠 단어 (--studio shorts --shorts-type vocabulary)
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
   python main.py batch-shorts-ko → ko_narration_* 테이블 기준 문장별 TTS 사전 생성
 
@@ -278,7 +279,7 @@ def _cmd_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     if not content.video_segments and not content.overlay_items:
         logger.error("콘텐츠가 없습니다. create_all_csv.bat으로 CSV를 생성한 뒤 resource/csv/ 에 base_sentences.csv 등이 있는지 확인하세요.")
         sys.exit(1)
-    # F5 / `python main.py studio`: 디버깅용으로 집계 단어(voca) 화면부터 시작(회화 생략)
+    # `python main.py studio`: 디버깅용으로 집계 단어(voca) 화면부터 시작(회화 생략). F5는 launch.json 숏츠 단어.
     session_topics = _parse_session_topics_arg(getattr(args, "topic", "") or "")
     studio = _create_studio(
         "conversation_then_words",

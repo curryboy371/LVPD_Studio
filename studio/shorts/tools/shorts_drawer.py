@@ -14,6 +14,8 @@ from studio.conversation.tools.fonts import WHITE
 from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
 from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import (
+    SHORTS_VOCAB_WORD_IMG_MAX_HEIGHT_RATIO,
+    SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO,
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
     KO_KARAOKE_ACTIVE,
@@ -445,7 +447,11 @@ class ShortsDrawer:
         rect = zones.middle
         y_off = shorts_middle_y_offset(screen.get_height())
         img_path = str(item.get("word_img_path") or "").strip()
-        img = self._load_hook_image(img_path, int(rect.width * 0.5), int(rect.height * 0.35))
+        img = self._load_hook_image(
+            img_path,
+            int(rect.width * SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO),
+            int(rect.height * SHORTS_VOCAB_WORD_IMG_MAX_HEIGHT_RATIO),
+        )
         y_top = rect.top + 8 + y_off
         if img is not None:
             screen.blit(img, (rect.centerx - img.get_width() // 2, y_top))

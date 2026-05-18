@@ -720,6 +720,7 @@ def main() -> None:
     elif args.studio == "shorts":
         load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
         load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+        load_vocabulary_word_rows_from_csv(DEFAULT_VOCABULARY_WORD_ROWS_CSV)
         content = None
         if not get_base_sentences():
             print(

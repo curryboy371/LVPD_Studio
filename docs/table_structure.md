@@ -86,13 +86,14 @@
 |------|------|------|------|
 | id | int | O | 숏츠 클립 ID |
 | topic | str | - | 주제 (`--topic` 필터) |
-| word_id | int | O | `words.id` |
+| word_id | int | O | `words.id` — 한자·병음·연상 이미지(`img_path`)·발음(`sound_path`)는 words에서 조인 |
 | hook_title | str | O | 상단 후킹 타이틀 |
-| hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/vocabulary/{id}.png` 등 |
-| situation_subtitle | str | - | 하단 설명(비우면 단어 뜻) |
 | ko_narration_id | int | - | `ko_narration_sets.id` 참조 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표) |
-| sound_path | str | - | 비우면 `words.sound_path` |
+
+판다 후킹 이미지는 CSV에 두지 않으며 `resource/image/shorts/panda/vocabulary/{id}.png` 기본 경로를 쓴다.
+
+**단어 뜻 TTS(재생 순서: 뜻 KO → 중국어 mp3)**: `batch_vocab_ko_tts.bat` + topic 입력 → `shorts_vocabulary_clips`의 `word_id`로 `words.meaning` 첫 항목 TTS 생성 → `resource/sound/shorts/ko_word_{word_id}_*.mp3`. `ko_narration_id`는 회화용 후킹 내레이션에 쓰며 단어 뜻 TTS와 별도.
 
 ## 6) ko_narration_sets (한국어 TTS·세트)
 

@@ -43,6 +43,9 @@ SHORTS_PINYIN_Y_OFFSET = 72
 SHORTS_PINYIN_HANZI_GAP = 52
 # 1080×1920 기준 — 한자↔번역(뜻) 추가 간격
 SHORTS_TRANSLATION_EXTRA_GAP = 28
+# 단어 숏츠 중앙 연상 이미지 (middle 구역 대비 최대 크기)
+SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO = 0.82
+SHORTS_VOCAB_WORD_IMG_MAX_HEIGHT_RATIO = 0.52
 
 
 def shorts_middle_y_offset(frame_height: int) -> int:
