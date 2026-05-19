@@ -175,18 +175,27 @@ def collect_vocab_word_ids_for_topic(
     topic_set = {topic_key}
     seen: set[int] = set()
     out: list[tuple[int, int]] = []
+    from studio.shorts.data_loading import (
+        _vocab_word_clip_id,
+        parse_vocab_word_ids_field,
+    )
+
     for row in _read_shorts_csv(path, label="shorts_vocabulary_clips"):
         if not _topic_matches((row.get("topic") or "").strip(), topic_set):
             continue
         try:
-            clip_id = int(float(row.get("id") or "0"))
-            word_id = int(float(row.get("word_id") or "0"))
+            topic_row_id = int(float(row.get("id") or "0"))
         except (TypeError, ValueError):
             continue
-        if clip_id < 1 or word_id < 1 or word_id in seen:
+        if topic_row_id < 1:
             continue
-        seen.add(word_id)
-        out.append((clip_id, word_id))
+        for wi, word_id in enumerate(
+            parse_vocab_word_ids_field(row.get("word_id") or ""), start=1
+        ):
+            if word_id in seen:
+                continue
+            seen.add(word_id)
+            out.append((_vocab_word_clip_id(topic_row_id, wi), word_id))
     if out:
         return out
     fallback = collect_vocab_word_ids_from_vocabulary_rows(topic)

@@ -10,7 +10,12 @@ import pygame
 from core.interfaces import IStudio
 from studio.conversation.core.types import FrameContext, SentenceStyleConfig
 from studio.conversation.core.types import ColorStyle, LayoutStyle, TextStyle
-from studio.shorts.data_loading import build_shorts_clip_list
+from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
+from studio.shorts.data_loading import (
+    build_shorts_clip_list,
+    extract_vocab_topic_intro,
+    topic_intro_configured,
+)
 from studio.shorts.execution.clip_scene import ClipScene
 from studio.shorts.tools.fonts import (
     DEFAULT_SHORTS_RENDER_SETTINGS,
@@ -48,6 +53,7 @@ class ShortsStudio(IStudio):
         self._scene: Optional[ClipScene] = None
         self._last_config: Any = None
         self._recording_done = False
+        self._topic_intro_done = False
         self._bg_player: Optional[ShortsBackgroundPlayer] = None
         csv_name = (
             "shorts_vocabulary_clips.csv"
@@ -95,6 +101,7 @@ class ShortsStudio(IStudio):
             follow_along_mp3=self._follow_along_mp3_path,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
+        self._scene.set_on_topic_intro_done(self._on_topic_intro_done)
         self._scene.set_record_end_hold(0.0)
         if self._clips:
             self._start_current_clip()
@@ -145,6 +152,7 @@ class ShortsStudio(IStudio):
         """녹화 루프 직전: init 시점에 쌓인 재생 상태를 버리고 클립 0부터 다시 시작."""
         self._last_config = config
         self._recording_done = False
+        self._topic_intro_done = False
         self._stop_learn_audio()
         if self._scene is not None:
             self._scene.set_record_end_hold(SHORTS_RECORD_END_HOLD_SEC)
@@ -236,9 +244,23 @@ class ShortsStudio(IStudio):
     def _start_current_clip(self) -> None:
         if not self._scene or not self._clips:
             return
+        if self._should_play_vocab_topic_intro():
+            self._topic_intro_done = True
+            intro = extract_vocab_topic_intro(self._clips)
+            if intro is not None:
+                self._scene.start_topic_intro(intro)
+                return
         idx = min(self._clip_index, len(self._clips) - 1)
         is_last = idx >= len(self._clips) - 1
         self._scene.start_clip(self._clips[idx], is_last=is_last)
+
+    def _should_play_vocab_topic_intro(self) -> bool:
+        if self._shorts_mode != CLIP_TYPE_VOCABULARY or self._topic_intro_done:
+            return False
+        return topic_intro_configured(extract_vocab_topic_intro(self._clips))
+
+    def _on_topic_intro_done(self) -> None:
+        self._start_current_clip()
 
     def _on_clip_done(self) -> None:
         if self._clip_index >= len(self._clips) - 1:

@@ -1,5 +1,7 @@
 """
 shorts_vocabulary_clips(숏츠·단어) 엑셀 → shorts_vocabulary_clips.csv 변환.
+
+topic당 행 1개. word_id·hook_title는 | 로 복수 지정.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ FIELDNAMES = [
     "word_id",
     "hook_title",
     "ko_narration_id",
-    "syllable_times_ms",
+    "video_path",
 ]
 
 
@@ -53,18 +55,18 @@ def shorts_vocabulary_clips_excel_to_csv(
     final_rows: list[dict[str, Any]] = []
 
     for _, row in df.iterrows():
-        clip_id = _to_int(row.get("id"), 0)
-        word_id = _to_int(row.get("word_id"), 0)
+        topic_row_id = _to_int(row.get("id"), 0)
         hook_title = _normalize(row.get("hook_title"))
-        if clip_id < 1 or word_id < 1 or not hook_title:
+        word_id_raw = _normalize(row.get("word_id"))
+        if topic_row_id < 1 or not word_id_raw or not hook_title:
             continue
         final_rows.append({
-            "id": clip_id,
+            "id": topic_row_id,
             "topic": _normalize(row.get("topic")),
-            "word_id": word_id,
+            "word_id": word_id_raw,
             "hook_title": hook_title,
             "ko_narration_id": _to_int(row.get("ko_narration_id"), 0),
-            "syllable_times_ms": _normalize(row.get("syllable_times_ms")),
+            "video_path": _normalize(row.get("video_path")),
         })
 
     out_path = Path(csv_path)

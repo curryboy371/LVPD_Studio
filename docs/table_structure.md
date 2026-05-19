@@ -84,16 +84,29 @@
 
 | 컬럼 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| id | int | O | 숏츠 클립 ID |
+| id | int | O | **topic당 1개** (CSV 행 id) |
 | topic | str | - | 주제 (`--topic` 필터) |
-| word_id | int | O | `words.id` — 한자·병음·연상 이미지(`img_path`)·발음(`sound_path`)는 words에서 조인 |
-| hook_title | str | O | 상단 후킹 타이틀 |
-| ko_narration_id | int | - | `ko_narration_sets.id` 참조 |
-| syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표) |
+| word_id | str | O | `words.id` 여러 개: `20501\|20504\|20505` (`\|` 구분) |
+| hook_title | str | O | 훅 문구: `\|` 로 복수. **1개만** 넣으면 모든 단어에 동일 |
+| ko_narration_id | int | - | topic 인트로 TTS·자막 (`batch_ko_tts.bat` 1회) |
+| video_path | str | - | topic 인트로 mp4 1개 |
 
-판다 후킹 이미지는 CSV에 두지 않으며 `resource/image/shorts/panda/vocabulary/{id}.png` 기본 경로를 쓴다.
+단어 숏츠는 `syllable_times_ms` 없음(노래방은 발음 길이로 균등 진행). 회화 숏츠만 `syllable_times_ms` 사용.
 
-**단어 뜻 TTS(재생 순서: 뜻 KO → 중국어 mp3)**: `batch_vocab_ko_tts.bat` + topic 입력 → `shorts_vocabulary_clips`의 `word_id`로 `words.meaning` 첫 항목 TTS 생성 → `resource/sound/shorts/ko_word_{word_id}_*.mp3`. `ko_narration_id`는 회화용 후킹 내레이션에 쓰며 단어 뜻 TTS와 별도.
+로드 시 단어 클립 내부 id는 `{id}001`, `{id}002` … (예: topic id=1 → 1001, 1002). 판다: `panda/vocabulary/{내부id}.png`.
+
+**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → 뜻 TTS → 중국어 발음.
+
+### CSV 예 (topic 1행)
+
+```csv
+id,topic,word_id,hook_title,ko_narration_id,video_path
+1,fruit_store,20501|20504|20505,사과 외워보세요|망고 외워보세요|수박 외워보세요,2,resource/video/intro.mp4
+```
+
+`hook_title`이 `과일 단어 외워보세요` 한 줄이면 사과·망고·수박 모두 같은 훅.
+
+준비: `batch_ko_tts.bat 2` → `batch_vocab_ko_tts.bat fruit_store` → F5 `--topic fruit_store`
 
 ## 6) ko_narration_sets (한국어 TTS·세트)
 

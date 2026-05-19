@@ -106,6 +106,8 @@ class ClipScene:
         self._bg_practice_duration = 0.0
         self._voice_channel: Optional[pygame.mixer.Channel] = None
         self._on_clip_done: Optional[Callable[[], None]] = None
+        self._on_topic_intro_done: Optional[Callable[[], None]] = None
+        self._topic_intro_mode = False
         self._is_last_clip = True
         self._ko_plan: Optional[Any] = None
         self._ko_cue_index = 0
@@ -115,6 +117,7 @@ class ClipScene:
         self._ko_finished = False
         self._ko_started = False
         self._vocab_meaning_plan: Optional[Any] = None
+        self._vocab_meaning_subtitle_hold = ""
         self._record_end_hold_sec = 0.0
         self._end_hold_after_learn = False
         self._last_live_video_frame: Optional[pygame.Surface] = None
@@ -137,6 +140,73 @@ class ClipScene:
 
     def set_on_clip_done(self, callback: Optional[Callable[[], None]]) -> None:
         self._on_clip_done = callback
+
+    def set_on_topic_intro_done(self, callback: Optional[Callable[[], None]]) -> None:
+        self._on_topic_intro_done = callback
+
+    def start_topic_intro(self, intro: dict[str, Any]) -> None:
+        """단어 숏츠: topic당 1회 — 비디오 + ko_narration_id TTS 후 단어 클립 시작."""
+        self._topic_intro_mode = True
+        self._clip = {
+            "clip_type": CLIP_TYPE_VOCABULARY,
+            "clip_id": int(intro.get("clip_id") or 0),
+            "topic": str(intro.get("topic") or "").strip(),
+            "hook_title": str(intro.get("hook_title") or "").strip(),
+            "ko_narration_id": int(intro.get("ko_narration_id") or 0),
+            "video_path": str(intro.get("video_path") or "").strip(),
+            "sentence": [],
+            "translation": [],
+        }
+        self._hook_title = resolve_hook_title(self._clip)
+        self._is_last_clip = False
+        self._timer = 0.0
+        self._stop_learn_audio()
+        self._video_player.close()
+        self._frozen_video_frame = None
+        self._video_inner_size = (0, 0)
+        self._video_display_alpha = 255
+        self._had_video_intro = False
+        self._last_live_video_frame = None
+        self._ko_plan = None
+        self._ko_finished = False
+        self._ko_started = False
+        self._vocab_meaning_plan = None
+        self._ensure_ko_plan()
+
+        video_path = str(self._clip.get("video_path") or "").strip()
+        if video_path:
+            self._video_player.set_source(video_path, 0.0, -1.0)
+            if self._video_player.has_source():
+                self._had_video_intro = True
+                self._stage = ClipStage.VIDEO_PLAY
+                fade = self._drawer.fade
+                fade.fade_on(_CHANNEL_HOOK, 0.0)
+                fade.fade_on(_CHANNEL_BOTTOM, 0.0)
+                return
+            self._video_player.close()
+
+        if self._ko_plan is not None:
+            self._stage = ClipStage.VIDEO_PLAY
+            self._had_video_intro = bool(video_path)
+            self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
+            self._start_ko_narration_sequence(during_video=bool(video_path))
+            if not video_path:
+                return
+
+        self._finish_topic_intro()
+
+    def _finish_topic_intro(self) -> None:
+        if not self._topic_intro_mode:
+            return
+        self._topic_intro_mode = False
+        self._stop_learn_audio()
+        self._video_player.close()
+        self._frozen_video_frame = None
+        self._last_live_video_frame = None
+        self._video_display_alpha = 255
+        cb = self._on_topic_intro_done
+        if cb:
+            cb()
 
     def _try_start_deferred_ko_narration(self) -> None:
         """비디오 구간 KO TTS는 첫 update에서 시작(녹화 로거 준비 후 InsertSound 기록)."""
@@ -162,7 +232,26 @@ class ClipScene:
             return False
         return True
 
+    def _vocab_show_ui_immediately(self) -> None:
+        """단어 숏츠: 훅·하단 페이드 없이 즉시 표시."""
+        fade = self._drawer.fade
+        fade.fade_on(_CHANNEL_HOOK, 0.0)
+        fade.fade_on(_CHANNEL_BOTTOM, 0.0)
+
+    def _vocab_skip_to_content(self) -> None:
+        """단어 숏츠: HOOK_IN 대기 없이 뜻 TTS 또는 발음 단계로."""
+        self._vocab_show_ui_immediately()
+        if self._vocab_meaning_plan is not None:
+            self._enter_vocab_meaning_ko()
+        else:
+            self._enter_learn_play()
+
     def _enter_hook_in(self) -> None:
+        if self._is_vocabulary_clip():
+            self._stage = ClipStage.HOOK_IN
+            self._timer = 0.0
+            self._vocab_skip_to_content()
+            return
         self._stage = ClipStage.HOOK_IN
         self._timer = 0.0
         fade = self._drawer.fade
@@ -201,12 +290,12 @@ class ClipScene:
         self._ko_finished = False
         self._ko_started = False
         self._vocab_meaning_plan = None
+        self._vocab_meaning_subtitle_hold = ""
         self._ensure_ko_plan()
         self._ensure_vocab_meaning_plan()
 
-        clip_type = str(self._clip.get("clip_type") or "").strip()
         video_path = str(self._clip.get("video_path") or "").strip()
-        if clip_type == CLIP_TYPE_CONVERSATION and video_path:
+        if video_path and self._clip_has_video_intro():
             self._video_player.set_source(video_path, 0.0, -1.0)
             if self._video_player.has_source():
                 self._had_video_intro = True
@@ -219,6 +308,17 @@ class ClipScene:
             self._video_player.close()
 
         self._enter_hook_in()
+
+    def _clip_has_video_intro(self) -> bool:
+        """단어 숏츠는 topic 인트로에서만 비디오. 회화만 클립별 비디오."""
+        return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_CONVERSATION
+
+    def _enter_post_video_intro(self) -> None:
+        """인트로 비디오·KO 내레이션 후 — 단어: 뜻 TTS, 회화: 학습."""
+        if self._is_vocabulary_clip() and self._vocab_meaning_plan is not None:
+            self._enter_vocab_meaning_ko()
+        else:
+            self._enter_learn_play()
 
     def _ensure_ko_plan(self) -> None:
         """ko_narration_id → 캐시 mp3 우선, 없으면 재생 시점 TTS 생성."""
@@ -259,10 +359,20 @@ class ClipScene:
             return
         if self._stage in (ClipStage.VIDEO_PLAY, ClipStage.VIDEO_HOLD, ClipStage.VIDEO_FADE_OUT):
             self._video_player.close()
-            self._enter_learn_play()
+            if self._topic_intro_mode:
+                self._finish_topic_intro()
+            else:
+                self._enter_post_video_intro()
             return
         if self._stage == ClipStage.LEARN_PLAY:
             self._stop_learn_audio()
+        if (
+            self._is_vocabulary_clip()
+            and not self._is_last_clip
+            and not self._topic_intro_mode
+        ):
+            self._finish_clip()
+            return
         self._stage = ClipStage.TRANSITION_OUT
         self._timer = 0.0
         self._drawer.fade.fade_off(_CHANNEL_HOOK, CLIP_TRANSITION_FADE_SEC)
@@ -279,26 +389,35 @@ class ClipScene:
         if self._stage == ClipStage.VIDEO_PLAY:
             self._try_start_deferred_ko_narration()
             self._tick_ko_narration(dt_sec)
-            if self._frozen_video_frame is not None:
+            # tick 중 topic→단어 handoff(start_clip) 시 stage가 바뀌면 아래 VIDEO_HOLD 등 재진입 금지
+            if self._stage != ClipStage.VIDEO_PLAY:
+                pass
+            elif self._topic_intro_mode and not self._video_player.has_source():
+                if self._ko_finished or not self._is_video_ko_narration_pending():
+                    self._finish_topic_intro()
+            elif self._frozen_video_frame is not None:
                 if not self._is_video_ko_narration_pending():
                     self._enter_video_hold()
+            else:
+                iw, ih = self._video_inner_size
+                if iw <= 0 or ih <= 0:
+                    iw, ih = self._default_video_inner_size()
+                self._video_player.tick(max(0.0, float(dt_sec)))
+                if self._video_player.has_source():
+                    live = self._video_player.get_frame(iw, ih, contain=True)
+                    if live is not None:
+                        self._last_live_video_frame = live.copy()
+                end_sec = float(self._video_player.get_effective_end_sec())
+                pts = float(self._video_player.get_pts())
+                if self._video_player.is_paused() and pts >= end_sec - 1e-3:
+                    self._freeze_video_frame()
+                    if (
+                        self._stage == ClipStage.VIDEO_PLAY
+                        and not self._is_video_ko_narration_pending()
+                    ):
+                        self._enter_video_hold()
+            if self._stage == ClipStage.VIDEO_PLAY:
                 return
-            iw, ih = self._video_inner_size
-            if iw <= 0 or ih <= 0:
-                iw, ih = self._default_video_inner_size()
-            self._video_player.tick(max(0.0, float(dt_sec)))
-            if self._video_player.has_source():
-                live = self._video_player.get_frame(iw, ih, contain=True)
-                if live is not None:
-                    self._last_live_video_frame = live.copy()
-            end_sec = float(self._video_player.get_effective_end_sec())
-            pts = float(self._video_player.get_pts())
-            if self._video_player.is_paused() and pts >= end_sec - 1e-3:
-                self._freeze_video_frame()
-                if self._is_video_ko_narration_pending():
-                    return
-                self._enter_video_hold()
-            return
 
         if self._stage == ClipStage.VIDEO_HOLD:
             self._tick_ko_narration(dt_sec)
@@ -322,10 +441,15 @@ class ClipScene:
             )
             if t >= 1.0:
                 self._video_display_alpha = target
-                self._enter_learn_play()
+                if self._topic_intro_mode:
+                    self._finish_topic_intro()
+                else:
+                    self._enter_post_video_intro()
             return
 
         if self._stage == ClipStage.HOOK_IN:
+            if self._is_vocabulary_clip():
+                return
             if self._timer >= self._hook_fade_sec:
                 if self._vocab_meaning_plan is not None:
                     self._enter_vocab_meaning_ko()
@@ -358,6 +482,8 @@ class ClipScene:
         if self._stage == ClipStage.CTA_HOLD:
             if self._timer >= self._cta_hold_sec:
                 if self._is_last_clip:
+                    self._finish_clip()
+                elif self._is_vocabulary_clip():
                     self._finish_clip()
                 else:
                     self.begin_transition_out()
@@ -401,6 +527,9 @@ class ClipScene:
             self._video_player.close()
 
     def _enter_video_hold(self) -> None:
+        if self._topic_intro_mode and not self._is_video_ko_narration_pending():
+            self._finish_topic_intro()
+            return
         self._stage = ClipStage.VIDEO_HOLD
         self._timer = 0.0
 
@@ -452,6 +581,12 @@ class ClipScene:
 
     def _enter_vocab_meaning_ko(self) -> None:
         """단어 모드: 한국어 뜻 TTS·자막 후 중국어 발음."""
+        if (
+            self._stage == ClipStage.VOCAB_MEANING_KO
+            and self._ko_started
+            and not self._ko_finished
+        ):
+            return
         plan = self._vocab_meaning_plan
         if plan is None or not getattr(plan, "cues", None):
             self._enter_learn_play()
@@ -461,7 +596,7 @@ class ClipScene:
         self._timer = 0.0
         self._ko_started = False
         self._ko_finished = False
-        self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
+        self._vocab_show_ui_immediately()
         self._start_ko_narration_sequence(during_video=False)
 
     def _start_sentence_play(self, *, play_index: int) -> None:
@@ -529,7 +664,10 @@ class ClipScene:
 
     def _finish_learn_sequence(self) -> None:
         if self._is_vocabulary_clip():
-            self._enter_cta_hold()
+            if self._is_last_clip:
+                self._enter_cta_hold()
+            else:
+                self._finish_clip()
             return
         if self._ko_plan is not None and not self._ko_finished:
             self._enter_ko_narration()
@@ -609,8 +747,17 @@ class ClipScene:
         cues = list(getattr(plan, "cues", None) or [])
         if index >= len(cues):
             self._ko_finished = True
+            if self._stage == ClipStage.VOCAB_MEANING_KO and self._is_vocabulary_clip():
+                hold = (self._ko_current_text or "").strip()
+                if hold:
+                    self._vocab_meaning_subtitle_hold = hold
             self._ko_current_text = ""
-            if self._stage == ClipStage.VOCAB_MEANING_KO:
+            if self._topic_intro_mode:
+                if self._had_video_intro:
+                    self._enter_video_hold()
+                else:
+                    self._finish_topic_intro()
+            elif self._stage == ClipStage.VOCAB_MEANING_KO:
                 self._enter_learn_play()
             elif self._stage == ClipStage.KO_NARRATION:
                 self._enter_cta_hold()
@@ -618,6 +765,10 @@ class ClipScene:
         cue = cues[index]
         self._ko_cue_index = index
         self._ko_current_text = str(getattr(cue, "text", "") or "")
+        if self._stage == ClipStage.VOCAB_MEANING_KO and self._is_vocabulary_clip():
+            t = (self._ko_current_text or "").strip()
+            if t:
+                self._vocab_meaning_subtitle_hold = t
         self._ko_cue_elapsed = 0.0
         path = str(getattr(cue, "audio_path", "") or "").strip()
         self._ko_cue_duration = self._play_voice(path) if path else 0.0
@@ -640,10 +791,21 @@ class ClipScene:
             return self._ko_cue_elapsed >= 0.5
         return self._ko_cue_elapsed >= dur + 0.1
 
-    def _active_ko_subtitle(self) -> str:
-        if self._ko_finished or not self._ko_started:
+    def _vocab_pinned_meaning_subtitle(self) -> str:
+        """단어 모드: 뜻 TTS 자막 — 중국어 mp3·CTA 구간에도 유지."""
+        if not self._is_vocabulary_clip() or not self._vocab_meaning_subtitle_hold:
             return ""
-        return (self._ko_current_text or "").strip()
+        if self._stage not in (ClipStage.LEARN_PLAY, ClipStage.CTA_HOLD):
+            return ""
+        return self._vocab_meaning_subtitle_hold
+
+    def _active_ko_subtitle(self) -> str:
+        if self._ko_started and not self._ko_finished:
+            return (self._ko_current_text or "").strip()
+        pinned = self._vocab_pinned_meaning_subtitle()
+        if pinned:
+            return pinned
+        return ""
 
     def _learn_overlay_subtitle(self) -> str:
         """학습 구간 비디오 하단 안내 자막( KO 내레이션 cue 와 별도 )."""
@@ -670,7 +832,12 @@ class ClipScene:
         return compute_karaoke_progress(self._ko_cue_elapsed, self._ko_cue_duration)
 
     def _overlay_subtitle_progress(self) -> Optional[float]:
-        if self._active_ko_subtitle():
+        if self._is_vocabulary_clip() and self._stage == ClipStage.VOCAB_MEANING_KO:
+            if self._active_ko_subtitle():
+                return 1.0
+        if self._vocab_pinned_meaning_subtitle():
+            return 1.0
+        if self._active_ko_subtitle() and self._ko_started and not self._ko_finished:
             return self._ko_subtitle_progress()
         if self._stage == ClipStage.LEARN_PLAY and self._learn_round == 3:
             dur = max(0.0, float(self._sound_once_duration))
@@ -755,7 +922,7 @@ class ClipScene:
         return str(self._clip.get("situation_subtitle") or "").strip()
 
     def _should_show_learn_karaoke(self) -> bool:
-        return self._stage in (
+        stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
@@ -763,6 +930,9 @@ class ClipScene:
             ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
         )
+        if self._is_vocabulary_clip() and self._stage == ClipStage.HOOK_IN:
+            return True
+        return self._stage in stages
 
     def set_voice_channel(self, channel: Optional[pygame.mixer.Channel]) -> None:
         self._voice_channel = channel
@@ -860,7 +1030,7 @@ class ClipScene:
                 )
             return
         show_karaoke = self._should_show_learn_karaoke()
-        show_bottom = self._stage in (
+        show_bottom_stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
@@ -868,15 +1038,24 @@ class ClipScene:
             ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
         )
+        show_bottom = self._stage in show_bottom_stages or (
+            self._is_vocabulary_clip() and self._stage == ClipStage.HOOK_IN
+        )
         overlay_sub = self._overlay_subtitle_text()
 
-        if self._frozen_video_frame is not None:
+        if (
+            self._frozen_video_frame is not None
+            and self._stage
+            not in (ClipStage.VOCAB_MEANING_KO, ClipStage.LEARN_PLAY, ClipStage.HOOK_IN)
+        ):
             self._draw_pinned_video(screen, zones)
 
         if show_karaoke:
             k_elapsed, k_dur = self._learn_karaoke_timing()
             if self._stage == ClipStage.VOCAB_MEANING_KO:
-                k_elapsed, k_dur = 0.0, max(1.0, float(k_dur))
+                # 뜻 TTS 구간: 한자·병음 전체 표시(노래방 0%는 빈 화면처럼 보임)
+                k_dur = max(1.0, float(k_dur))
+                k_elapsed = k_dur
             screen.set_clip(zones.middle)
             try:
                 self._drawer.draw_middle(

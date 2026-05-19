@@ -69,6 +69,25 @@ def _resolve_conversation_video_path(
     return video_path
 
 
+def _resolve_vocabulary_video_path(
+    row: dict[str, str],
+    *,
+    clip_id: int,
+    topic: str,
+    repo: Path,
+) -> str:
+    """단어 클립 인트로 비디오. CSV video_path → resource/video/{topic}/vocab_{id}.mp4 등."""
+    video_path = _resolve_path(repo, row.get("video_path") or "")
+    if video_path and os.path.exists(video_path):
+        return video_path
+    if topic:
+        for name in (f"vocab_{clip_id}.mp4", f"{clip_id}.mp4"):
+            cand = repo / "resource" / "video" / topic / name
+            if cand.is_file():
+                return str(cand)
+    return ""
+
+
 def _default_hook_image(clip_id: int, *, subdir: str = "") -> str:
     if subdir:
         return str(SHORTS_PANDA_DIR / subdir / f"{clip_id}.png")
@@ -207,11 +226,15 @@ def _common_clip_fields(
     index: int,
     clip_type: str,
     sound_from_row: bool = True,
+    use_syllable_times_ms: bool = True,
 ) -> dict[str, Any]:
     sound_path = (
         _resolve_path(repo, row.get("sound_path") or "") if sound_from_row else ""
     )
     times_raw = row.get("syllable_times_ms") or row.get("syllable_times") or ""
+    syllable_times = (
+        parse_syllable_times_ms(times_raw) if use_syllable_times_ms else []
+    )
     return {
         "clip_id": clip_id,
         "clip_type": clip_type,
@@ -223,12 +246,13 @@ def _common_clip_fields(
         "situation_subtitle": (row.get("situation_subtitle") or "").strip(),
         "ko_narration_id": _parse_ko_narration_id(row),
         "sound_path": sound_path,
-        "syllable_times": parse_syllable_times_ms(times_raw),
+        "syllable_times": syllable_times,
         "sentence": [],
         "translation": [],
         "pinyin": "",
         "word_img_path": "",
         "word_pos": "",
+        "video_path": _resolve_path(repo, row.get("video_path") or ""),
         "index": index,
     }
 
@@ -301,63 +325,192 @@ def build_shorts_conversation_clip_list(
     return out
 
 
+def _split_pipe_field(raw: str) -> list[str]:
+    """CSV `|` 구분 (쉼표 대체 `，` 허용)."""
+    return [p.strip() for p in str(raw or "").replace("，", "|").split("|") if p.strip()]
+
+
+def parse_vocab_word_ids_field(raw: str) -> list[int]:
+    """word_id 셀: `20501` 또는 `20501|20504|20505`."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    for part in _split_pipe_field(raw):
+        try:
+            wid = int(float(part))
+        except (TypeError, ValueError):
+            continue
+        if wid < 1 or wid in seen:
+            continue
+        seen.add(wid)
+        ids.append(wid)
+    return ids
+
+
+def parse_vocab_hook_titles_field(raw: str, word_count: int) -> list[str]:
+    """hook_title 셀: 1개면 모든 단어 동일, 여러 개면 word_id 순서와 짝."""
+    if word_count < 1:
+        return []
+    parts = [p.replace("\\n", "\n") for p in _split_pipe_field(raw)]
+    if not parts:
+        return [""] * word_count
+    if len(parts) == 1:
+        return parts * word_count
+    if len(parts) < word_count:
+        parts.extend([parts[-1]] * (word_count - len(parts)))
+    return parts[:word_count]
+
+
+def _vocab_word_clip_id(topic_row_id: int, word_index: int) -> int:
+    """topic CSV id 하나 → 단어 클립별 내부 id (판다 이미지 등)."""
+    if word_index < 1:
+        return int(topic_row_id)
+    return int(topic_row_id) * 1000 + int(word_index)
+
+
+def _topic_intro_from_row(
+    row: dict[str, str],
+    *,
+    clip_id: int,
+    topic: str,
+    repo: Path,
+) -> dict[str, Any]:
+    """topic 인트로 1회용 (행의 video_path·ko_narration_id)."""
+    intro_titles = parse_vocab_hook_titles_field(row.get("hook_title") or "", 1)
+    hook = intro_titles[0] if intro_titles else resolve_hook_title(row)
+    return {
+        "topic": topic,
+        "clip_id": int(clip_id),
+        "clip_type": CLIP_TYPE_VOCABULARY,
+        "hook_title": hook,
+        "ko_narration_id": _parse_ko_narration_id(row),
+        "video_path": _resolve_vocabulary_video_path(
+            row, clip_id=max(1, int(clip_id)), topic=topic, repo=repo
+        ),
+    }
+
+
+def extract_vocab_topic_intro(clips: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """단어 클립 목록에 붙은 topic_intro (첫 클립 기준)."""
+    if not clips:
+        return None
+    intro = clips[0].get("topic_intro")
+    if isinstance(intro, dict) and (
+        (intro.get("video_path") or "").strip()
+        or int(intro.get("ko_narration_id") or 0) > 0
+    ):
+        return intro
+    return None
+
+
+def topic_intro_configured(intro: Optional[dict[str, Any]]) -> bool:
+    if not intro:
+        return False
+    if int(intro.get("ko_narration_id") or 0) > 0:
+        return True
+    return bool((intro.get("video_path") or "").strip())
+
+
 def build_shorts_vocabulary_clip_list(
     csv_path: str | Path | None = None,
     *,
     session_topics: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
-    """shorts_vocabulary_clips.csv + words 조인."""
+    """shorts_vocabulary_clips.csv + words 조인.
+
+  topic당 CSV 행 1개(id). word_id·hook_title는 `|` 로 복수 지정.
+  hook_title 1개만 있으면 모든 단어에 동일 적용.
+    """
     path = Path(csv_path) if csv_path else DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV
     repo = _REPO_ROOT
     topic_set: Optional[set[str]] = None
     if session_topics:
         topic_set = {t.strip().lower() for t in session_topics if t.strip()}
 
+    topic_intros: dict[str, dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
-    for i, row in enumerate(_read_shorts_csv(path, label="shorts_vocabulary_clips")):
+    clip_index = 0
+    for row in _read_shorts_csv(path, label="shorts_vocabulary_clips"):
         try:
-            clip_id = int(float(row.get("id") or "0"))
+            topic_row_id = int(float(row.get("id") or "0"))
         except (TypeError, ValueError):
             continue
-        if clip_id < 1:
+        if topic_row_id < 1:
             continue
         topic = (row.get("topic") or "").strip()
         if not _topic_matches(topic, topic_set):
             continue
-        hook_title = resolve_hook_title(row)
-        if not hook_title:
-            logger.warning("shorts vocabulary clip id=%s: hook_title 없음, 스킵", clip_id)
-            continue
-        try:
-            word_id = int(float(row.get("word_id") or "0"))
-        except (TypeError, ValueError):
-            logger.warning("shorts vocabulary clip id=%s: word_id 없음", clip_id)
+
+        word_ids = parse_vocab_word_ids_field(row.get("word_id") or "")
+        if not word_ids:
+            logger.warning(
+                "shorts vocabulary topic id=%s: word_id 없음 (| 구분)",
+                topic_row_id,
+            )
             continue
 
-        hook_image = _default_hook_image(clip_id, subdir="vocabulary")
-        if not os.path.exists(hook_image):
-            hook_image = _default_hook_image(clip_id)
-        if not os.path.exists(hook_image):
-            hook_image = ""
-
-        clip = _common_clip_fields(
-            row,
-            clip_id=clip_id,
-            topic=topic,
-            hook_image=hook_image,
-            repo=repo,
-            index=i,
-            clip_type=CLIP_TYPE_VOCABULARY,
-            sound_from_row=False,
+        hook_titles = parse_vocab_hook_titles_field(
+            row.get("hook_title") or "", len(word_ids)
         )
-        word = get_word(word_id)
-        if word is None:
-            logger.warning("shorts vocabulary clip id=%s: word_id=%s 없음", clip_id, word_id)
+        if not any(hook_titles):
+            logger.warning(
+                "shorts vocabulary topic id=%s: hook_title 없음, 스킵",
+                topic_row_id,
+            )
             continue
-        _merge_word_into_clip(clip, word, repo)
-        if not clip["sentence"]:
-            continue
-        out.append(clip)
+
+        topic_key = topic.lower()
+        topic_intros[topic_key] = _topic_intro_from_row(
+            row, clip_id=topic_row_id, topic=topic, repo=repo
+        )
+
+        for wi, word_id in enumerate(word_ids, start=1):
+            word_clip_id = _vocab_word_clip_id(topic_row_id, wi)
+            hook_image = _default_hook_image(word_clip_id, subdir="vocabulary")
+            if not os.path.exists(hook_image):
+                hook_image = _default_hook_image(topic_row_id, subdir="vocabulary")
+            if not os.path.exists(hook_image):
+                hook_image = ""
+
+            word_row = {
+                "id": str(topic_row_id),
+                "topic": topic,
+                "word_id": str(word_id),
+                "hook_title": hook_titles[wi - 1],
+                "ko_narration_id": "0",
+                "video_path": "",
+            }
+            clip = _common_clip_fields(
+                word_row,
+                clip_id=word_clip_id,
+                topic=topic,
+                hook_image=hook_image,
+                repo=repo,
+                index=clip_index,
+                clip_type=CLIP_TYPE_VOCABULARY,
+                sound_from_row=False,
+                use_syllable_times_ms=False,
+            )
+            clip["video_path"] = ""
+            clip["ko_narration_id"] = 0
+            clip["topic_row_id"] = topic_row_id
+            clip["hook_title"] = hook_titles[wi - 1]
+            word = get_word(word_id)
+            if word is None:
+                logger.warning(
+                    "shorts vocabulary topic id=%s: word_id=%s 없음",
+                    topic_row_id,
+                    word_id,
+                )
+                continue
+            _merge_word_into_clip(clip, word, repo)
+            if not clip["sentence"]:
+                continue
+            out.append(clip)
+            clip_index += 1
+
+    for clip in out:
+        key = (clip.get("topic") or "").strip().lower()
+        clip["topic_intro"] = topic_intros.get(key, {})
 
     if not out and session_topics:
         out = _build_vocab_clips_from_vocabulary_word_rows(session_topics, repo)
@@ -367,7 +520,13 @@ def build_shorts_vocabulary_clip_list(
                 len(out),
             )
 
-    logger.info("shorts 단어 클립 로드: %d개 (%s)", len(out), path)
+    n_intro = sum(1 for t in topic_intros.values() if topic_intro_configured(t))
+    logger.info(
+        "shorts 단어 클립 로드: %d개, topic 인트로 %d개 (%s)",
+        len(out),
+        n_intro,
+        path,
+    )
     return out
 
 
@@ -410,7 +569,7 @@ def _build_vocab_clips_from_vocabulary_word_rows(
             "word_id": str(word_id),
             "hook_title": hook_title,
             "ko_narration_id": "0",
-            "syllable_times_ms": "",
+            "video_path": "",
         }
         clip = _common_clip_fields(
             csv_row,
@@ -421,10 +580,12 @@ def _build_vocab_clips_from_vocabulary_word_rows(
             index=i,
             clip_type=CLIP_TYPE_VOCABULARY,
             sound_from_row=False,
+            use_syllable_times_ms=False,
         )
         _merge_word_into_clip(clip, word, repo)
         if not clip["sentence"]:
             continue
+        clip["topic_intro"] = {}
         out.append(clip)
     return out
 
