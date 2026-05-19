@@ -23,6 +23,8 @@ FIELDNAMES = [
     "hook_title",
     "ko_narration_id",
     "video_path",
+    "sound_repeat_count",
+    "after_sound_delay_sec",
 ]
 
 
@@ -67,6 +69,8 @@ def shorts_vocabulary_clips_excel_to_csv(
             "hook_title": hook_title,
             "ko_narration_id": _to_int(row.get("ko_narration_id"), 0),
             "video_path": _normalize(row.get("video_path")),
+            "sound_repeat_count": _normalize(row.get("sound_repeat_count")),
+            "after_sound_delay_sec": _normalize(row.get("after_sound_delay_sec")),
         })
 
     out_path = Path(csv_path)

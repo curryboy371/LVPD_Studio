@@ -152,11 +152,11 @@ def _merge_word_into_clip(clip: dict[str, Any], word: Any, repo: Path) -> None:
     meaning_raw = (word.meaning or "").strip()
     first_meaning = meaning_raw.split("|")[0].strip() if meaning_raw else ""
     pos = (word.pos or "").strip()
-    trans_parts = [p for p in (first_meaning, pos) if p]
-    clip["translation"] = [" · ".join(trans_parts)] if trans_parts else []
+    clip["translation"] = [first_meaning] if first_meaning else []
     clip["pinyin"] = (word.pinyin or "").strip()
     clip["word_img_path"] = _resolve_path(repo, (word.img_path or "").strip())
     clip["word_pos"] = pos
+    clip["word_tip"] = (getattr(word, "tip", None) or "").strip()
 
     sound = (clip.get("sound_path") or "").strip()
     if not sound:
@@ -252,6 +252,9 @@ def _common_clip_fields(
         "pinyin": "",
         "word_img_path": "",
         "word_pos": "",
+        "word_tip": "",
+        "sound_repeat_count": 1,
+        "after_sound_delay_sec": 0.0,
         "video_path": _resolve_path(repo, row.get("video_path") or ""),
         "index": index,
     }
@@ -344,6 +347,59 @@ def parse_vocab_word_ids_field(raw: str) -> list[int]:
         seen.add(wid)
         ids.append(wid)
     return ids
+
+
+def parse_vocab_int_list_field(
+    raw: str,
+    word_count: int,
+    *,
+    default: int = 1,
+    minimum: int = 1,
+) -> list[int]:
+    """`| ` 구분 정수. 1개면 모든 단어 동일."""
+    if word_count < 1:
+        return []
+    parts = _split_pipe_field(raw)
+    if not parts:
+        return [max(minimum, int(default))] * word_count
+
+    vals: list[int] = []
+    for part in parts:
+        try:
+            vals.append(max(minimum, int(float(part))))
+        except (TypeError, ValueError):
+            vals.append(max(minimum, int(default)))
+    if len(vals) == 1:
+        return vals * word_count
+    if len(vals) < word_count:
+        vals.extend([vals[-1]] * (word_count - len(vals)))
+    return vals[:word_count]
+
+
+def parse_vocab_float_list_field(
+    raw: str,
+    word_count: int,
+    *,
+    default: float = 0.0,
+) -> list[float]:
+    """`| ` 구분 실수(초). 1개면 모든 단어 동일."""
+    if word_count < 1:
+        return []
+    parts = _split_pipe_field(raw)
+    if not parts:
+        return [max(0.0, float(default))] * word_count
+
+    vals: list[float] = []
+    for part in parts:
+        try:
+            vals.append(max(0.0, float(part)))
+        except (TypeError, ValueError):
+            vals.append(max(0.0, float(default)))
+    if len(vals) == 1:
+        return vals * word_count
+    if len(vals) < word_count:
+        vals.extend([vals[-1]] * (word_count - len(vals)))
+    return vals[:word_count]
 
 
 def parse_vocab_hook_titles_field(raw: str, word_count: int) -> list[str]:
@@ -462,6 +518,17 @@ def build_shorts_vocabulary_clip_list(
         topic_intros[topic_key] = _topic_intro_from_row(
             row, clip_id=topic_row_id, topic=topic, repo=repo
         )
+        sound_repeat_counts = parse_vocab_int_list_field(
+            row.get("sound_repeat_count") or "",
+            len(word_ids),
+            default=1,
+            minimum=1,
+        )
+        after_sound_delays = parse_vocab_float_list_field(
+            row.get("after_sound_delay_sec") or "",
+            len(word_ids),
+            default=0.0,
+        )
 
         for wi, word_id in enumerate(word_ids, start=1):
             word_clip_id = _vocab_word_clip_id(topic_row_id, wi)
@@ -494,6 +561,8 @@ def build_shorts_vocabulary_clip_list(
             clip["ko_narration_id"] = 0
             clip["topic_row_id"] = topic_row_id
             clip["hook_title"] = hook_titles[wi - 1]
+            clip["sound_repeat_count"] = sound_repeat_counts[wi - 1]
+            clip["after_sound_delay_sec"] = after_sound_delays[wi - 1]
             word = get_word(word_id)
             if word is None:
                 logger.warning(

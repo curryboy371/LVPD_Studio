@@ -46,6 +46,16 @@ FONT_SITUATION_FILENAMES = (
     "NotoSansCJK-Regular.otf",
     "SourceHanSansKR-Regular.otf",
     "SourceHanSansK-Regular.otf",
+    # repo에 실제 있는 한·중 혼합 대체 (위 CJK KR 없을 때)
+    "SourceHanSansSC-Regular.otf",
+    "NotoSerifSC-Regular.ttf",
+)
+# 숏츠 단어 tip: 한자 커버 우선 (간체 SC)
+FONT_TIP_CN_FILENAMES = (
+    "SourceHanSansSC-Regular.otf",
+    "SourceHanSansSC-Normal.otf",
+    "NotoSerifSC-Regular.ttf",
+    "NotoSerifSC-Medium.ttf",
 )
 
 # 스튜디오 CLI / record_output_select_mode.bat combo에서 topic 생략·엔터 시 기본값과 동일하게 유지

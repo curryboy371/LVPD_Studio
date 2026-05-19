@@ -395,3 +395,122 @@ def load_font_kr_chinese(
         "한글·한자 혼합 폰트 없음. resource/font 에 NotoSansCJKkr-Regular.otf 권장."
     )
     return None
+
+
+def load_font_chinese_for_tip(
+    size: int,
+    fgcolor: Tuple[int, int, int],
+) -> "Optional[pygame.font.Font]":
+    """숏츠 단어 tip용 — 간체 한자 커버 우선(Source Han / Noto Serif SC)."""
+    from core.paths import DEFAULT_FONT_DIR, FONT_TIP_CN_FILENAMES
+
+    if pygame is None:
+        return None
+    for name in FONT_TIP_CN_FILENAMES:
+        font = _load_font_at(DEFAULT_FONT_DIR / name, size)
+        if font is not None:
+            return attach_font_fgcolor(font, fgcolor)
+    for path in find_chinese_font_paths_in_dir(DEFAULT_FONT_DIR):
+        font = _load_font_at(path, size)
+        if font is not None:
+            return attach_font_fgcolor(font, fgcolor)
+    return load_font_chinese(size, fgcolor)
+
+
+def _tip_char_uses_chinese_font(ch: str) -> bool:
+    if not ch or ch.isspace():
+        return False
+    o = ord(ch)
+    if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF or 0xF900 <= o <= 0xFAFF:
+        return True
+    if 0x3000 <= o <= 0x303F or 0xFF00 <= o <= 0xFFEF:
+        return True
+    return False
+
+
+def _render_char(
+    font: Any,
+    ch: str,
+    color: Tuple[int, int, int],
+) -> "Optional[pygame.Surface]":
+    if font is None:
+        return None
+    try:
+        return font.render(ch, True, color)
+    except Exception:
+        return None
+
+
+def render_mixed_kr_cn_line(
+    text: str,
+    *,
+    size: int,
+    color: Tuple[int, int, int],
+    font_kr: Any = None,
+    font_cn: Any = None,
+) -> "Optional[pygame.Surface]":
+    """한글·한자 혼합 한 줄 — 글자별 KR/CN 폰트 선택."""
+    if pygame is None:
+        return None
+    line = (text or "").strip()
+    if not line:
+        return None
+    if font_kr is None:
+        font_kr = load_font_korean(size, color)
+    if font_cn is None:
+        font_cn = load_font_chinese_for_tip(size, color) or load_font_chinese(size, color)
+    if font_kr is None and font_cn is None:
+        return None
+
+    parts: list[pygame.Surface] = []
+    total_w = 0
+    max_h = 0
+    for ch in line:
+        use_cn = _tip_char_uses_chinese_font(ch)
+        font = font_cn if use_cn else font_kr
+        if font is None:
+            font = font_cn or font_kr
+        surf = _render_char(font, ch, color)
+        if surf is None:
+            continue
+        parts.append(surf)
+        total_w += surf.get_width()
+        max_h = max(max_h, surf.get_height())
+    if not parts or total_w <= 0 or max_h <= 0:
+        return None
+
+    out = pygame.Surface((total_w, max_h), pygame.SRCALPHA)
+    x = 0
+    for surf in parts:
+        out.blit(surf, (x, 0))
+        x += surf.get_width()
+    return out
+
+
+def blit_mixed_kr_cn_centered(
+    screen: "pygame.Surface",
+    *,
+    center_x: int,
+    y: int,
+    text: str,
+    size: int,
+    color: Tuple[int, int, int],
+    fade_alpha: int = 255,
+    font_kr: Any = None,
+    font_cn: Any = None,
+) -> None:
+    """화면 중앙 X 기준으로 혼합 tip/자막 한 줄."""
+    surf = render_mixed_kr_cn_line(
+        text,
+        size=size,
+        color=color,
+        font_kr=font_kr,
+        font_cn=font_cn,
+    )
+    if surf is None:
+        return
+    alpha = max(0, min(255, int(fade_alpha)))
+    if alpha < 255:
+        surf = surf.copy()
+        surf.set_alpha(alpha)
+    screen.blit(surf, (int(center_x) - surf.get_width() // 2, int(y)))

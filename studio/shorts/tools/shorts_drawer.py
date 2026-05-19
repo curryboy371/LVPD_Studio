@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pygame
 
@@ -14,8 +14,15 @@ from studio.conversation.tools.fonts import WHITE
 from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
 from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import (
-    SHORTS_VOCAB_WORD_IMG_MAX_HEIGHT_RATIO,
+    SHORTS_VOCAB_POS_FONT_RATIO,
     SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO,
+    shorts_vocab_hanzi_line_height,
+    shorts_vocab_hanzi_y,
+    shorts_vocab_layout_metrics,
+    shorts_vocab_pos_after_hanzi_gap,
+    shorts_vocab_text_block_top,
+    shorts_vocab_tip_after_meaning_gap,
+    shorts_vocab_tip_font_pt,
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
     KO_KARAOKE_ACTIVE,
@@ -54,6 +61,9 @@ class ShortsDrawer:
         self._ko_subtitle_font = load_font_korean(int(font_sizes.ko_subtitle_kr), WHITE)
         self._bg_surface: Optional[pygame.Surface] = None
         self._hook_image_cache: dict[str, pygame.Surface] = {}
+        self._tip_font_pt = 0
+        self._tip_font_kr: Any = None
+        self._tip_font_cn: Any = None
 
     @property
     def fade(self) -> FadeController:
@@ -271,6 +281,46 @@ class ShortsDrawer:
         screen.blit(frame, frame_rect.topleft)
         return frame_rect
 
+    def measure_ko_subtitle_height(self, text: str) -> int:
+        sub = (text or "").strip()
+        if not sub:
+            return 0
+        surf = self._ko_subtitle_font.render(sub, True, (255, 255, 255))
+        return max(0, int(surf.get_height()))
+
+    def draw_vocab_tip(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        text: str,
+        fade_alpha: int = 255,
+    ) -> None:
+        """숏츠 단어: 뜻 TTS 자막 아래 tip (한글·한자 글자별 폰트, 흰색)."""
+        tip = (text or "").strip()
+        if not tip or fade_alpha <= 0:
+            return
+        from utils.fonts import blit_mixed_kr_cn_centered, load_font_chinese_for_tip, load_font_korean
+
+        pt = shorts_vocab_tip_font_pt(ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr))
+        color = (255, 255, 255)
+        if not hasattr(self, "_tip_font_pt") or self._tip_font_pt != pt:
+            self._tip_font_pt = pt
+            self._tip_font_kr = load_font_korean(pt, color)
+            self._tip_font_cn = load_font_chinese_for_tip(pt, color)
+        blit_mixed_kr_cn_centered(
+            screen,
+            center_x=center_x,
+            y=y,
+            text=tip,
+            size=pt,
+            color=color,
+            fade_alpha=fade_alpha,
+            font_kr=getattr(self, "_tip_font_kr", None),
+            font_cn=getattr(self, "_tip_font_cn", None),
+        )
+
     def draw_ko_subtitle_overlay(
         self,
         screen: pygame.Surface,
@@ -279,14 +329,19 @@ class ShortsDrawer:
         text: str,
         fade_alpha: int = 255,
         subtitle_progress: Optional[float] = None,
+        below_gap_fn: Optional[Callable[[int], int]] = None,
     ) -> None:
-        """TTS 자막을 비디오 프레임 바로 아래에 그린다."""
+        """TTS 자막을 앵커 rect 바로 아래에 그린다."""
         sub = (text or "").strip()
         if not sub or fade_alpha <= 0:
             return
         alpha = max(0, min(255, int(fade_alpha)))
         cx = anchor_rect.centerx
-        gap = shorts_ko_subtitle_below_video_gap(screen.get_height())
+        fh = max(1, int(screen.get_height()))
+        if below_gap_fn is not None:
+            gap = int(below_gap_fn(fh))
+        else:
+            gap = shorts_ko_subtitle_below_video_gap(fh)
 
         if subtitle_progress is not None:
             surf_in = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_INACTIVE)
@@ -316,6 +371,25 @@ class ShortsDrawer:
             surf = surf.copy()
             surf.set_alpha(alpha)
         screen.blit(surf, (cx - tw // 2, y))
+
+    def measure_hook_title_bottom_y(
+        self,
+        hook_title: str,
+        *,
+        frame_height: int,
+    ) -> int:
+        """훅 타이틀 하단 Y(미표시 시 0)."""
+        title = (hook_title or "").strip()
+        if not title:
+            return 0
+        surf = self._render_hook_title(title, frame_height=frame_height)
+        if surf is None:
+            return 0
+        fh = max(1, int(frame_height))
+        pad = 16
+        ty = shorts_hook_title_y(fh)
+        ty = max(pad, min(ty, fh - surf.get_height() - pad))
+        return ty + surf.get_height()
 
     def draw_hook_title(
         self,
@@ -382,9 +456,20 @@ class ShortsDrawer:
         syllable_times: list[float],
         sound_duration_sec: float,
         style: Any,
+        hook_title: str = "",
     ) -> None:
         """clip_type에 따라 상황극(노래방) 또는 단어 중앙 UI."""
         if (item.get("clip_type") or "") == CLIP_TYPE_VOCABULARY:
+            fh = screen.get_height()
+            rect = zones.middle
+            hook_bottom = self.measure_hook_title_bottom_y(hook_title, frame_height=fh)
+            layout_top, img_band_h = shorts_vocab_layout_metrics(
+                rect.top,
+                rect.height,
+                rect.bottom,
+                fh,
+                hook_title_bottom_y=hook_bottom,
+            )
             self.draw_middle_word(
                 screen,
                 zones=zones,
@@ -393,6 +478,8 @@ class ShortsDrawer:
                 syllable_times=syllable_times,
                 sound_duration_sec=sound_duration_sec,
                 style=style,
+                layout_top=layout_top,
+                img_band_h=img_band_h,
             )
             return
         self.draw_middle_karaoke(
@@ -432,6 +519,32 @@ class ShortsDrawer:
             translation_extra_gap=shorts_translation_extra_gap(fh),
         )
 
+    def _draw_vocab_pos_line(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        hanzi_y: int,
+        hanzi_line_h: int,
+        pos: str,
+        frame_height: int,
+        text_color: tuple[int, int, int],
+    ) -> None:
+        """품사 — 한자 바로 아래."""
+        label = (pos or "").strip()
+        if not label:
+            return
+        from utils.fonts import load_font_korean
+
+        pos_pt = max(14, int(self._font_sizes.kr * SHORTS_VOCAB_POS_FONT_RATIO))
+        font = load_font_korean(pos_pt, text_color)
+        if font is None:
+            return
+        surf = font.render(label, True, text_color)
+        gap = shorts_vocab_pos_after_hanzi_gap(frame_height)
+        y = int(hanzi_y) + int(hanzi_line_h) + gap
+        screen.blit(surf, (center_x - surf.get_width() // 2, y))
+
     def draw_middle_word(
         self,
         screen: pygame.Surface,
@@ -442,23 +555,52 @@ class ShortsDrawer:
         syllable_times: list[float],
         sound_duration_sec: float,
         style: Any,
+        layout_top: Optional[int] = None,
+        img_band_h: Optional[int] = None,
     ) -> None:
         """단어 숏츠: 연상 이미지 + 노래방(한 글자/음절)."""
         rect = zones.middle
-        y_off = shorts_middle_y_offset(screen.get_height())
+        fh = screen.get_height()
+        if layout_top is None or img_band_h is None:
+            hook_bottom = self.measure_hook_title_bottom_y(
+                str(item.get("hook_title") or ""), frame_height=fh
+            )
+            layout_top, img_band_h = shorts_vocab_layout_metrics(
+                rect.top,
+                rect.height,
+                rect.bottom,
+                fh,
+                hook_title_bottom_y=hook_bottom,
+            )
         img_path = str(item.get("word_img_path") or "").strip()
         img = self._load_hook_image(
             img_path,
             int(rect.width * SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO),
-            int(rect.height * SHORTS_VOCAB_WORD_IMG_MAX_HEIGHT_RATIO),
+            int(img_band_h),
         )
-        y_top = rect.top + 8 + y_off
         if img is not None:
-            screen.blit(img, (rect.centerx - img.get_width() // 2, y_top))
-            y_top += img.get_height() + 12
-        sub_rect = pygame.Rect(rect.left, y_top, rect.width, rect.bottom - y_top)
-        data = build_sentence_render_data_with_tone_icons(item)
-        fh = screen.get_height()
+            iy = int(layout_top) + max(0, (int(img_band_h) - img.get_height()) // 2)
+            screen.blit(img, (rect.centerx - img.get_width() // 2, iy))
+        text_top = shorts_vocab_text_block_top(int(layout_top), int(img_band_h), fh)
+        pinyin_y = text_top
+        hanzi_y = shorts_vocab_hanzi_y(int(layout_top), int(img_band_h), fh)
+        pos = str(item.get("word_pos") or "").strip()
+        if not pos:
+            trans_raw = item.get("translation") or []
+            if isinstance(trans_raw, list):
+                legacy = (trans_raw[0] if trans_raw else "").strip()
+            else:
+                legacy = str(trans_raw or "").strip()
+            if " · " in legacy:
+                parts = [p.strip() for p in legacy.split(" · ", 1)]
+                if len(parts) == 2 and parts[1]:
+                    pos = parts[1]
+        hanzi_line_h = shorts_vocab_hanzi_line_height(fh, cn_font_pt=int(self._font_sizes.cn))
+        sub_rect = pygame.Rect(rect.left, text_top, rect.width, max(80, rect.bottom - text_top))
+        item_karaoke = dict(item)
+        item_karaoke["translation"] = []
+        data = build_sentence_render_data_with_tone_icons(item_karaoke)
+        trans_color = getattr(getattr(style, "colors", None), "translation_color", WHITE)
         self._karaoke.draw(
             screen,
             data=data,
@@ -467,9 +609,19 @@ class ShortsDrawer:
             elapsed_sec=elapsed_sec,
             syllable_times=syllable_times,
             sound_duration_sec=sound_duration_sec,
-            y_offset=0,
-            translation_extra_gap=shorts_translation_extra_gap(fh),
+            fixed_pinyin_y=pinyin_y,
+            fixed_hanzi_y=hanzi_y,
         )
+        if pos:
+            self._draw_vocab_pos_line(
+                screen,
+                center_x=rect.centerx,
+                hanzi_y=hanzi_y,
+                hanzi_line_h=hanzi_line_h,
+                pos=pos,
+                frame_height=fh,
+                text_color=trans_color,
+            )
 
     def draw_bottom_zone(
         self,

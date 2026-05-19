@@ -59,6 +59,7 @@ class ClipStage(Enum):
     LEARN_PLAY = auto()
     KO_NARRATION = auto()
     CTA_HOLD = auto()
+    VOCAB_GAP = auto()
     END_HOLD = auto()
     DONE = auto()
     TRANSITION_OUT = auto()
@@ -118,13 +119,38 @@ class ClipScene:
         self._ko_started = False
         self._vocab_meaning_plan: Optional[Any] = None
         self._vocab_meaning_subtitle_hold = ""
+        self._vocab_meaning_entered = False
         self._record_end_hold_sec = 0.0
         self._end_hold_after_learn = False
         self._last_live_video_frame: Optional[pygame.Surface] = None
+        self._vocab_gap_sec = 0.0
 
     def set_record_end_hold(self, seconds: float) -> None:
         """녹화 모드 tail hold(초). 0이면 비활성(debug)."""
         self._record_end_hold_sec = max(0.0, float(seconds))
+
+    def reset_playback_state(self) -> None:
+        """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
+        self._stop_learn_audio()
+        self._video_player.close()
+        self._frozen_video_frame = None
+        self._last_live_video_frame = None
+        self._video_inner_size = (0, 0)
+        self._video_display_alpha = 255
+        self._had_video_intro = False
+        self._topic_intro_mode = False
+        self._stage = ClipStage.HOOK_IN
+        self._timer = 0.0
+        self._ko_plan = None
+        self._ko_cue_index = 0
+        self._ko_current_text = ""
+        self._ko_cue_elapsed = 0.0
+        self._ko_cue_duration = 0.0
+        self._ko_finished = False
+        self._ko_started = False
+        self._vocab_meaning_plan = None
+        self._vocab_meaning_subtitle_hold = ""
+        self._vocab_meaning_entered = False
 
     @property
     def stage(self) -> ClipStage:
@@ -291,6 +317,7 @@ class ClipScene:
         self._ko_started = False
         self._vocab_meaning_plan = None
         self._vocab_meaning_subtitle_hold = ""
+        self._vocab_meaning_entered = False
         self._ensure_ko_plan()
         self._ensure_vocab_meaning_plan()
 
@@ -418,9 +445,12 @@ class ClipScene:
                         self._enter_video_hold()
             if self._stage == ClipStage.VIDEO_PLAY:
                 return
+            return
 
         if self._stage == ClipStage.VIDEO_HOLD:
             self._tick_ko_narration(dt_sec)
+            if self._stage != ClipStage.VIDEO_HOLD:
+                return
             if self._is_video_ko_narration_pending():
                 self._timer = 0.0
                 return
@@ -430,6 +460,8 @@ class ClipScene:
 
         if self._stage == ClipStage.VIDEO_FADE_OUT:
             self._tick_ko_narration(dt_sec)
+            if self._stage != ClipStage.VIDEO_FADE_OUT:
+                return
             if self._is_video_ko_narration_pending():
                 self._timer = 0.0
                 return
@@ -477,6 +509,11 @@ class ClipScene:
 
         if self._stage == ClipStage.KO_NARRATION:
             self._tick_ko_narration(dt_sec)
+            return
+
+        if self._stage == ClipStage.VOCAB_GAP:
+            if self._timer >= self._vocab_gap_sec:
+                self._finish_clip()
             return
 
         if self._stage == ClipStage.CTA_HOLD:
@@ -581,6 +618,8 @@ class ClipScene:
 
     def _enter_vocab_meaning_ko(self) -> None:
         """단어 모드: 한국어 뜻 TTS·자막 후 중국어 발음."""
+        if self._vocab_meaning_entered:
+            return
         if (
             self._stage == ClipStage.VOCAB_MEANING_KO
             and self._ko_started
@@ -596,6 +635,7 @@ class ClipScene:
         self._timer = 0.0
         self._ko_started = False
         self._ko_finished = False
+        self._vocab_meaning_entered = True
         self._vocab_show_ui_immediately()
         self._start_ko_narration_sequence(during_video=False)
 
@@ -644,19 +684,37 @@ class ClipScene:
             except Exception as ex:
                 logger.debug("bg 시작 실패: %s", ex)
 
+    def _vocab_sound_repeat_target(self) -> int:
+        try:
+            return max(1, int(self._clip.get("sound_repeat_count") or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    def _vocab_after_sound_delay_sec(self) -> float:
+        try:
+            return max(0.0, float(self._clip.get("after_sound_delay_sec") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _enter_vocab_gap(self) -> None:
+        self._stop_learn_audio()
+        self._stage = ClipStage.VOCAB_GAP
+        self._timer = 0.0
+        self._vocab_gap_sec = self._vocab_after_sound_delay_sec()
+
     def _advance_learn_voice_step(self) -> None:
+        if self._is_vocabulary_clip():
+            if self._sound_play_count < self._vocab_sound_repeat_target():
+                self._start_sentence_play(play_index=self._sound_play_count + 1)
+            else:
+                self._finish_learn_sequence()
+            return
         if self._learn_round == 1 and self._sound_play_count < max(
             1, int(SHORTS_SOUND_PLAY_COUNT)
         ):
-            if self._is_vocabulary_clip():
-                self._finish_learn_sequence()
-            else:
-                self._start_sentence_play(play_index=2)
+            self._start_sentence_play(play_index=2)
         elif self._learn_round == 2:
-            if self._is_vocabulary_clip():
-                self._finish_learn_sequence()
-            else:
-                self._start_follow_along_voice()
+            self._start_follow_along_voice()
         elif self._learn_round == 3:
             self._start_bg_practice()
         else:
@@ -666,6 +724,8 @@ class ClipScene:
         if self._is_vocabulary_clip():
             if self._is_last_clip:
                 self._enter_cta_hold()
+            elif self._vocab_after_sound_delay_sec() > 1e-6:
+                self._enter_vocab_gap()
             else:
                 self._finish_clip()
             return
@@ -795,7 +855,11 @@ class ClipScene:
         """단어 모드: 뜻 TTS 자막 — 중국어 mp3·CTA 구간에도 유지."""
         if not self._is_vocabulary_clip() or not self._vocab_meaning_subtitle_hold:
             return ""
-        if self._stage not in (ClipStage.LEARN_PLAY, ClipStage.CTA_HOLD):
+        if self._stage not in (
+            ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_GAP,
+            ClipStage.CTA_HOLD,
+        ):
             return ""
         return self._vocab_meaning_subtitle_hold
 
@@ -926,6 +990,7 @@ class ClipScene:
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
+            ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
             ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
@@ -943,7 +1008,9 @@ class ClipScene:
             return (w, h)
         return None
 
-    def _ko_subtitle_anchor_rect(self, zones: ShortsLayoutZones) -> pygame.Rect:
+    def _ko_subtitle_anchor_rect(
+        self, zones: ShortsLayoutZones, *, frame_height: int = 0
+    ) -> pygame.Rect:
         inner = self._video_frame_inner_size()
         player = self._video_player if self._stage == ClipStage.VIDEO_PLAY else None
         frame_rect = self._drawer.compute_center_video_frame_rect(
@@ -954,6 +1021,32 @@ class ClipScene:
         )
         if frame_rect is not None:
             return frame_rect
+        if self._is_vocabulary_clip():
+            from studio.shorts.constants import (
+                shorts_vocab_layout_metrics,
+                shorts_vocab_text_stack_bottom,
+            )
+
+            fh = max(int(frame_height), zones.middle.height, 1)
+            hook_bottom = self._drawer.measure_hook_title_bottom_y(
+                self._hook_title, frame_height=fh
+            )
+            layout_top, img_band_h = shorts_vocab_layout_metrics(
+                zones.middle.top,
+                zones.middle.height,
+                zones.middle.bottom,
+                fh,
+                hook_title_bottom_y=hook_bottom,
+            )
+            pos_label = str(self._clip.get("word_pos") or "").strip()
+            stack_bottom = shorts_vocab_text_stack_bottom(
+                layout_top,
+                img_band_h,
+                fh,
+                has_pos=bool(pos_label),
+            )
+            w = max(80, zones.middle.width - 64)
+            return pygame.Rect(zones.middle.centerx - w // 2, stack_bottom - 1, w, 1)
         fallback = zones.middle.inflate(-32, -32)
         return fallback if fallback.width > 0 and fallback.height > 0 else zones.middle
 
@@ -961,12 +1054,59 @@ class ClipScene:
         sub = self._overlay_subtitle_text()
         if not sub:
             return
+        fh = max(1, int(screen.get_height()))
+        gap_fn = None
+        if self._is_vocabulary_clip():
+            from studio.shorts.constants import shorts_vocab_meaning_subtitle_gap
+
+            gap_fn = shorts_vocab_meaning_subtitle_gap
         self._drawer.draw_ko_subtitle_overlay(
             screen,
-            anchor_rect=self._ko_subtitle_anchor_rect(zones),
+            anchor_rect=self._ko_subtitle_anchor_rect(zones, frame_height=fh),
             text=sub,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
             subtitle_progress=self._overlay_subtitle_progress(),
+            below_gap_fn=gap_fn,
+        )
+
+    def _vocab_meaning_subtitle_bottom_y(
+        self, zones: ShortsLayoutZones, *, frame_height: int
+    ) -> int:
+        from studio.shorts.constants import shorts_vocab_meaning_subtitle_gap
+
+        anchor = self._ko_subtitle_anchor_rect(zones, frame_height=frame_height)
+        y = anchor.bottom + shorts_vocab_meaning_subtitle_gap(frame_height)
+        sub = self._overlay_subtitle_text()
+        if sub:
+            y += self._drawer.measure_ko_subtitle_height(sub)
+        return y
+
+    def _draw_vocab_tip_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
+        if not self._is_vocabulary_clip():
+            return
+        tip = str(self._clip.get("word_tip") or "").strip()
+        if not tip:
+            return
+        if self._stage not in (
+            ClipStage.VOCAB_MEANING_KO,
+            ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_GAP,
+            ClipStage.CTA_HOLD,
+            ClipStage.END_HOLD,
+            ClipStage.TRANSITION_OUT,
+        ):
+            return
+        fh = max(1, int(screen.get_height()))
+        from studio.shorts.constants import shorts_vocab_tip_after_meaning_gap
+
+        y = self._vocab_meaning_subtitle_bottom_y(zones, frame_height=fh)
+        y += shorts_vocab_tip_after_meaning_gap(fh)
+        self._drawer.draw_vocab_tip(
+            screen,
+            center_x=zones.middle.centerx,
+            y=y,
+            text=tip,
+            fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
         )
 
     def _draw_pinned_video(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
@@ -1034,6 +1174,7 @@ class ClipScene:
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
             ClipStage.KO_NARRATION,
+            ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
             ClipStage.END_HOLD,
             ClipStage.TRANSITION_OUT,
@@ -1066,12 +1207,14 @@ class ClipScene:
                     syllable_times=list(self._clip.get("syllable_times") or []),
                     sound_duration_sec=k_dur,
                     style=self._style,
+                    hook_title=self._hook_title,
                 )
             finally:
                 screen.set_clip(None)
 
         if overlay_sub:
             self._draw_ko_subtitle_if_any(screen, zones)
+        self._draw_vocab_tip_if_any(screen, zones)
         if show_bottom:
             situation = self._situation_subtitle_for_bottom()
             self._drawer.draw_bottom_zone(

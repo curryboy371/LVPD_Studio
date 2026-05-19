@@ -13,6 +13,7 @@ from studio.shorts.constants import (
     KARAOKE_ACTIVE_PINYIN,
     KARAOKE_INACTIVE_HANZI,
     KARAOKE_INACTIVE_PINYIN,
+    SHORTS_VOCAB_POS_FONT_RATIO,
 )
 
 
@@ -67,18 +68,47 @@ class KaraokeRenderer:
         pinyin_y_offset: int = 0,
         pinyin_hanzi_gap: Optional[int] = None,
         translation_extra_gap: Optional[int] = None,
+        vocab_pos: str = "",
+        vocab_kr_font_pt: int = 36,
+        after_hanzi_pad: int = 0,
+        fixed_pinyin_y: Optional[int] = None,
+        fixed_hanzi_y: Optional[int] = None,
     ) -> None:
         """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다."""
         del syllable_times  # 음절 단위 하이라이트 미사용
         pinyin = (data.pinyin or "").strip()
         hanzi = (data.sentence or "").strip()
         trans = (data.translation or "").strip()
+        vocab_pos = (vocab_pos or "").strip()
         progress = compute_karaoke_progress(elapsed_sec, sound_duration_sec)
 
         center_x = rect.centerx
-        y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
         line_gap = style.layout.line_gap_px
 
+        if fixed_hanzi_y is not None:
+            hz_y = int(fixed_hanzi_y)
+            if pinyin and fixed_pinyin_y is not None:
+                self._draw_pinyin_wipe(
+                    screen,
+                    pinyin=pinyin,
+                    center_x=center_x,
+                    y=int(fixed_pinyin_y),
+                    rect=rect,
+                    style=style,
+                    progress=progress,
+                )
+            if hanzi:
+                self._draw_hanzi_wipe(
+                    screen,
+                    hanzi=hanzi,
+                    center_x=center_x,
+                    y=hz_y,
+                    style=style,
+                    progress=progress,
+                )
+            return
+
+        y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
         gap_py_hz = int(pinyin_hanzi_gap) if pinyin_hanzi_gap is not None else line_gap
 
         if pinyin:
@@ -94,7 +124,7 @@ class KaraokeRenderer:
             y += gap_py_hz
 
         if hanzi:
-            self._draw_hanzi_wipe(
+            y = self._draw_hanzi_wipe(
                 screen,
                 hanzi=hanzi,
                 center_x=center_x,
@@ -102,9 +132,37 @@ class KaraokeRenderer:
                 style=style,
                 progress=progress,
             )
-            y += line_gap
+            pad_after = max(0, int(after_hanzi_pad))
+            if pad_after:
+                y += pad_after
+            elif not vocab_pos:
+                y += line_gap
 
-        if trans:
+        if vocab_pos:
+            extra_trans = (
+                int(translation_extra_gap)
+                if translation_extra_gap is not None
+                else style.layout.translation_extra_gap_px
+            )
+            y += extra_trans
+            trans_color = style.colors.translation_color
+            from utils.fonts import load_font_korean
+
+            pos_pt = max(
+                14, int(int(vocab_kr_font_pt) * float(SHORTS_VOCAB_POS_FONT_RATIO))
+            )
+            pos_font = load_font_korean(pos_pt, trans_color)
+            if pos_font is not None:
+                surf_pos = pos_font.render(vocab_pos, True, trans_color)
+                self._drawer._blit_surface(
+                    screen,
+                    surf_pos,
+                    center_x=center_x,
+                    y=min(y, rect.bottom - surf_pos.get_height() - 8),
+                    min_margin_x=style.layout.min_margin_x,
+                    align="center",
+                )
+        elif trans:
             extra_trans = (
                 int(translation_extra_gap)
                 if translation_extra_gap is not None
@@ -183,10 +241,10 @@ class KaraokeRenderer:
         y: int,
         style: SentenceStyleConfig,
         progress: float,
-    ) -> None:
+    ) -> int:
         del style
         fonts = self._drawer._fonts
-        self._draw_cached_wipe(
+        return self._draw_cached_wipe(
             screen,
             cache=self._drawer._cache_hanzi,
             font_ft=fonts.hanzi_ft,

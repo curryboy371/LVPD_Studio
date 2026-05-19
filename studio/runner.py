@@ -327,6 +327,9 @@ def run(
     studio.init(config)
 
     if mode == "debug":
+        _start = getattr(studio, "start_playback", None)
+        if callable(_start):
+            _start()
         _run_debug(studio, config, clock, pygame)
     else:
         _ensure_record_audio_ready(pygame)
@@ -449,10 +452,11 @@ def _run_record(
 
     frames_written = 0
     stopped_by_content = False
+    progress_fn = getattr(studio, "recording_progress_line", None)
+    last_progress_sec = -999.0
     try:
         for frame_index in range(loop_limit):
             config.actual_fps = clock.get_fps()
-
             events = list(pygame.event.get())
             stop = False
             for e in events:
@@ -476,12 +480,32 @@ def _run_record(
                 frames_written += 1
             pygame.display.flip()
             clock.tick(config.fps)
+            t_sec = (frame_index + 1) / max(1e-9, float(config.fps))
+            if t_sec - last_progress_sec >= 2.0:
+                extra = ""
+                if callable(progress_fn):
+                    try:
+                        extra = f" | {progress_fn()}"
+                    except Exception:
+                        pass
+                print(
+                    f"[rec] 녹화 중… {frames_written}프레임 {t_sec:.1f}s{extra}",
+                    flush=True,
+                )
+                last_progress_sec = t_sec
             if record_until_content_done and studio.should_stop_recording():
                 stopped_by_content = True
                 try:
+                    extra = ""
+                    if callable(progress_fn):
+                        try:
+                            extra = f" | {progress_fn()}"
+                        except Exception:
+                            pass
                     print(
                         "[rec][step] should_stop_recording=True → 루프 종료 | "
-                        f"frame={frame_index} t={frame_index / max(1e-9, float(config.fps)):.3f}s",
+                        f"frame={frame_index} t={frame_index / max(1e-9, float(config.fps)):.3f}s"
+                        f"{extra}",
                         flush=True,
                     )
                 except Exception:

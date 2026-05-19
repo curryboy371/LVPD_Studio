@@ -218,6 +218,7 @@ def load_words_table_from_csv(
                         masking=_str(row.get("masking")),
                         pos=_normalize_pipe_list(row.get("pos")),
                         meaning=_normalize_pipe_list(row.get("meaning")),
+                        tip=_str(row.get("tip")),
                         img_path=_resolve_media_path_from_name(img_raw, image_index),
                         sound_path=_resolve_media_path_from_name(sound_raw, sound_index),
                         stroke_anim_path=_str(row.get("stroke_anim_path")),

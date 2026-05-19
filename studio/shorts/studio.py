@@ -103,8 +103,20 @@ class ShortsStudio(IStudio):
         self._scene.set_on_clip_done(self._on_clip_done)
         self._scene.set_on_topic_intro_done(self._on_topic_intro_done)
         self._scene.set_record_end_hold(0.0)
+
+    def start_playback(self) -> None:
+        """debug 모드: 첫 클립(또는 topic 인트로) 재생 시작."""
         if self._clips:
             self._start_current_clip()
+
+    def recording_progress_line(self) -> str:
+        """녹화 진행 로그용."""
+        n = len(self._clips)
+        idx = min(self._clip_index, max(0, n - 1)) + 1 if n else 0
+        stage = ""
+        if self._scene is not None:
+            stage = getattr(self._scene.stage, "name", str(self._scene.stage))
+        return f"clip {idx}/{n} stage={stage}"
 
     def get_title(self) -> str:
         return "LVPD Studio - 숏츠"
@@ -153,12 +165,36 @@ class ShortsStudio(IStudio):
         self._last_config = config
         self._recording_done = False
         self._topic_intro_done = False
-        self._stop_learn_audio()
+        if not self._clips:
+            print(
+                f"[!] {self._empty_message} "
+                f"(topic={self._session_topics or '전체'})",
+                flush=True,
+            )
+            self._recording_done = True
+            return
         if self._scene is not None:
             self._scene.set_record_end_hold(SHORTS_RECORD_END_HOLD_SEC)
-        if self._scene is not None and self._clips:
-            self._clip_index = 0
-            self._start_current_clip()
+            reset = getattr(self._scene, "reset_playback_state", None)
+            if callable(reset):
+                try:
+                    reset()
+                except Exception as ex:
+                    logger.debug("reset_playback_state 실패: %s", ex)
+        self._clip_index = 0
+        intro = (
+            extract_vocab_topic_intro(self._clips)
+            if self._shorts_mode == CLIP_TYPE_VOCABULARY
+            else None
+        )
+        if intro and topic_intro_configured(intro):
+            print(
+                f"[rec] topic 인트로 + 단어 클립 {len(self._clips)}개 녹화 시작",
+                flush=True,
+            )
+        else:
+            print(f"[rec] 클립 {len(self._clips)}개 녹화 시작", flush=True)
+        self._start_current_clip()
 
     def _dt_sec(self, config: Any) -> float:
         dt = 1.0 / 30.0
@@ -204,6 +240,11 @@ class ShortsStudio(IStudio):
                 logger.debug("숏츠 음성 로드 실패: %s (%s)", path, ex)
                 return 0.0
             dur = float(snd.get_length() or 0.0)
+            if self._is_recording_mode():
+                self._record_insert_sound(path, snd=snd, duration_sec=dur)
+                if self._scene:
+                    self._scene.set_voice_channel(None)
+                return dur
             try:
                 ch = pygame.mixer.Channel(_VOICE_CHANNEL_INDEX)
                 ch.play(snd)
