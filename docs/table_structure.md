@@ -26,7 +26,9 @@
 | word | str | O | 한자 단어 |
 | pos | str | - | 품사 |
 | meaning | str | - | 뜻 |
-| tip | str | - | 학습 팁(숏츠 단어 모드: 뜻 TTS 자막 아래 표시) |
+| tip | str | - | 학습 팁(숏츠 단어 모드: tip 줄) |
+| tts_type | str | - | 숏츠 **뜻 TTS** 엔진: `edge` \| `gtts`. 비우면 `edge` |
+| tts_voice | str | - | Edge 목소리 ID (예: `ko-KR-SunHiNeural`). `gtts`는 무시 |
 | img_path | str | - | 이미지 경로 |
 
 ---
@@ -89,7 +91,7 @@
 | topic | str | - | 주제 (`--topic` 필터) |
 | word_id | str | O | `words.id` 여러 개: `20501\|20504\|20505` (`\|` 구분) |
 | hook_title | str | O | 훅 문구: `\|` 로 복수. **1개만** 넣으면 모든 단어에 동일 |
-| ko_narration_id | int | - | topic 인트로 TTS·자막 (`batch_ko_tts.bat` 1회) |
+| ko_narration_id | int | - | topic 인트로 TTS·자막 (`batch_tts.bat` 2 또는 `batch_ko_tts.bat`) |
 | video_path | str | - | topic 인트로 mp4 1개 |
 | sound_repeat_count | str | - | 중국어 `sound_path` 재생 횟수. `1` 또는 `2\|1\|1` (`word_id` 순, 1개면 전체 동일). 기본 1 |
 | after_sound_delay_sec | str | - | 마지막 mp3 재생 후 다음 단어까지 대기(초). `1.5` 또는 `2\|1\|0.5` 형식. 기본 0 |
@@ -109,7 +111,7 @@ id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_
 
 `hook_title`이 `과일 단어 외워보세요` 한 줄이면 사과·망고·수박 모두 같은 훅.
 
-준비: `batch_ko_tts.bat 2` → `batch_vocab_ko_tts.bat fruit_store` → F5 `--topic fruit_store`
+준비: `batch_tts.bat` (통합) — `2` 회화 set_id → `1 id 1` 또는 `1 topic fruit_store` 단어 뜻 TTS (`ko_word_{word_id}_*`) → F5 `--topic fruit_store`. 호환: `batch_ko_tts.bat`, `batch_vocab_ko_tts_by_id.bat`
 
 ## 6) ko_narration_sets (한국어 TTS·세트)
 

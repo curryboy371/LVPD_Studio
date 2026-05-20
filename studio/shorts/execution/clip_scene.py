@@ -267,6 +267,8 @@ class ClipScene:
     def _vocab_skip_to_content(self) -> None:
         """단어 숏츠: HOOK_IN 대기 없이 뜻 TTS 또는 발음 단계로."""
         self._vocab_show_ui_immediately()
+        if self._vocab_meaning_plan is None:
+            self._ensure_vocab_meaning_plan()
         if self._vocab_meaning_plan is not None:
             self._enter_vocab_meaning_ko()
         else:
@@ -603,13 +605,21 @@ class ClipScene:
         if not self._is_vocabulary_clip():
             return
         try:
-            from audio.vocab_meaning_ko import try_load_cached_vocab_meaning_plan
+            from audio.vocab_meaning_ko import ensure_vocab_meaning_plan_for_clip
 
-            plan = try_load_cached_vocab_meaning_plan(self._clip)
+            plan = ensure_vocab_meaning_plan_for_clip(self._clip, build_if_missing=True)
             if plan is not None:
                 self._vocab_meaning_plan = plan
+                self._clip["_vocab_meaning_plan"] = plan
+            else:
+                wid = self._clip.get("word_id")
+                logger.warning(
+                    "단어 뜻 TTS 없음 word_id=%s — "
+                    "batch_tts.bat (1 숏츠 단어) 로 생성 후 재생",
+                    wid,
+                )
         except Exception as ex:
-            logger.debug("단어 뜻 TTS 로드 생략: %s", ex)
+            logger.warning("단어 뜻 TTS 로드 실패 word_id=%s: %s", self._clip.get("word_id"), ex)
 
     def _active_ko_plan(self) -> Optional[Any]:
         if self._stage == ClipStage.VOCAB_MEANING_KO:
@@ -628,6 +638,10 @@ class ClipScene:
             return
         plan = self._vocab_meaning_plan
         if plan is None or not getattr(plan, "cues", None):
+            logger.info(
+                "단어 뜻 TTS 스킵 → 중국어 발음(word sound_path) word_id=%s",
+                self._clip.get("word_id"),
+            )
             self._enter_learn_play()
             return
         self._stop_learn_audio()
@@ -818,6 +832,10 @@ class ClipScene:
                 else:
                     self._finish_topic_intro()
             elif self._stage == ClipStage.VOCAB_MEANING_KO:
+                logger.debug(
+                    "단어 뜻 TTS 완료 → 중국어 발음 word_id=%s",
+                    self._clip.get("word_id"),
+                )
                 self._enter_learn_play()
             elif self._stage == ClipStage.KO_NARRATION:
                 self._enter_cta_hold()
@@ -831,6 +849,23 @@ class ClipScene:
                 self._vocab_meaning_subtitle_hold = t
         self._ko_cue_elapsed = 0.0
         path = str(getattr(cue, "audio_path", "") or "").strip()
+        if path:
+            try:
+                from audio.ko_narration import resolve_ko_cue_audio_path
+
+                path = resolve_ko_cue_audio_path(path)
+            except Exception:
+                pass
+        if (
+            self._stage == ClipStage.VOCAB_MEANING_KO
+            and self._is_vocabulary_clip()
+            and path
+        ):
+            logger.info(
+                "단어 뜻 TTS 재생 word_id=%s: %s",
+                self._clip.get("word_id"),
+                path,
+            )
         self._ko_cue_duration = self._play_voice(path) if path else 0.0
         if self._ko_cue_duration <= 0 and path:
             self._ko_cue_duration = 3.0
@@ -857,7 +892,6 @@ class ClipScene:
             if not text:
                 return ""
             if self._is_vocabulary_clip():
-                # 뜻(translation)은 drawer 고정. TTS 자막은 비디오·뜻 TTS·KO 내레이션만.
                 if self._stage in (
                     ClipStage.VIDEO_PLAY,
                     ClipStage.VIDEO_HOLD,

@@ -154,6 +154,14 @@ class Word(BaseModel):
     pos: str = Field(default="", description="품사 (예: 명사, 동사). 복수 시 | 구분")
     meaning: str = Field(default="", description="뜻")
     tip: str = Field(default="", description="학습 팁(숏츠 단어 모드 등)")
+    tts_type: str = Field(
+        default="",
+        description="숏츠 뜻 TTS 엔진 (edge|gtts). 비우면 edge",
+    )
+    tts_voice: str = Field(
+        default="",
+        description="Edge 목소리 ID (예: ko-KR-SunHiNeural). gtts는 무시",
+    )
     img_path: str = Field(default="", description="이미지 경로")
     sound_path: str = Field(default="", description="단어 단독 발음 음원 (선택)")
     stroke_anim_path: str = Field(default="", description="획순 애니메이션 리소스 경로(선택)")

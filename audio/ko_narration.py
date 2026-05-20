@@ -525,11 +525,56 @@ def cached_timeline_json_path(clip_type: str, clip_id: int) -> Path:
     return KO_SOUND_DIR / f"ko_{_cache_stem(clip_type, clip_id)}_timeline.json"
 
 
+def resolve_ko_cue_audio_path(raw: str) -> str:
+    """timeline JSON의 audio_path → 재생 가능한 절대 경로 (절대/상대/파일명 폴백)."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    p = Path(s)
+    if p.is_file():
+        return str(p.resolve())
+    if not p.is_absolute():
+        under_repo = (_REPO / p).resolve()
+        if under_repo.is_file():
+            return str(under_repo)
+    name = p.name
+    if name:
+        for base in (KO_SOUND_DIR, _LEGACY_KO_SOUND_DIR):
+            cand = (base / name).resolve()
+            if cand.is_file():
+                return str(cand)
+    return str(p.resolve()) if s else ""
+
+
+def normalize_plan_cue_audio_paths(plan: KoNarrationPlan) -> KoNarrationPlan:
+    """로드 후 cue mp3 경로를 repo 기준으로 정규화."""
+    cues = [
+        KoCue(
+            index=c.index,
+            text=c.text,
+            start_sec=c.start_sec,
+            end_sec=c.end_sec,
+            audio_path=resolve_ko_cue_audio_path(c.audio_path),
+        )
+        for c in plan.cues
+    ]
+    return KoNarrationPlan(
+        set_id=plan.set_id,
+        clip_type=plan.clip_type,
+        clip_id=plan.clip_id,
+        cues=cues,
+        composite_audio_path=plan.composite_audio_path,
+        adjusted_srt_path=plan.adjusted_srt_path,
+        timeline_json_path=plan.timeline_json_path,
+        total_duration_sec=plan.total_duration_sec,
+    )
+
+
 def plan_cue_audios_ready(plan: KoNarrationPlan) -> bool:
     """문장별 TTS mp3가 모두 있으면 True (재생·자막 동기용)."""
     if not plan.cues:
         return False
-    return all(Path(c.audio_path).is_file() for c in plan.cues)
+    return all(Path(resolve_ko_cue_audio_path(c.audio_path)).is_file() for c in plan.cues)
 
 
 def try_load_cached_ko_plan(clip: dict[str, Any]) -> Optional[KoNarrationPlan]:

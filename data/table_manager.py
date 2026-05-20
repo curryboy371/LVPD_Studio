@@ -219,6 +219,10 @@ def load_words_table_from_csv(
                         pos=_normalize_pipe_list(row.get("pos")),
                         meaning=_normalize_pipe_list(row.get("meaning")),
                         tip=_str(row.get("tip")),
+                        tts_type=_str(
+                            row.get("tts_type") or row.get("tts") or ""
+                        ).strip().lower(),
+                        tts_voice=_str(row.get("tts_voice")),
                         img_path=_resolve_media_path_from_name(img_raw, image_index),
                         sound_path=_resolve_media_path_from_name(sound_raw, sound_index),
                         stroke_anim_path=_str(row.get("stroke_anim_path")),
