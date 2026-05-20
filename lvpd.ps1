@@ -5,6 +5,6 @@ if ($args.Count -eq 0) {
     cmd.exe /k "lvpd.bat"
 } else {
     $cmd = 'lvpd.bat ' + ($args -join ' ')
-    cmd.exe /c "$cmd & pause"
+    cmd.exe /c "$cmd & if errorlevel 1 pause"
 }
 exit $LASTEXITCODE

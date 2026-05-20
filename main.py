@@ -2,7 +2,7 @@
 단일 진입점. 명령별 실행:
 
   python main.py studio  → 스튜디오 (디버그: 집계 단어 화면부터). 기본 topic은 fruit store. --mode record 로 오프스크린 녹화
-  F5(디버그)            → .vscode/launch.json 기본: 숏츠 단어 (--studio shorts --shorts-type vocabulary)
+  F5(디버그)            → .vscode/launch.json (숏츠 단어/회화, 단어장, 회화) 또는 lvpd.bat 6~9
   python main.py batch   → CSV 기반 배치 렌더 → output/ 저장
   python main.py batch-shorts-ko → ko_narration_* 테이블 기준 문장별 TTS 사전 생성
 

@@ -1,72 +1,92 @@
 {
-
   "version": "0.2.0",
-
   "configurations": [
-
     {
-
-      "name": "숏츠 - 단어",
-
+      "name": "F5 숏츠 - 단어",
       "type": "debugpy",
-
       "request": "launch",
-
       "program": "${workspaceFolder}/studio/runner.py",
-
       "args": [
-
         "--studio",
-
         "shorts",
-
         "--mode",
-
         "debug",
-
         "--topic",
-
         "bao",
-
         "--shorts-type",
-
         "vocabulary"
-
       ],
-
       "console": "integratedTerminal",
-
       "cwd": "${workspaceFolder}",
-
       "env": { "PYTHONPATH": "${workspaceFolder}" },
-
       "justMyCode": true
-
     },
-
     {
-
-      "name": "배치 (영상 제작)",
-
+      "name": "F5 숏츠 - 회화",
       "type": "debugpy",
-
       "request": "launch",
-
-      "program": "${workspaceFolder}/main.py",
-
-      "args": ["batch"],
-
+      "program": "${workspaceFolder}/studio/runner.py",
+      "args": [
+        "--studio",
+        "shorts",
+        "--mode",
+        "debug",
+        "--topic",
+        "where",
+        "--shorts-type",
+        "conversation"
+      ],
       "console": "integratedTerminal",
-
       "cwd": "${workspaceFolder}",
-
       "env": { "PYTHONPATH": "${workspaceFolder}" },
-
       "justMyCode": true
-
+    },
+    {
+      "name": "F5 단어장",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/studio/runner.py",
+      "args": [
+        "--studio",
+        "vocabulary",
+        "--mode",
+        "debug",
+        "--topic",
+        "fruit_store"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "justMyCode": true
+    },
+    {
+      "name": "F5 회화",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/studio/runner.py",
+      "args": [
+        "--studio",
+        "conversation",
+        "--mode",
+        "debug",
+        "--topic",
+        "fruit_store"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "justMyCode": true
+    },
+    {
+      "name": "배치 (영상 제작)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["batch"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}" },
+      "justMyCode": true
     }
-
   ]
-
 }
-
