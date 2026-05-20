@@ -1,3 +1,3 @@
 @echo off
-REM create_all_csv.bat 와 동일 (ko_narration_sets/lines 포함)
-call "%~dp0create_all_csv.bat" %*
+REM [호환] create_all_csv 와 동일 → lvpd.bat csv
+call "%~dp0lvpd.bat" csv %*

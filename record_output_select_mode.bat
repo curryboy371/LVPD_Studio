@@ -93,7 +93,7 @@ if not defined RECORD_TOPIC (
 if "%RECORD_TOPIC%"=="" set "RECORD_TOPIC=where"
 echo.
 echo [shorts/%SHORTS_TYPE%] topic=%RECORD_TOPIC% 1080x1920 녹화 (클립 끝까지)
-echo   CSV: shorts_%SHORTS_TYPE%_clips.csv  /  KO TTS: batch_ko_tts.bat
+echo   CSV: shorts_%SHORTS_TYPE%_clips.csv  /  KO TTS: lvpd.bat ^(2 TTS^)
 echo.
 if not exist "release" mkdir "release"
 where py >nul 2>nul && (

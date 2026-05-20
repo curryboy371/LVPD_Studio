@@ -490,7 +490,7 @@ def ensure_vocab_meaning_plan_for_clip(
         word_id, tts_cli=tts, tts_voice_cli=tts_voice
     )
     logger.info(
-        "단어 뜻 TTS 캐시 없음 → 재생 시 생성 word_id=%s [%s] (배치: batch_tts.bat)",
+        "단어 뜻 TTS 캐시 없음 → 재생 시 생성 word_id=%s [%s] (배치: lvpd.bat tts)",
         word_id,
         format_tts_log_label(engine, voice),
     )

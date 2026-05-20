@@ -4,19 +4,10 @@ cd /d "%~dp0"
 setlocal EnableDelayedExpansion
 
 REM ---------------------------------------------------------------------------
-REM  TTS 배치 통합
+REM  TTS 배치 (lvpd.bat 2번 / lvpd.bat tts 로도 호출)
 REM    1  숏츠 단어 모드  — words.csv 뜻 → ko_word_{word_id}_*
 REM    2  숏츠 회화 모드  — ko_narration set → ko_set_{id}_*
 REM    3  단어 자체       — words.csv word_id 직접 (동일 산출 경로)
-REM
-REM  사용 예:
-REM    batch_tts.bat
-REM    batch_tts.bat 1 id 1
-REM    batch_tts.bat 1 topic bao --force
-REM    batch_tts.bat 2 1000
-REM    batch_tts.bat 3 30123|30124
-REM    batch_tts.bat conversation 2
-REM    batch_tts.bat word 30123
 REM ---------------------------------------------------------------------------
 
 set "MODE=%~1"
@@ -45,7 +36,7 @@ goto fail
 :menu
 echo.
 echo ========================================
-echo   TTS 배치 (통합)
+echo   TTS 배치
 echo ========================================
 echo   1  숏츠 단어 모드
 echo      shorts_vocabulary_clips / topic -^> words.csv 뜻 TTS

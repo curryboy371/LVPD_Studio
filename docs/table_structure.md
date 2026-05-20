@@ -12,7 +12,9 @@
 
 `sentence_word_map.csv`는 신규 기본 경로에서 사용하지 않습니다(레거시 폴백 전용).
 
-**CSV 일괄 생성**: 프로젝트 루트에서 `create_all_csv.bat` 또는 `create_csv.bat` → `python -m tools.csv_gen` (위 테이블 엑셀→CSV 포함).
+**통합 배치**: 프로젝트 루트 `lvpd.bat` (CSV / TTS / 녹화·실행 / 오디오 추출 / 한자 프레임). 호환: `create_all_csv.bat`, `batch_tts.bat`, `record_output_select_mode.bat` 등.
+
+**CSV 일괄 생성**: `lvpd.bat csv` 또는 `create_all_csv.bat` → `python -m tools.csv_gen` (위 테이블 엑셀→CSV 포함).
 
 ---
 
@@ -111,7 +113,7 @@ id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_
 
 `hook_title`이 `과일 단어 외워보세요` 한 줄이면 사과·망고·수박 모두 같은 훅.
 
-준비: `batch_tts.bat` (통합) — `2` 회화 set_id → `1 id 1` 또는 `1 topic fruit_store` 단어 뜻 TTS (`ko_word_{word_id}_*`) → F5 `--topic fruit_store`. 호환: `batch_ko_tts.bat`, `batch_vocab_ko_tts_by_id.bat`
+준비: `lvpd.bat` → `2` TTS(회화 set_id) → `1` TTS(단어 id/topic) → F5 `--topic …`. CLI: `lvpd.bat tts 2 1000`, `lvpd.bat tts 1 id 1`, `lvpd.bat run shorts_vocabulary bao`
 
 ## 6) ko_narration_sets (한국어 TTS·세트)
 

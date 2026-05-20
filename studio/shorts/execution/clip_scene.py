@@ -615,7 +615,7 @@ class ClipScene:
                 wid = self._clip.get("word_id")
                 logger.warning(
                     "단어 뜻 TTS 없음 word_id=%s — "
-                    "batch_tts.bat (1 숏츠 단어) 로 생성 후 재생",
+                    "lvpd.bat → 2 TTS (숏츠 단어) 로 생성 후 재생",
                     wid,
                 )
         except Exception as ex:
