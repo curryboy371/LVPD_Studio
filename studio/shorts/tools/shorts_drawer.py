@@ -15,13 +15,12 @@ from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
 from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import (
     SHORTS_VOCAB_POS_FONT_RATIO,
-    SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO,
     shorts_vocab_hanzi_line_height,
-    shorts_vocab_hanzi_y,
+    shorts_vocab_word_img_inner_size,
     shorts_vocab_layout_metrics,
+    shorts_vocab_overlay_layout,
     shorts_vocab_pos_after_hanzi_gap,
-    shorts_vocab_text_block_top,
-    shorts_vocab_tip_after_meaning_gap,
+    shorts_vocab_pos_line_height,
     shorts_vocab_tip_font_pt,
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
@@ -30,6 +29,11 @@ from studio.shorts.constants import (
     KO_SUBTITLE_BG_PAD_X,
     KO_SUBTITLE_BG_PAD_Y,
     KO_SUBTITLE_BG_RGBA,
+    KARAOKE_INACTIVE_HANZI,
+    KARAOKE_INACTIVE_PINYIN,
+    SHORTS_VOCAB_OVERLAY_BG_PAD_X,
+    SHORTS_VOCAB_OVERLAY_BG_PAD_Y,
+    SHORTS_VOCAB_OVERLAY_BG_RGBA,
     shorts_ko_subtitle_below_video_gap,
     shorts_hook_title_line_gap,
     shorts_hook_title_y,
@@ -42,6 +46,10 @@ from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
 from studio.shorts.tools.karaoke_renderer import KaraokeRenderer, blit_horizontal_karaoke_wipe
 from utils.fonts import load_font_korean, load_font_kr_chinese
+
+# clip_scene fade 채널과 동일 문자열
+_CHANNEL_BOTTOM = "shorts_bottom"
+
 
 class ShortsDrawer:
     """상단 훅·중앙 학습·하단 CTA 렌더."""
@@ -79,6 +87,30 @@ class ShortsDrawer:
     def fade_alpha(self, channel: str) -> int:
         return self._fade.alpha(channel)
 
+    def _draw_alpha_panel_background(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        top: int,
+        width: int,
+        height: int,
+        fade_alpha: int,
+        bg_rgba: tuple[int, int, int, int],
+        pad_x: int,
+        pad_y: int,
+    ) -> None:
+        """텍스트 블록 뒤 반투명 패널."""
+        if width <= 0 or height <= 0:
+            return
+        bg_w = int(width) + pad_x * 2
+        bg_h = int(height) + pad_y * 2
+        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        _, _, _, base_a = bg_rgba
+        a = max(0, min(255, int(base_a * fade_alpha / 255)))
+        bg.fill((0, 0, 0, a))
+        screen.blit(bg, (center_x - bg_w // 2, int(top) - pad_y))
+
     def _draw_ko_subtitle_background(
         self,
         screen: pygame.Surface,
@@ -90,17 +122,94 @@ class ShortsDrawer:
         fade_alpha: int,
     ) -> None:
         """TTS 자막: 검정 배경 + 알파(채널 페이드와 곱)."""
-        if text_w <= 0 or text_h <= 0:
-            return
-        pad_x = KO_SUBTITLE_BG_PAD_X
-        pad_y = KO_SUBTITLE_BG_PAD_Y
-        bg_w = text_w + pad_x * 2
-        bg_h = text_h + pad_y * 2
-        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
-        _, _, _, base_a = KO_SUBTITLE_BG_RGBA
-        a = max(0, min(255, int(base_a * fade_alpha / 255)))
-        bg.fill((0, 0, 0, a))
-        screen.blit(bg, (center_x - bg_w // 2, y - pad_y))
+        self._draw_alpha_panel_background(
+            screen,
+            center_x=center_x,
+            top=y,
+            width=text_w,
+            height=text_h,
+            fade_alpha=fade_alpha,
+            bg_rgba=KO_SUBTITLE_BG_RGBA,
+            pad_x=KO_SUBTITLE_BG_PAD_X,
+            pad_y=KO_SUBTITLE_BG_PAD_Y,
+        )
+
+    def _measure_vocab_cn_stack(
+        self,
+        data: Any,
+        *,
+        pinyin_y: int,
+        hanzi_y: int,
+        hanzi_line_h: int,
+        pos: str,
+        frame_height: int,
+    ) -> Optional[tuple[int, int, int]]:
+        """병음·한자·품사 블록 (top, bottom, max_width). 없으면 None."""
+        pinyin = (getattr(data, "pinyin", None) or "").strip()
+        hanzi = (getattr(data, "sentence", None) or "").strip()
+        pos_label = (pos or "").strip()
+        if not pinyin and not hanzi and not pos_label:
+            return None
+
+        max_w = 0
+        fonts = self._fonts
+        if pinyin:
+            surf_in, _ = self._drawer._get_cached_text_pair(
+                self._drawer._cache_pinyin,
+                fonts.pinyin_ft,
+                fonts.pinyin_pg,
+                pinyin,
+                KARAOKE_INACTIVE_PINYIN,
+            )
+            max_w = max(max_w, surf_in.get_width())
+        if hanzi:
+            surf_in, _ = self._drawer._get_cached_text_pair(
+                self._drawer._cache_hanzi,
+                fonts.hanzi_ft,
+                fonts.hanzi_pg,
+                hanzi,
+                KARAOKE_INACTIVE_HANZI,
+            )
+            max_w = max(max_w, surf_in.get_width())
+        if pos_label:
+            from utils.fonts import load_font_korean
+
+            pos_pt = max(14, int(self._font_sizes.kr * SHORTS_VOCAB_POS_FONT_RATIO))
+            font = load_font_korean(pos_pt, WHITE)
+            if font is not None:
+                max_w = max(max_w, font.render(pos_label, True, WHITE).get_width())
+
+        top = int(pinyin_y) if pinyin else int(hanzi_y)
+        bottom = int(hanzi_y) + int(hanzi_line_h)
+        if pos_label:
+            bottom += shorts_vocab_pos_after_hanzi_gap(frame_height)
+            bottom += shorts_vocab_pos_line_height(
+                frame_height, kr_font_pt=int(self._font_sizes.kr)
+            )
+        if bottom <= top:
+            bottom = top + max(1, int(hanzi_line_h))
+        return top, bottom, max(1, max_w)
+
+    def _draw_vocab_cn_stack_background(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        stack: tuple[int, int, int],
+        fade_alpha: int,
+    ) -> None:
+        top, bottom, max_w = stack
+        self._draw_alpha_panel_background(
+            screen,
+            center_x=center_x,
+            top=top,
+            width=max_w,
+            height=bottom - top,
+            fade_alpha=fade_alpha,
+            bg_rgba=SHORTS_VOCAB_OVERLAY_BG_RGBA,
+            pad_x=SHORTS_VOCAB_OVERLAY_BG_PAD_X,
+            pad_y=SHORTS_VOCAB_OVERLAY_BG_PAD_Y,
+        )
 
     def _ensure_bg(self, width: int, height: int) -> None:
         if self._bg_surface is not None and self._bg_surface.get_size() == (width, height):
@@ -117,8 +226,15 @@ class ShortsDrawer:
         if self._bg_surface is not None:
             screen.blit(self._bg_surface, (0, 0))
 
-    def _load_hook_image(self, path: str, max_w: int, max_h: int) -> Optional[pygame.Surface]:
-        key = f"{path}|{max_w}|{max_h}"
+    def _load_hook_image(
+        self,
+        path: str,
+        max_w: int,
+        max_h: int,
+        *,
+        allow_upscale: bool = False,
+    ) -> Optional[pygame.Surface]:
+        key = f"{path}|{max_w}|{max_h}|{int(allow_upscale)}"
         if key in self._hook_image_cache:
             return self._hook_image_cache[key]
         if not path or not Path(path).exists():
@@ -137,10 +253,15 @@ class ShortsDrawer:
         sw, sh = img.get_width(), img.get_height()
         if sw <= 0 or sh <= 0:
             return None
-        scale = min(float(max_w) / sw, float(max_h) / sh, 1.0)
+        scale = min(float(max_w) / sw, float(max_h) / sh)
+        if not allow_upscale:
+            scale = min(scale, 1.0)
         tw = max(1, int(sw * scale))
         th = max(1, int(sh * scale))
-        scaled = pygame.transform.smoothscale(img, (tw, th)) if scale < 1.0 else img
+        if tw == sw and th == sh:
+            scaled = img
+        else:
+            scaled = pygame.transform.smoothscale(img, (tw, th))
         self._hook_image_cache[key] = scaled
         return scaled
 
@@ -287,6 +408,42 @@ class ShortsDrawer:
             return 0
         surf = self._ko_subtitle_font.render(sub, True, (255, 255, 255))
         return max(0, int(surf.get_height()))
+
+    @staticmethod
+    def _vocab_meaning_text(item: dict[str, Any]) -> str:
+        """words.csv 뜻(translation) — '뜻 · 품사' 형식이면 뜻만."""
+        trans_raw = item.get("translation") or []
+        if isinstance(trans_raw, list):
+            text = (trans_raw[0] if trans_raw else "").strip()
+        else:
+            text = str(trans_raw or "").strip()
+        if " · " in text:
+            text = text.split(" · ", 1)[0].strip()
+        return text
+
+    def _draw_vocab_meaning_line(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        text: str,
+        fade_alpha: int = 255,
+    ) -> None:
+        """이미지 위 words.csv 뜻(한국어)."""
+        label = (text or "").strip()
+        if not label or fade_alpha <= 0:
+            return
+        alpha = max(0, min(255, int(fade_alpha)))
+        surf = self._ko_subtitle_font.render(label, True, KO_KARAOKE_ACTIVE)
+        tw, th = surf.get_width(), surf.get_height()
+        self._draw_ko_subtitle_background(
+            screen, center_x=center_x, y=int(y), text_w=tw, text_h=th, fade_alpha=alpha
+        )
+        if alpha < 255:
+            surf = surf.copy()
+            surf.set_alpha(alpha)
+        screen.blit(surf, (center_x - tw // 2, int(y)))
 
     def draw_vocab_tip(
         self,
@@ -573,17 +730,17 @@ class ShortsDrawer:
                 hook_title_bottom_y=hook_bottom,
             )
         img_path = str(item.get("word_img_path") or "").strip()
+        max_w, max_h = shorts_vocab_word_img_inner_size(rect.width, rect.height, fh)
         img = self._load_hook_image(
             img_path,
-            int(rect.width * SHORTS_VOCAB_WORD_IMG_MAX_WIDTH_RATIO),
-            int(img_band_h),
+            max_w,
+            max(max_h, int(img_band_h)),
+            allow_upscale=True,
         )
         if img is not None:
             iy = int(layout_top) + max(0, (int(img_band_h) - img.get_height()) // 2)
             screen.blit(img, (rect.centerx - img.get_width() // 2, iy))
-        text_top = shorts_vocab_text_block_top(int(layout_top), int(img_band_h), fh)
-        pinyin_y = text_top
-        hanzi_y = shorts_vocab_hanzi_y(int(layout_top), int(img_band_h), fh)
+        meaning_text = self._vocab_meaning_text(item)
         pos = str(item.get("word_pos") or "").strip()
         if not pos:
             trans_raw = item.get("translation") or []
@@ -595,12 +752,41 @@ class ShortsDrawer:
                 parts = [p.strip() for p in legacy.split(" · ", 1)]
                 if len(parts) == 2 and parts[1]:
                     pos = parts[1]
+        tip_text = str(item.get("word_tip") or "").strip()
+        overlay = shorts_vocab_overlay_layout(
+            int(layout_top),
+            int(img_band_h),
+            fh,
+            frame_width=screen.get_width(),
+            has_pos=bool(pos),
+            has_tip=bool(tip_text),
+            cn_font_pt=int(self._font_sizes.cn),
+            kr_font_pt=int(self._font_sizes.kr),
+            ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr),
+        )
+        pinyin_y = overlay.pinyin_y
+        hanzi_y = overlay.hanzi_y
         hanzi_line_h = shorts_vocab_hanzi_line_height(fh, cn_font_pt=int(self._font_sizes.cn))
-        sub_rect = pygame.Rect(rect.left, text_top, rect.width, max(80, rect.bottom - text_top))
+        sub_rect = pygame.Rect(
+            rect.left, int(layout_top), rect.width, max(80, int(img_band_h))
+        )
         item_karaoke = dict(item)
         item_karaoke["translation"] = []
         data = build_sentence_render_data_with_tone_icons(item_karaoke)
         trans_color = getattr(getattr(style, "colors", None), "translation_color", WHITE)
+        fade = self.fade_alpha(_CHANNEL_BOTTOM)
+        stack = self._measure_vocab_cn_stack(
+            data,
+            pinyin_y=pinyin_y,
+            hanzi_y=hanzi_y,
+            hanzi_line_h=hanzi_line_h,
+            pos=pos,
+            frame_height=fh,
+        )
+        if stack is not None:
+            self._draw_vocab_cn_stack_background(
+                screen, center_x=rect.centerx, stack=stack, fade_alpha=fade
+            )
         self._karaoke.draw(
             screen,
             data=data,
@@ -622,6 +808,48 @@ class ShortsDrawer:
                 frame_height=fh,
                 text_color=trans_color,
             )
+    def draw_vocab_meaning_if_any(
+        self,
+        screen: pygame.Surface,
+        *,
+        zones: ShortsLayoutZones,
+        item: dict[str, Any],
+        hook_title: str = "",
+        fade_alpha: int = 255,
+    ) -> None:
+        """단어 뜻(words.csv) — middle set_clip 밖에서 그려 하단 잘림 방지."""
+        meaning_text = self._vocab_meaning_text(item)
+        if not meaning_text or fade_alpha <= 0:
+            return
+        fh = screen.get_height()
+        hook_bottom = self.measure_hook_title_bottom_y(hook_title, frame_height=fh)
+        layout_top, img_band_h = shorts_vocab_layout_metrics(
+            zones.middle.top,
+            zones.middle.height,
+            zones.middle.bottom,
+            fh,
+            hook_title_bottom_y=hook_bottom,
+        )
+        pos = str(item.get("word_pos") or "").strip()
+        tip_text = str(item.get("word_tip") or "").strip()
+        overlay = shorts_vocab_overlay_layout(
+            int(layout_top),
+            int(img_band_h),
+            fh,
+            frame_width=screen.get_width(),
+            has_pos=bool(pos),
+            has_tip=bool(tip_text),
+            cn_font_pt=int(self._font_sizes.cn),
+            kr_font_pt=int(self._font_sizes.kr),
+            ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr),
+        )
+        self._draw_vocab_meaning_line(
+            screen,
+            center_x=zones.middle.centerx,
+            y=overlay.meaning_y,
+            text=meaning_text,
+            fade_alpha=fade_alpha,
+        )
 
     def draw_bottom_zone(
         self,

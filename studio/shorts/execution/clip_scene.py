@@ -851,24 +851,23 @@ class ClipScene:
             return self._ko_cue_elapsed >= 0.5
         return self._ko_cue_elapsed >= dur + 0.1
 
-    def _vocab_pinned_meaning_subtitle(self) -> str:
-        """단어 모드: 뜻 TTS 자막 — 중국어 mp3·CTA 구간에도 유지."""
-        if not self._is_vocabulary_clip() or not self._vocab_meaning_subtitle_hold:
-            return ""
-        if self._stage not in (
-            ClipStage.LEARN_PLAY,
-            ClipStage.VOCAB_GAP,
-            ClipStage.CTA_HOLD,
-        ):
-            return ""
-        return self._vocab_meaning_subtitle_hold
-
     def _active_ko_subtitle(self) -> str:
         if self._ko_started and not self._ko_finished:
-            return (self._ko_current_text or "").strip()
-        pinned = self._vocab_pinned_meaning_subtitle()
-        if pinned:
-            return pinned
+            text = (self._ko_current_text or "").strip()
+            if not text:
+                return ""
+            if self._is_vocabulary_clip():
+                # 뜻(translation)은 drawer 고정. TTS 자막은 비디오·뜻 TTS·KO 내레이션만.
+                if self._stage in (
+                    ClipStage.VIDEO_PLAY,
+                    ClipStage.VIDEO_HOLD,
+                    ClipStage.VIDEO_FADE_OUT,
+                    ClipStage.VOCAB_MEANING_KO,
+                    ClipStage.KO_NARRATION,
+                ):
+                    return text
+                return ""
+            return text
         return ""
 
     def _learn_overlay_subtitle(self) -> str:
@@ -899,8 +898,6 @@ class ClipScene:
         if self._is_vocabulary_clip() and self._stage == ClipStage.VOCAB_MEANING_KO:
             if self._active_ko_subtitle():
                 return 1.0
-        if self._vocab_pinned_meaning_subtitle():
-            return 1.0
         if self._active_ko_subtitle() and self._ko_started and not self._ko_finished:
             return self._ko_subtitle_progress()
         if self._stage == ClipStage.LEARN_PLAY and self._learn_round == 3:
@@ -1008,9 +1005,26 @@ class ClipScene:
             return (w, h)
         return None
 
+    def _vocab_ko_subtitle_anchor_rect(
+        self, zones: ShortsLayoutZones, *, frame_height: int = 0
+    ) -> pygame.Rect:
+        """단어 숏츠 TTS 자막 — drawer 뜻(meaning_y)과 동일 앵커."""
+        fh = max(int(frame_height), zones.middle.height, 1)
+        fw = max(1, zones.middle.width)
+        _, _, overlay = self._vocab_overlay_layout(zones, frame_height=fh, frame_width=fw)
+        w = max(80, fw - 64)
+        return pygame.Rect(
+            zones.middle.centerx - w // 2,
+            overlay.meaning_anchor_bottom - 1,
+            w,
+            1,
+        )
+
     def _ko_subtitle_anchor_rect(
         self, zones: ShortsLayoutZones, *, frame_height: int = 0
     ) -> pygame.Rect:
+        if self._is_vocabulary_clip():
+            return self._vocab_ko_subtitle_anchor_rect(zones, frame_height=frame_height)
         inner = self._video_frame_inner_size()
         player = self._video_player if self._stage == ClipStage.VIDEO_PLAY else None
         frame_rect = self._drawer.compute_center_video_frame_rect(
@@ -1021,32 +1035,6 @@ class ClipScene:
         )
         if frame_rect is not None:
             return frame_rect
-        if self._is_vocabulary_clip():
-            from studio.shorts.constants import (
-                shorts_vocab_layout_metrics,
-                shorts_vocab_text_stack_bottom,
-            )
-
-            fh = max(int(frame_height), zones.middle.height, 1)
-            hook_bottom = self._drawer.measure_hook_title_bottom_y(
-                self._hook_title, frame_height=fh
-            )
-            layout_top, img_band_h = shorts_vocab_layout_metrics(
-                zones.middle.top,
-                zones.middle.height,
-                zones.middle.bottom,
-                fh,
-                hook_title_bottom_y=hook_bottom,
-            )
-            pos_label = str(self._clip.get("word_pos") or "").strip()
-            stack_bottom = shorts_vocab_text_stack_bottom(
-                layout_top,
-                img_band_h,
-                fh,
-                has_pos=bool(pos_label),
-            )
-            w = max(80, zones.middle.width - 64)
-            return pygame.Rect(zones.middle.centerx - w // 2, stack_bottom - 1, w, 1)
         fallback = zones.middle.inflate(-32, -32)
         return fallback if fallback.width > 0 and fallback.height > 0 else zones.middle
 
@@ -1069,17 +1057,67 @@ class ClipScene:
             below_gap_fn=gap_fn,
         )
 
-    def _vocab_meaning_subtitle_bottom_y(
-        self, zones: ShortsLayoutZones, *, frame_height: int
-    ) -> int:
-        from studio.shorts.constants import shorts_vocab_meaning_subtitle_gap
+    def _vocab_overlay_layout(
+        self,
+        zones: ShortsLayoutZones,
+        *,
+        frame_height: int,
+        frame_width: int = 0,
+    ):
+        from studio.shorts.constants import (
+            shorts_ko_subtitle_font_size,
+            shorts_vocab_layout_metrics,
+            shorts_vocab_overlay_layout,
+        )
 
-        anchor = self._ko_subtitle_anchor_rect(zones, frame_height=frame_height)
-        y = anchor.bottom + shorts_vocab_meaning_subtitle_gap(frame_height)
-        sub = self._overlay_subtitle_text()
-        if sub:
-            y += self._drawer.measure_ko_subtitle_height(sub)
-        return y
+        fh = max(int(frame_height), zones.middle.height, 1)
+        fw = max(1, int(frame_width) if frame_width > 0 else zones.middle.width)
+        hook_bottom = self._drawer.measure_hook_title_bottom_y(
+            self._hook_title, frame_height=fh
+        )
+        layout_top, img_band_h = shorts_vocab_layout_metrics(
+            zones.middle.top,
+            zones.middle.height,
+            zones.middle.bottom,
+            fh,
+            hook_title_bottom_y=hook_bottom,
+        )
+        pos_label = str(self._clip.get("word_pos") or "").strip()
+        tip_label = str(self._clip.get("word_tip") or "").strip()
+        ko_pt = shorts_ko_subtitle_font_size(fh)
+        overlay = shorts_vocab_overlay_layout(
+            layout_top,
+            img_band_h,
+            fh,
+            frame_width=fw,
+            has_pos=bool(pos_label),
+            has_tip=bool(tip_label),
+            ko_subtitle_pt=ko_pt,
+        )
+        return layout_top, img_band_h, overlay
+
+    def _draw_vocab_meaning_if_any(
+        self, screen: pygame.Surface, zones: ShortsLayoutZones
+    ) -> None:
+        if not self._is_vocabulary_clip() or not self._clip:
+            return
+        if self._stage not in (
+            ClipStage.VOCAB_MEANING_KO,
+            ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_GAP,
+            ClipStage.CTA_HOLD,
+            ClipStage.END_HOLD,
+            ClipStage.TRANSITION_OUT,
+            ClipStage.HOOK_IN,
+        ):
+            return
+        self._drawer.draw_vocab_meaning_if_any(
+            screen,
+            zones=zones,
+            item=self._clip,
+            hook_title=self._hook_title,
+            fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
+        )
 
     def _draw_vocab_tip_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
         if not self._is_vocabulary_clip():
@@ -1097,14 +1135,16 @@ class ClipScene:
         ):
             return
         fh = max(1, int(screen.get_height()))
-        from studio.shorts.constants import shorts_vocab_tip_after_meaning_gap
-
-        y = self._vocab_meaning_subtitle_bottom_y(zones, frame_height=fh)
-        y += shorts_vocab_tip_after_meaning_gap(fh)
+        fw = max(1, int(screen.get_width()))
+        _, _, overlay = self._vocab_overlay_layout(
+            zones, frame_height=fh, frame_width=fw
+        )
+        if overlay.tip_y <= 0:
+            return
         self._drawer.draw_vocab_tip(
             screen,
             center_x=zones.middle.centerx,
-            y=y,
+            y=overlay.tip_y,
             text=tip,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
         )
@@ -1212,6 +1252,20 @@ class ClipScene:
             finally:
                 screen.set_clip(None)
 
+        if show_karaoke or (
+            self._is_vocabulary_clip()
+            and self._stage
+            in (
+                ClipStage.VOCAB_MEANING_KO,
+                ClipStage.LEARN_PLAY,
+                ClipStage.VOCAB_GAP,
+                ClipStage.CTA_HOLD,
+                ClipStage.END_HOLD,
+                ClipStage.TRANSITION_OUT,
+                ClipStage.HOOK_IN,
+            )
+        ):
+            self._draw_vocab_meaning_if_any(screen, zones)
         if overlay_sub:
             self._draw_ko_subtitle_if_any(screen, zones)
         self._draw_vocab_tip_if_any(screen, zones)
