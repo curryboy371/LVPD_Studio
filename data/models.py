@@ -163,6 +163,7 @@ class Word(BaseModel):
         description="Edge 목소리 ID (예: ko-KR-SunHiNeural). gtts는 무시",
     )
     img_path: str = Field(default="", description="이미지 경로")
+    video_path: str = Field(default="", description="연상 동영상 경로 (숏츠 단어 모드, 선택)")
     sound_path: str = Field(default="", description="단어 단독 발음 음원 (선택)")
     stroke_anim_path: str = Field(default="", description="획순 애니메이션 리소스 경로(선택)")
     stroke_play_speed: float = Field(default=1.0, ge=0.1, le=5.0, description="획순 재생 속도 배수(선택)")

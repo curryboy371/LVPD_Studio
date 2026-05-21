@@ -91,7 +91,13 @@ class ClipScene:
         self._clip: dict[str, Any] = {}
         self._hook_title: str = ""
         self._video_player = SimpleVideoPlayer()
+        self._word_video_player = SimpleVideoPlayer()
         self._frozen_video_frame: Optional[pygame.Surface] = None
+        self._word_video_frozen_frame: Optional[pygame.Surface] = None
+        self._word_video_last_live_frame: Optional[pygame.Surface] = None
+        self._word_video_inner_size: tuple[int, int] = (0, 0)
+        self._word_video_started: bool = False
+        self._word_video_clock: float = 0.0
         self._video_inner_size: tuple[int, int] = (0, 0)
         self._video_display_alpha: int = 255
         self._video_fade_from_alpha: int = 255
@@ -133,6 +139,7 @@ class ClipScene:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
         self._stop_learn_audio()
         self._video_player.close()
+        self._reset_word_video()
         self._frozen_video_frame = None
         self._last_live_video_frame = None
         self._video_inner_size = (0, 0)
@@ -188,6 +195,7 @@ class ClipScene:
         self._timer = 0.0
         self._stop_learn_audio()
         self._video_player.close()
+        self._reset_word_video()
         self._frozen_video_frame = None
         self._video_inner_size = (0, 0)
         self._video_display_alpha = 255
@@ -305,6 +313,7 @@ class ClipScene:
         self._bg_practice_duration = 0.0
         self._stop_learn_audio()
         self._video_player.close()
+        self._reset_word_video()
         self._frozen_video_frame = None
         self._video_inner_size = (0, 0)
         self._video_display_alpha = 255
@@ -341,6 +350,166 @@ class ClipScene:
     def _clip_has_video_intro(self) -> bool:
         """단어 숏츠는 topic 인트로에서만 비디오. 회화만 클립별 비디오."""
         return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_CONVERSATION
+
+    def _word_video_path(self) -> str:
+        return str(self._clip.get("word_video_path") or "").strip()
+
+    def _has_word_video(self) -> bool:
+        return bool(self._word_video_path())
+
+    def _reset_word_video(self) -> None:
+        self._word_video_player.close()
+        self._word_video_frozen_frame = None
+        self._word_video_last_live_frame = None
+        self._word_video_inner_size = (0, 0)
+        self._word_video_started = False
+        self._word_video_clock = 0.0
+
+    def _load_word_video_source(self) -> bool:
+        """비디오 파일을 연다(클립당 1회)."""
+        path = self._word_video_path()
+        if not path:
+            return False
+        self._word_video_player.set_source(path, 0.0, -1.0)
+        if not self._word_video_player.has_source():
+            logger.warning(
+                "단어 비디오 열기 실패 word_id=%s: %s",
+                self._clip.get("word_id"),
+                path,
+            )
+            return False
+        self._word_video_player.seek_to(0.0)
+        return True
+
+    def _begin_word_video_once(self) -> None:
+        """video_path 있으면 단어 클립 전체에서 비디오 1회만 시작(뜻 TTS·발음 구간 연속)."""
+        if not self._has_word_video():
+            return
+        if self._word_video_started:
+            return
+        self._word_video_frozen_frame = None
+        self._word_video_last_live_frame = None
+        self._word_video_clock = 0.0
+        if not self._load_word_video_source():
+            self._reset_word_video()
+            return
+        self._word_video_started = True
+
+    def _should_draw_word_video(self) -> bool:
+        if not self._has_word_video() or not self._word_video_started:
+            return False
+        return self._stage in (
+            ClipStage.VOCAB_MEANING_KO,
+            ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_GAP,
+            ClipStage.CTA_HOLD,
+            ClipStage.END_HOLD,
+            ClipStage.TRANSITION_OUT,
+        )
+
+    def _freeze_word_video_frame(self) -> None:
+        if self._word_video_frozen_frame is not None:
+            if self._word_video_player.has_source():
+                self._word_video_player.close()
+            return
+        iw, ih = self._word_video_inner_size
+        if iw <= 0 or ih <= 0:
+            iw, ih = self._vocab_word_media_inner_size()
+        frame = None
+        if self._word_video_player.has_source():
+            frame = self._word_video_player.get_frame(iw, ih, contain=True)
+        if frame is None and self._word_video_last_live_frame is not None:
+            frame = self._word_video_last_live_frame
+        if frame is not None:
+            self._word_video_frozen_frame = frame.copy()
+        if self._word_video_player.has_source():
+            self._word_video_player.close()
+
+    def _sync_word_video_timeline(self, dt_sec: float) -> None:
+        """단어 클립 단일 타임라인 — 뜻 TTS·발음 구간에 걸쳐 1회만 재생."""
+        if not self._word_video_started or self._word_video_frozen_frame is not None:
+            return
+        if not self._word_video_player.has_source():
+            return
+        self._word_video_clock += max(0.0, float(dt_sec))
+        end_sec = float(self._word_video_player.get_effective_end_sec())
+        t = min(self._word_video_clock, end_sec)
+        self._word_video_player.seek_to(t)
+        if t >= end_sec - 1e-3:
+            self._freeze_word_video_frame()
+
+    def _vocab_word_media_inner_size(self) -> tuple[int, int]:
+        from studio.shorts.constants import shorts_vocab_word_img_inner_size
+
+        w = max(1, int(SHORTS_WIDTH))
+        h = max(1, int(SHORTS_HEIGHT * ZONE_MIDDLE_RATIO))
+        return shorts_vocab_word_img_inner_size(w, h, SHORTS_HEIGHT)
+
+    def _vocab_word_media_slot(
+        self, zones: Optional[ShortsLayoutZones]
+    ) -> tuple[pygame.Rect, tuple[int, int]]:
+        from studio.shorts.constants import (
+            shorts_vocab_image_y_offset,
+            shorts_vocab_layout_metrics,
+            shorts_vocab_word_img_inner_size,
+        )
+
+        if zones is None:
+            mid_top = int(SHORTS_HEIGHT * (1.0 - ZONE_MIDDLE_RATIO - 0.30))
+            mid_h = int(SHORTS_HEIGHT * ZONE_MIDDLE_RATIO)
+            mid_bottom = mid_top + mid_h
+            mid_left = 0
+            mid_width = SHORTS_WIDTH
+            fh = SHORTS_HEIGHT
+        else:
+            mid_top = zones.middle.top
+            mid_h = zones.middle.height
+            mid_bottom = zones.middle.bottom
+            mid_left = zones.middle.left
+            mid_width = zones.middle.width
+            fh = max(1, int(zones.middle.height))
+        hook_bottom = self._drawer.measure_hook_title_bottom_y(
+            self._hook_title, frame_height=fh
+        )
+        layout_top, img_band_h = shorts_vocab_layout_metrics(
+            mid_top,
+            mid_h,
+            mid_bottom,
+            fh,
+            hook_title_bottom_y=hook_bottom,
+        )
+        max_w, max_h = shorts_vocab_word_img_inner_size(mid_width, mid_h, fh)
+        iy = int(layout_top) + shorts_vocab_image_y_offset(fh)
+        slot = pygame.Rect(mid_left, max(0, iy), mid_width, max(48, int(img_band_h)))
+        inner = (
+            max(1, min(max_w, slot.width)),
+            max(1, min(max(max_h, int(img_band_h)), slot.height)),
+        )
+        return slot, inner
+
+    def _draw_word_video_in_slot(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
+        if not self._has_word_video():
+            return
+        slot, inner = self._vocab_word_media_slot(zones)
+        self._word_video_inner_size = inner
+        frozen = self._word_video_frozen_frame
+        player = None if frozen is not None else self._word_video_player
+        if frozen is None and not (player and player.has_source()):
+            return
+        self._drawer.draw_center_video(
+            screen,
+            player,
+            slot,
+            pad=0,
+            frozen_frame=frozen,
+            frame_inner_size=inner,
+        )
+        if frozen is not None:
+            self._word_video_last_live_frame = frozen
+        elif player is not None and player.has_source():
+            live = player.get_frame(inner[0], inner[1], contain=True)
+            if live is not None:
+                self._word_video_last_live_frame = live.copy()
 
     def _enter_post_video_intro(self) -> None:
         """인트로 비디오·KO 내레이션 후 — 단어: 뜻 TTS, 회화: 학습."""
@@ -379,6 +548,7 @@ class ClipScene:
             self._clip["_ko_plan"] = plan
 
     def _finish_clip(self) -> None:
+        self._reset_word_video()
         self._stage = ClipStage.DONE
         if self._on_clip_done:
             self._on_clip_done()
@@ -493,10 +663,14 @@ class ClipScene:
 
         if self._stage == ClipStage.VOCAB_MEANING_KO:
             self._tick_ko_narration(dt_sec)
+            if self._is_vocabulary_clip():
+                self._sync_word_video_timeline(dt_sec)
             return
 
         if self._stage == ClipStage.LEARN_PLAY:
             self._learn_elapsed += max(0.0, float(dt_sec))
+            if self._is_vocabulary_clip():
+                self._sync_word_video_timeline(dt_sec)
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
                     self._stop_learn_background_only()
@@ -589,6 +763,8 @@ class ClipScene:
         self._sentence_sound_duration = 0.0
         self._bg_practice_duration = 0.0
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
+        if self._is_vocabulary_clip():
+            self._begin_word_video_once()
         path = str(self._clip.get("sound_path") or "").strip()
         if path:
             self._start_sentence_play(play_index=1)
@@ -651,6 +827,7 @@ class ClipScene:
         self._ko_finished = False
         self._vocab_meaning_entered = True
         self._vocab_show_ui_immediately()
+        self._begin_word_video_once()
         self._start_ko_narration_sequence(during_video=False)
 
     def _start_sentence_play(self, *, play_index: int) -> None:
@@ -1278,6 +1455,8 @@ class ClipScene:
             )
             screen.set_clip(clip_rect)
             try:
+                if self._should_draw_word_video():
+                    self._draw_word_video_in_slot(screen, zones)
                 self._drawer.draw_middle(
                     screen,
                     zones=zones,

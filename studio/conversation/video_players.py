@@ -18,6 +18,10 @@ from core.paths import (
 
 logger = logging.getLogger(__name__)
 
+# OpenCV CAP_PROP_FPS가 1·1000 등 비정상인 mp4에서 연속 read()가 구간을 건너뛰며 빨리 재생되는 것 방지
+_MIN_TRUSTED_FPS = 8.0
+_MAX_TRUSTED_FPS = 120.0
+
 
 class SimpleVideoPlayer:
     """단일 비디오 파일의 화면만 재생 (OpenCV로 비디오 스트림만 읽음, 오디오 미사용). start_time~end_time 구간만 재생, end_time=-1이면 끝까지."""
@@ -38,6 +42,71 @@ class SimpleVideoPlayer:
     def _effective_end_sec(self) -> float:
         """end_time이 음수면 파일 길이까지를 유효 종료 시각으로 본다."""
         return self._end_time if self._end_time >= 0 else self._duration_sec
+
+    @staticmethod
+    def _normalize_capture_fps(cap: Any, frame_count: float) -> float:
+        """컨테이너 FPS 메타가 비정상일 때 길이·프레임 수로 보정."""
+        fallback = float(STUDIO_VIDEO_FALLBACK_FPS)
+        try:
+            import cv2
+
+            raw = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+        except Exception:
+            raw = 0.0
+        if _MIN_TRUSTED_FPS <= raw <= _MAX_TRUSTED_FPS:
+            return raw
+        if frame_count > 1:
+            try:
+                import cv2
+
+                cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1.0)
+                ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0)
+                cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+                if ms > 100.0:
+                    est = frame_count * 1000.0 / ms
+                    if _MIN_TRUSTED_FPS <= est <= _MAX_TRUSTED_FPS:
+                        logger.debug(
+                            "비디오 FPS 보정(재생 길이 기준): meta=%.3f → %.3f",
+                            raw,
+                            est,
+                        )
+                        return est
+            except Exception:
+                pass
+        if raw > 1e-6:
+            logger.debug(
+                "비디오 FPS 메타 비정상(%.3f) — 폴백 %.1f 사용",
+                raw,
+                fallback,
+            )
+        return fallback
+
+    def _seek_display_to_current_pts(
+        self,
+        width: int,
+        height: int,
+        *,
+        contain: bool = False,
+    ) -> bool:
+        """current_pts 시점 프레임을 시크로 표시(연속 read 누적 오차·가속 방지)."""
+        if self._cap is None:
+            return False
+        try:
+            import cv2
+
+            self._cap.set(cv2.CAP_PROP_POS_MSEC, self._current_pts * 1000.0)
+            ok, frame = self._cap.read()
+            if not ok or frame is None:
+                return False
+            out = self._bgr_to_surface(frame, width, height, contain=contain)
+            if out is None:
+                return False
+            self._cached_surf = out
+            self._cached_pts = self._current_pts
+            self._cached_size = (width, height, contain)
+            return True
+        except Exception:
+            return False
 
     def set_source(self, path: str, start_time: float = 0.0, end_time: float = -1.0) -> None:
         """OpenCV로 비디오를 열고 구간·FPS·길이를 설정한 뒤 start_time 위치로 시크한다."""
@@ -86,9 +155,9 @@ class SimpleVideoPlayer:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, STUDIO_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, STUDIO_HEIGHT)
         self._cap = cap
-        self._fps = max(1.0, cap.get(cv2.CAP_PROP_FPS) or STUDIO_VIDEO_FALLBACK_FPS)
-        fc = max(0, cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        self._duration_sec = fc / self._fps if fc else 3600.0
+        fc = max(0.0, float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
+        self._fps = self._normalize_capture_fps(cap, fc)
+        self._duration_sec = fc / self._fps if fc > 0 and self._fps > 0 else 3600.0
         try:
             cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000.0)
         except Exception:
@@ -137,9 +206,17 @@ class SimpleVideoPlayer:
         """절대 시점으로 이동. 세그먼트 [start_time, end_time] 구간으로 클램프."""
         if self._cap is None:
             return
-        end_sec = self._effective_end_sec()
-        clamped = max(self._start_time, min(end_sec, time_sec))
-        self.seek(clamped - self._current_pts)
+        try:
+            import cv2
+
+            end_sec = self._effective_end_sec()
+            clamped = max(self._start_time, min(end_sec, float(time_sec)))
+            self._current_pts = clamped
+            self._paused = clamped >= end_sec - 1e-3
+            self._cap.set(cv2.CAP_PROP_POS_MSEC, clamped * 1000.0)
+            self._cached_pts = -1.0
+        except Exception:
+            pass
 
     def toggle_pause(self) -> None:
         """재생/일시정지 플래그를 뒤집는다."""
@@ -203,9 +280,14 @@ class SimpleVideoPlayer:
             return self._cached_surf
 
         duration = max(0.0, self._duration_sec)
+        gap = self._current_pts - self._cached_pts
+        # FPS 메타 오류·해상도 변경 시 연속 read()가 타임라인을 크게 점프 → 시크로 동기화
+        if gap > frame_interval * 2.0:
+            if self._seek_display_to_current_pts(width, height, contain=contain):
+                return self._cached_surf
         # LEARNING/PRACTICE는 bg_frame만 쓰는 프레임이 있어 get_frame이 오래 없을 수 있음.
         # 그 사이 tick만 진행되면 cached_pts 대비 current_pts가 크게 벌어져 한 호출에 수천 번 read()가 될 수 있다.
-        max_seek_reads = 4096
+        max_seek_reads = 64
         n_read = 0
         while (
             self._cached_pts < self._current_pts - frame_interval * 0.5 and n_read < max_seek_reads

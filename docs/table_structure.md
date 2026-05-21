@@ -32,6 +32,8 @@
 | tts_type | str | - | 숏츠 **뜻 TTS** 엔진: `edge` \| `gtts`. 비우면 `edge` |
 | tts_voice | str | - | Edge 목소리 ID (예: `ko-KR-SunHiNeural`). `gtts`는 무시 |
 | img_path | str | - | 이미지 경로 |
+| video_path | str | - | 연상 동영상 (숏츠 단어 모드, 있으면 이미지 대신 재생) |
+| sound_path | str | - | 단어 발음 음원 |
 
 ---
 

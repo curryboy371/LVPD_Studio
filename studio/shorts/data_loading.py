@@ -155,6 +155,7 @@ def _merge_word_into_clip(clip: dict[str, Any], word: Any, repo: Path) -> None:
     clip["translation"] = [first_meaning] if first_meaning else []
     clip["pinyin"] = (word.pinyin or "").strip()
     clip["word_img_path"] = _resolve_path(repo, (word.img_path or "").strip())
+    clip["word_video_path"] = _resolve_path(repo, (getattr(word, "video_path", None) or "").strip())
     clip["word_pos"] = pos
     clip["word_tip"] = (getattr(word, "tip", None) or "").strip()
 

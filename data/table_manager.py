@@ -201,6 +201,7 @@ def load_words_table_from_csv(
 
     repo_root = get_repo_root()
     image_index = _build_stem_index(repo_root / "resource" / "image", "*")
+    video_index = _build_stem_index(repo_root / "resource" / "video", "*")
     sound_index = _build_stem_index(repo_root / "resource" / "sound", "*.mp3")
 
     out: list[Word] = []
@@ -209,6 +210,7 @@ def load_words_table_from_csv(
         for row in reader:
             try:
                 img_raw = _str(row.get("img_path"))
+                video_raw = _str(row.get("video_path"))
                 sound_raw = _str(row.get("sound_path"))
                 out.append(
                     Word(
@@ -224,6 +226,7 @@ def load_words_table_from_csv(
                         ).strip().lower(),
                         tts_voice=_str(row.get("tts_voice")),
                         img_path=_resolve_media_path_from_name(img_raw, image_index),
+                        video_path=_resolve_media_path_from_name(video_raw, video_index),
                         sound_path=_resolve_media_path_from_name(sound_raw, sound_index),
                         stroke_anim_path=_str(row.get("stroke_anim_path")),
                         stroke_play_speed=_to_float_in_range(

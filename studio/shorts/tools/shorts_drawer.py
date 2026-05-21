@@ -729,14 +729,17 @@ class ShortsDrawer:
                 fh,
                 hook_title_bottom_y=hook_bottom,
             )
-        img_path = str(item.get("word_img_path") or "").strip()
-        max_w, max_h = shorts_vocab_word_img_inner_size(rect.width, rect.height, fh)
-        img = self._load_hook_image(
-            img_path,
-            max_w,
-            max(max_h, int(img_band_h)),
-            allow_upscale=True,
-        )
+        if not str(item.get("word_video_path") or "").strip():
+            img_path = str(item.get("word_img_path") or "").strip()
+            max_w, max_h = shorts_vocab_word_img_inner_size(rect.width, rect.height, fh)
+            img = self._load_hook_image(
+                img_path,
+                max_w,
+                max(max_h, int(img_band_h)),
+                allow_upscale=True,
+            )
+        else:
+            img = None
         if img is not None:
             iy = (
                 int(layout_top)
