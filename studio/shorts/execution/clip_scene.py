@@ -1271,7 +1271,12 @@ class ClipScene:
                 # 뜻 TTS 구간: 한자·병음 전체 표시(노래방 0%는 빈 화면처럼 보임)
                 k_dur = max(1.0, float(k_dur))
                 k_elapsed = k_dur
-            screen.set_clip(zones.middle)
+            clip_rect = (
+                zones.vocab_middle_draw_clip()
+                if self._is_vocabulary_clip()
+                else zones.middle
+            )
+            screen.set_clip(clip_rect)
             try:
                 self._drawer.draw_middle(
                     screen,

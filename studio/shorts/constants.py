@@ -22,14 +22,14 @@ SHORTS_BRAND_ICON = _REPO_ROOT / "resource" / "image" / "icon" / "icon.png"
 # 1080 기준 — 전체 실루엣(머리+발)이 들어가도록 (원본 높이 ~1028px 크롭 기준)
 SHORTS_BRAND_ICON_W = 200
 SHORTS_BRAND_ICON_H = 120
-# 1080×1920 기준 하단 중앙 — 아이콘 하단 여백(해상도에 비례 스케일)
-SHORTS_BRAND_ICON_BOTTOM_MARGIN = 280
-SHORTS_BRAND_TITLE_TEXT = "#중국어 여포판다"
+# 1080×1920 기준 하단 중앙 — 아이콘 하단 여백(해상도에 비례 스케일, 작을수록 아래)
+SHORTS_BRAND_ICON_BOTTOM_MARGIN = 50
+SHORTS_BRAND_TITLE_TEXT = ""
 SHORTS_BRAND_TITLE_COLOR = (64, 64, 64)
 SHORTS_BRAND_TITLE_FONT_SIZE = 30
 SHORTS_BRAND_TITLE_GAP_ABOVE_ICON = 10
-# 1080×1920 기준 — 훅 타이틀 Y(화면 최상단부터, 상단 30% 구역을 넘어설 수 있음)
-SHORTS_HOOK_TITLE_Y = 420
+# 1080×1920 기준 — 훅 타이틀 Y(화면 최상단부터, 작을수록 위)
+SHORTS_HOOK_TITLE_Y = 250
 # 하위 호환 이름
 SHORTS_HOOK_TITLE_Y_OFFSET = SHORTS_HOOK_TITLE_Y
 SHORTS_HOOK_TITLE_LINE_GAP = 0
@@ -41,7 +41,7 @@ SHORTS_MIDDLE_Y_OFFSET = 72
 # 1080×1920 기준 — 병음 줄 추가 y 보정(양수 = 아래)
 SHORTS_PINYIN_Y_OFFSET = 72
 # 1080×1920 기준 — 병음↔한자 줄 간격(기본 line_gap보다 좁게)
-SHORTS_PINYIN_HANZI_GAP = 52
+SHORTS_PINYIN_HANZI_GAP = 60
 # 1080×1920 기준 — 한자↔번역(뜻) 추가 간격
 SHORTS_TRANSLATION_EXTRA_GAP = 28
 # 단어 숏츠 연상 이미지 — inner 패딩·최대 크기(비디오 영역 대비)
@@ -50,26 +50,35 @@ SHORTS_VOCAB_WORD_IMG_MAX_RATIO = 0.90
 # 단어 숏츠 품사 줄 — 뜻(kr) 대비 글자 크기 비율
 SHORTS_VOCAB_POS_FONT_RATIO = 0.72
 # 한자 하단 ↔ 품사 줄 간격 (1080×1920 기준)
-SHORTS_VOCAB_POS_AFTER_HANZI_GAP = 10
+SHORTS_VOCAB_POS_AFTER_HANZI_GAP = 5
 # 품사 ↔ TTS 뜻 자막 간격
 SHORTS_VOCAB_MEANING_SUBTITLE_GAP = 10
-# 뜻 하단 ↔ tip 상단 (1080×1920 기준)
-SHORTS_VOCAB_MEANING_TO_TIP_GAP = 16
-# tip 하단 ↔ #여포판다 브랜드 타이틀 상단
-SHORTS_VOCAB_TIP_ABOVE_BRAND_GAP = 32
-# 품사(병음·한자 블록) 하단 ↔ 뜻 상단(슬롯 안 스택)
+# TTS 자막(뜻) 하단 ↔ tip 상단 (1080×1920 기준)
+SHORTS_VOCAB_MEANING_TO_TIP_GAP = 28
+# (레거시) icon 기준 tip — 미사용
+SHORTS_VOCAB_TIP_ABOVE_ICON_GAP = 48
+SHORTS_VOCAB_TIP_ABOVE_BRAND_GAP = SHORTS_VOCAB_TIP_ABOVE_ICON_GAP
+# 연상 이미지 슬롯 하단 ↔ 병음 상단 (1080×1920, 양수=아래·이미지와 분리)
+SHORTS_VOCAB_CN_BELOW_IMAGE_GAP = 12
+# 품사(병음·한자 블록) 하단 ↔ 뜻 상단
 SHORTS_VOCAB_CN_ABOVE_MEANING_GAP = 12
 # tip 글자 크기 (ko_subtitle 대비)
 SHORTS_VOCAB_TIP_FONT_RATIO = 0.78
 # 훅 타이틀 하단 ↔ 연상 이미지 상단 간격 (1080×1920 기준)
-SHORTS_VOCAB_BELOW_HOOK_GAP = 28
+SHORTS_VOCAB_BELOW_HOOK_GAP = 4
+# 훅 타이틀 제외 — 단어 모드 본문(병음·한자·품사·뜻) y 보정 (1080×1920, 양수=아래)
+SHORTS_VOCAB_TEXT_Y_OFFSET = 16
+# 연상 이미지만 y 보정 (1080×1920, 음수=위·텍스트는 그대로)
+SHORTS_VOCAB_IMAGE_Y_OFFSET = -32
 # 연상 이미지 슬롯 높이 — middle − 양쪽 패딩(비디오 contain 영역과 동일)
 # 이미지/동영상 슬롯 하단 ↔ 뜻·TTS 자막 상단 (슬롯 밖으로, 1080×1920 기준)
 SHORTS_VOCAB_MEANING_BELOW_SLOT_GAP = 24
 # (레거시) 슬롯 안 하단 여백 — 뜻 Y 계산에는 미사용
 SHORTS_VOCAB_OVERLAY_BOTTOM_PAD = 24
 # 병음 줄 고정 슬롯 높이(병음 없어도 한자 Y 유지)
-SHORTS_VOCAB_PINYIN_SLOT_H = 48
+SHORTS_VOCAB_PINYIN_SLOT_H = 42
+# 단어 모드 병음↔한자 추가 간격 (1080×1920)
+SHORTS_VOCAB_PINYIN_HANZI_GAP = 18
 # 연상 이미지 위 병음·한자·품사 배경 (알파 ≈80%)
 SHORTS_VOCAB_OVERLAY_BG_RGBA = (0, 0, 0, 204)
 SHORTS_VOCAB_OVERLAY_BG_PAD_X = 20
@@ -77,7 +86,7 @@ SHORTS_VOCAB_OVERLAY_BG_PAD_Y = 10
 
 
 class VocabOverlayLayout(NamedTuple):
-    """연상 이미지 위 병음·한자·품사 → 뜻 → tip → #여포판다."""
+    """이미지 → 병음·한자·품사 → 뜻·TTS → tip."""
 
     pinyin_y: int
     hanzi_y: int
@@ -92,6 +101,25 @@ def shorts_vocab_below_hook_gap(frame_height: int) -> int:
     return max(8, int(SHORTS_VOCAB_BELOW_HOOK_GAP * sy))
 
 
+def shorts_vocab_text_y_offset(frame_height: int) -> int:
+    """단어 숏츠 — 훅 타이틀 제외 텍스트·연상 이미지 y 보정."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(0, int(SHORTS_VOCAB_TEXT_Y_OFFSET * sy))
+
+
+def shorts_vocab_image_y_offset(frame_height: int) -> int:
+    """연상 이미지만 y 보정(음수면 위)."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return int(SHORTS_VOCAB_IMAGE_Y_OFFSET * sy)
+
+
+def shorts_vocab_content_y_offset(frame_height: int) -> int:
+    """하위 호환 alias."""
+    return shorts_vocab_text_y_offset(frame_height)
+
+
 def shorts_vocab_layout_top(
     middle_top: int,
     frame_height: int,
@@ -99,9 +127,10 @@ def shorts_vocab_layout_top(
     hook_title_bottom_y: int = 0,
 ) -> int:
     """단어 숏츠 본문(이미지·병음·한자…) 시작 Y — 훅 타이틀과 겹치지 않게."""
-    base = int(middle_top)
+    dy = shorts_vocab_text_y_offset(frame_height)
+    base = int(middle_top) + dy
     if hook_title_bottom_y > 0:
-        return max(base, int(hook_title_bottom_y) + shorts_vocab_below_hook_gap(frame_height))
+        return max(base, int(hook_title_bottom_y) + shorts_vocab_below_hook_gap(frame_height) + dy)
     return base
 
 
@@ -187,10 +216,22 @@ def shorts_vocab_meaning_to_tip_gap(frame_height: int) -> int:
     return max(6, int(SHORTS_VOCAB_MEANING_TO_TIP_GAP * sy))
 
 
-def shorts_vocab_tip_above_brand_gap(frame_height: int) -> int:
+def shorts_vocab_tip_above_icon_gap(frame_height: int) -> int:
+    """tip 하단과 icon 상단 사이 간격."""
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
-    return max(8, int(SHORTS_VOCAB_TIP_ABOVE_BRAND_GAP * sy))
+    return max(8, int(SHORTS_VOCAB_TIP_ABOVE_ICON_GAP * sy))
+
+
+def shorts_vocab_tip_above_brand_gap(frame_height: int) -> int:
+    return shorts_vocab_tip_above_icon_gap(frame_height)
+
+
+def shorts_vocab_cn_below_image_gap(frame_height: int) -> int:
+    """이미지 슬롯 바로 아래 — 병음·한자가 영상/PNG를 가리지 않게."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(4, int(SHORTS_VOCAB_CN_BELOW_IMAGE_GAP * sy))
 
 
 def shorts_vocab_cn_above_meaning_gap(frame_height: int) -> int:
@@ -199,15 +240,36 @@ def shorts_vocab_cn_above_meaning_gap(frame_height: int) -> int:
     return max(6, int(SHORTS_VOCAB_CN_ABOVE_MEANING_GAP * sy))
 
 
-def shorts_brand_title_top_y(frame_width: int, frame_height: int) -> int:
-    """하단 브랜드 '#중국어 여포판다' 텍스트 상단 Y."""
+def shorts_brand_icon_top_y(
+    frame_width: int,
+    frame_height: int,
+    *,
+    icon_width: int = 0,
+    icon_height: int = 0,
+    y_offset: int = 0,
+) -> int:
+    """브랜드 icon.png 좌상단 Y."""
     w = max(1, int(frame_width))
     h = max(1, int(frame_height))
     sx = w / float(SHORTS_WIDTH)
     sy = h / float(SHORTS_HEIGHT)
-    iw = max(1, int(SHORTS_BRAND_ICON_W * sx))
-    ih = max(1, int(SHORTS_BRAND_ICON_H * sy))
-    _, icon_y = shorts_brand_icon_xy(w, h, icon_width=iw, icon_height=ih)
+    iw = max(1, int(icon_width) if icon_width > 0 else int(SHORTS_BRAND_ICON_W * sx))
+    ih = max(1, int(icon_height) if icon_height > 0 else int(SHORTS_BRAND_ICON_H * sy))
+    _, y = shorts_brand_icon_xy(w, h, icon_width=iw, icon_height=ih, y_offset=y_offset)
+    return int(y)
+
+
+def shorts_brand_title_top_y(
+    frame_width: int,
+    frame_height: int,
+    *,
+    y_offset: int = 0,
+) -> int:
+    """하단 브랜드 '#중국어 여포판다' 텍스트 상단 Y."""
+    h = max(1, int(frame_height))
+    icon_y = shorts_brand_icon_top_y(
+        frame_width, frame_height, y_offset=y_offset
+    )
     gap = shorts_brand_title_gap(h)
     title_h = max(14, int(shorts_brand_title_font_size(h) * 1.2))
     return max(0, int(icon_y) - gap - title_h)
@@ -235,40 +297,49 @@ def shorts_vocab_overlay_layout(
     kr_font_pt: int = 36,
     ko_subtitle_pt: int = 46,
 ) -> VocabOverlayLayout:
-    """슬롯 안: 병음·한자·품사 / 슬롯 아래: 뜻 → tip → 브랜드 타이틀."""
+    """이미지 아래: 병음·한자·품사 → 뜻·TTS → tip."""
     fw = max(1, int(frame_width) if frame_width > 0 else SHORTS_WIDTH)
     fh = max(1, int(frame_height))
     slot_bottom = int(layout_top) + int(img_band_h)
-    meaning_h = shorts_vocab_ko_subtitle_line_height(
-        fh, ko_subtitle_pt=ko_subtitle_pt
-    )
     meaning_gap = shorts_vocab_meaning_subtitle_gap(fh)
-    meaning_y = slot_bottom + shorts_vocab_meaning_below_slot_gap(fh)
+
+    pinyin_y = slot_bottom + shorts_vocab_cn_below_image_gap(fh)
+    hanzi_line_h = shorts_vocab_hanzi_line_height(fh, cn_font_pt=cn_font_pt)
+    hanzi_y = (
+        pinyin_y
+        + shorts_vocab_pinyin_slot_height(fh)
+        + shorts_vocab_pinyin_hanzi_gap(fh)
+    )
+
+    if has_pos:
+        cn_block_bottom = (
+            int(hanzi_y)
+            + int(hanzi_line_h)
+            + shorts_vocab_pos_after_hanzi_gap(fh)
+            + shorts_vocab_pos_line_height(fh, kr_font_pt=kr_font_pt)
+        )
+    else:
+        cn_block_bottom = int(hanzi_y) + int(hanzi_line_h)
+
+    meaning_y = max(
+        slot_bottom + shorts_vocab_meaning_below_slot_gap(fh),
+        cn_block_bottom + shorts_vocab_cn_above_meaning_gap(fh),
+    )
     meaning_anchor_bottom = meaning_y - meaning_gap
 
-    tip_h = shorts_vocab_tip_line_height(fh, ko_subtitle_pt=ko_subtitle_pt)
     if has_tip:
-        brand_top = shorts_brand_title_top_y(fw, fh)
-        tip_y = brand_top - shorts_vocab_tip_above_brand_gap(fh) - tip_h
-        tip_y = max(
-            tip_y,
-            meaning_y + meaning_h + shorts_vocab_meaning_to_tip_gap(fh),
+        subtitle_h = shorts_vocab_ko_subtitle_line_height(
+            fh, ko_subtitle_pt=ko_subtitle_pt
+        )
+        # clip_scene TTS: anchor.bottom(=meaning_anchor_bottom-1) + meaning_subtitle_gap
+        tts_top = int(meaning_anchor_bottom) - 1 + shorts_vocab_meaning_subtitle_gap(fh)
+        tts_bottom = tts_top + subtitle_h
+        meaning_bottom = int(meaning_y) + subtitle_h
+        tip_y = (
+            max(tts_bottom, meaning_bottom) + shorts_vocab_meaning_to_tip_gap(fh)
         )
     else:
         tip_y = 0
-
-    cn_floor = meaning_anchor_bottom
-
-    y = cn_floor
-    if has_pos:
-        y -= shorts_vocab_pos_after_hanzi_gap(fh)
-        y -= shorts_vocab_pos_line_height(fh, kr_font_pt=kr_font_pt)
-    hanzi_line_h = shorts_vocab_hanzi_line_height(fh, cn_font_pt=cn_font_pt)
-    y -= hanzi_line_h
-    hanzi_y = y
-    y -= shorts_pinyin_hanzi_gap(fh)
-    y -= shorts_vocab_pinyin_slot_height(fh)
-    pinyin_y = max(int(layout_top) + 8, y)
 
     return VocabOverlayLayout(
         pinyin_y=pinyin_y,
@@ -283,7 +354,14 @@ def shorts_vocab_pinyin_slot_height(frame_height: int) -> int:
     """병음 유무와 관계없이 확보하는 줄 높이."""
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
-    return max(32, int(SHORTS_VOCAB_PINYIN_SLOT_H * sy))
+    return max(24, int(SHORTS_VOCAB_PINYIN_SLOT_H * sy))
+
+
+def shorts_vocab_pinyin_hanzi_gap(frame_height: int) -> int:
+    """단어 모드 병음·한자 줄 사이 간격."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(4, int(SHORTS_VOCAB_PINYIN_HANZI_GAP * sy))
 
 
 def shorts_vocab_hanzi_y(
@@ -344,7 +422,7 @@ def shorts_vocab_text_stack_bottom(
     has_pos: bool = True,
     ko_subtitle_pt: int = 46,
 ) -> int:
-    """TTS 뜻 자막 anchor rect bottom Y (이미지 위)."""
+    """TTS 뜻 자막 anchor rect bottom Y."""
     return shorts_vocab_overlay_layout(
         layout_top,
         img_band_h,
@@ -431,6 +509,7 @@ def shorts_brand_icon_xy(
     *,
     icon_width: int,
     icon_height: int,
+    y_offset: int = 0,
 ) -> tuple[int, int]:
     """프레임 크기에 맞춘 브랜드 아이콘 좌상단 좌표(하단 중앙 정렬)."""
     w = max(1, int(frame_width))
@@ -440,7 +519,7 @@ def shorts_brand_icon_xy(
     sy = h / float(SHORTS_HEIGHT)
     margin = int(SHORTS_BRAND_ICON_BOTTOM_MARGIN * sy)
     x = (w - iw) // 2
-    y = max(0, h - ih - margin)
+    y = max(0, h - ih - margin + int(y_offset))
     return x, y
 
 # FSM 타이밍(초)

@@ -302,6 +302,7 @@ def run(
     record_until_content_done: bool = False,
     record_max_sec: float = 3600.0,
     viewport: Optional[tuple[int, int]] = None,
+    debug_preview_scale: Optional[float] = None,
 ) -> None:
     """IStudio 실행. debug=화면만(녹화 없음), record=오프스크린 버퍼→인코딩만.
 
@@ -327,10 +328,13 @@ def run(
     studio.init(config)
 
     if mode == "debug":
+        scale = float(debug_preview_scale) if debug_preview_scale is not None else 1.0
+        if debug_preview_scale is None and viewport == (SHORTS_WIDTH, SHORTS_HEIGHT):
+            scale = 0.7
         _start = getattr(studio, "start_playback", None)
         if callable(_start):
             _start()
-        _run_debug(studio, config, clock, pygame)
+        _run_debug(studio, config, clock, pygame, preview_scale=scale)
     else:
         _ensure_record_audio_ready(pygame)
         _run_record(
@@ -366,19 +370,31 @@ def _warm_shorts_brand_icon(studio: IStudio, pygame) -> None:
         drawer._bg_surface = None
 
 
-def _draw_shorts_brand_icon(studio: IStudio, screen) -> None:
-    """debug/record 공통: 매 프레임 맨 위에 브랜드 아이콘 보장."""
-    if not _is_shorts_studio(studio):
-        return
-    from studio.shorts.brand_icon import draw_brand_icon
-
-    draw_brand_icon(screen)
-
-
-def _run_debug(studio: IStudio, config: StudioConfig, clock, pygame) -> None:
+def _run_debug(
+    studio: IStudio,
+    config: StudioConfig,
+    clock,
+    pygame,
+    *,
+    preview_scale: float = 1.0,
+) -> None:
     """디버그 모드: 창에만 출력, 녹화 없음. FPS 등 디버그 정보는 config에 설정됨."""
-    screen = pygame.display.set_mode((config.width, config.height))
-    pygame.display.set_caption(studio.get_title())
+    fw, fh = int(config.width), int(config.height)
+    scale = max(0.25, min(1.0, float(preview_scale)))
+    if scale < 1.0:
+        dw = max(1, int(round(fw * scale)))
+        dh = max(1, int(round(fh * scale)))
+        screen = pygame.display.set_mode((dw, dh))
+        buffer = pygame.Surface((fw, fh))
+    else:
+        screen = pygame.display.set_mode((fw, fh))
+        buffer = screen
+
+    title = studio.get_title()
+    if scale < 1.0:
+        pct = int(round(scale * 100))
+        title = f"{title} (미리보기 {pct}%, {dw}×{dh})"
+    pygame.display.set_caption(title)
     _warm_shorts_brand_icon(studio, pygame)
 
     running = True
@@ -397,8 +413,12 @@ def _run_debug(studio: IStudio, config: StudioConfig, clock, pygame) -> None:
             running = False
             break
         studio.update(config)
-        studio.draw(screen, config)
-        _draw_shorts_brand_icon(studio, screen)
+        if buffer is screen:
+            studio.draw(screen, config)
+        else:
+            buffer.fill(config.bg_color)
+            studio.draw(buffer, config)
+            pygame.transform.smoothscale(buffer, screen.get_size(), screen)
         pygame.display.flip()
         clock.tick(config.fps)
 
@@ -472,7 +492,6 @@ def _run_record(
             config.dt_sec = 1.0 / config.fps
             studio.update(config)
             studio.draw(buffer, config)
-            _draw_shorts_brand_icon(studio, buffer)
             if np is not None:
                 buf = pygame.surfarray.array3d(buffer)
                 frame = np.transpose(buf, (1, 0, 2))
@@ -661,6 +680,16 @@ def main() -> None:
         help="실행 모드: debug=화면 출력만(녹화 없음), record=오프스크린 녹화만.",
     )
     parser.add_argument(
+        "--debug-preview-scale",
+        type=float,
+        default=None,
+        metavar="RATIO",
+        help=(
+            "debug 창 미리보기 배율(0.25~1.0, 비율 유지). "
+            "숏츠 미지정 시 기본 0.7. 1.0=원본 1080×1920 창."
+        ),
+    )
+    parser.add_argument(
         "--record-duration",
         type=float,
         default=10.0,
@@ -801,6 +830,7 @@ def main() -> None:
         record_until_content_done=bool(getattr(args, "record_until_content_done", False)),
         record_max_sec=float(getattr(args, "record_max_sec", 3600.0)),
         viewport=viewport,
+        debug_preview_scale=args.debug_preview_scale,
     )
 
 

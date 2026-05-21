@@ -205,8 +205,8 @@ def _draw_brand_title(screen: pygame.Surface, *, icon_y: int) -> bool:
     return True
 
 
-def draw_brand_icon(screen: pygame.Surface) -> bool:
-    """하단 중앙: 브랜드 타이틀 + icon.png (배경 투명). 성공 시 True."""
+def draw_brand_icon(screen: pygame.Surface, *, y_offset: int = 0) -> bool:
+    """하단 중앙 icon.png (배경 투명). 성공 시 True."""
     global _draw_announced
 
     screen.set_clip(None)
@@ -216,8 +216,9 @@ def draw_brand_icon(screen: pygame.Surface) -> bool:
 
     fw, fh = screen.get_width(), screen.get_height()
     iw, ih = icon.get_width(), icon.get_height()
-    x, y = shorts_brand_icon_xy(fw, fh, icon_width=iw, icon_height=ih)
-    _draw_brand_title(screen, icon_y=y)
+    x, y = shorts_brand_icon_xy(
+        fw, fh, icon_width=iw, icon_height=ih, y_offset=int(y_offset)
+    )
     try:
         screen.blit(icon, (x, y), special_flags=pygame.BLEND_ALPHA_SDL2)
     except Exception:

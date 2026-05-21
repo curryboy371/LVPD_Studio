@@ -48,7 +48,7 @@ def _capture_inprocess() -> dict:
         shorts_brand_icon_xy,
     )
     from data.table_manager import load_base_sentences_from_csv, load_words_table_from_csv
-    from studio.runner import StudioConfig, _draw_shorts_brand_icon, _warm_shorts_brand_icon
+    from studio.runner import StudioConfig, _warm_shorts_brand_icon
     from studio.shorts.studio import ShortsStudio
 
     pygame.mixer.pre_init(48000, -16, 2, 4096)
@@ -71,7 +71,6 @@ def _capture_inprocess() -> dict:
     for _ in range(90):
         studio.update(config)
     studio.draw(buffer, config)
-    _draw_shorts_brand_icon(studio, buffer)
 
     plate = load_brand_icon_plate()
     if plate is None:

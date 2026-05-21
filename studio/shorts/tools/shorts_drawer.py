@@ -16,6 +16,7 @@ from studio.shorts import brand_icon as brand_icon_module
 from studio.shorts.constants import (
     SHORTS_VOCAB_POS_FONT_RATIO,
     shorts_vocab_hanzi_line_height,
+    shorts_vocab_image_y_offset,
     shorts_vocab_word_img_inner_size,
     shorts_vocab_layout_metrics,
     shorts_vocab_overlay_layout,
@@ -217,7 +218,6 @@ class ShortsDrawer:
         surf = pygame.Surface((width, height))
         surf.fill((0, 0, 0))
         self._bg_surface = surf
-        brand_icon_module.draw_brand_icon(self._bg_surface)
 
     def draw_background(self, screen: pygame.Surface, ctx: FrameContext) -> None:
         screen.set_clip(None)
@@ -738,7 +738,12 @@ class ShortsDrawer:
             allow_upscale=True,
         )
         if img is not None:
-            iy = int(layout_top) + max(0, (int(img_band_h) - img.get_height()) // 2)
+            iy = (
+                int(layout_top)
+                + max(0, (int(img_band_h) - img.get_height()) // 2)
+                + shorts_vocab_image_y_offset(fh)
+            )
+            iy = max(0, iy)
             screen.blit(img, (rect.centerx - img.get_width() // 2, iy))
         meaning_text = self._vocab_meaning_text(item)
         pos = str(item.get("word_pos") or "").strip()

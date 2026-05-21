@@ -46,6 +46,15 @@ class ShortsLayoutZones:
             h = max(1, int(getattr(ctx, "height", 1920) or 1920))
         return cls.from_frame(w, h)
 
+    def vocab_middle_draw_clip(self) -> pygame.Rect:
+        """단어 모드 middle 그리기 — 병음·한자가 middle 하단 밖으로 나가도 잘리지 않게."""
+        return pygame.Rect(
+            self.middle.left,
+            self.middle.top,
+            self.middle.width,
+            self.bottom.bottom - self.middle.top,
+        )
+
 
 def compute_contain_frame_rect(
     zone_middle: pygame.Rect,
