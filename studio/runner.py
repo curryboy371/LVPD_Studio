@@ -57,22 +57,31 @@ from data.table_manager import (
 # ----- 공통 인프라 -----
 
 
-def _ensure_record_audio_ready(pygame) -> None:
-    """record 시작 전에 mixer를 강제 점검하고, 실패 시 즉시 예외를 올린다."""
+def _ensure_mixer_ready(pygame, *, context: str = "스튜디오") -> None:
+    """display 준비 후 mixer·채널을 점검한다."""
     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
     try:
         if pygame.mixer.get_init() is None:
             pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+        pygame.mixer.set_num_channels(8)
     except Exception as e:
         raise RuntimeError(
-            "녹화 모드 오디오 초기화 실패: pygame.mixer를 사용할 수 없습니다. "
+            f"{context} 오디오 초기화 실패: pygame.mixer를 사용할 수 없습니다. "
             "오디오 장치/드라이버 설정을 확인하세요."
         ) from e
     if pygame.mixer.get_init() is None:
-        raise RuntimeError(
-            "녹화 모드 오디오 초기화 실패: mixer가 비활성 상태입니다."
-        )
+        raise RuntimeError(f"{context} 오디오 초기화 실패: mixer가 비활성 상태입니다.")
+
+
+def _ensure_record_audio_ready(pygame) -> None:
+    """record 시작 전에 mixer를 강제 점검하고, 실패 시 즉시 예외를 올린다."""
+    _ensure_mixer_ready(pygame, context="녹화 모드")
+
+
+def _ensure_debug_audio_ready(pygame) -> None:
+    """debug 창 표시 직후 mixer를 다시 점검한다(set_mode 이후 재생용)."""
+    _ensure_mixer_ready(pygame, context="디버그 모드")
 
 
 class StudioConfig:
@@ -331,12 +340,8 @@ def run(
         scale = float(debug_preview_scale) if debug_preview_scale is not None else 1.0
         if debug_preview_scale is None and viewport == (SHORTS_WIDTH, SHORTS_HEIGHT):
             scale = 0.7
-        _start = getattr(studio, "start_playback", None)
-        if callable(_start):
-            _start()
         _run_debug(studio, config, clock, pygame, preview_scale=scale)
     else:
-        _ensure_record_audio_ready(pygame)
         _run_record(
             studio,
             config,
@@ -397,6 +402,14 @@ def _run_debug(
     pygame.display.set_caption(title)
     _warm_shorts_brand_icon(studio, pygame)
 
+    _ensure_debug_audio_ready(pygame)
+    _start = getattr(studio, "start_playback", None)
+    if callable(_start):
+        try:
+            _start()
+        except Exception as ex:
+            logger.warning("start_playback 실패: %s", ex)
+
     running = True
     while running:
         config.dt_sec = clock.get_time() / 1000.0 if clock.get_time() > 0 else 1.0 / config.fps
@@ -441,6 +454,7 @@ def _run_record(
     """
     pygame.display.set_mode((1, 1))  # 최소 디스플레이 (폰트 등 동작용)
     pygame.display.set_caption(studio.get_title())
+    _ensure_record_audio_ready(pygame)
     buffer = pygame.Surface((config.width, config.height))
     _warm_shorts_brand_icon(studio, pygame)
     recorder = SimpleRecordingManager()
@@ -451,6 +465,7 @@ def _run_record(
     recording_events: list = []
     config.recording_time_sec = 0.0
     config.recording_log_event = lambda ev: recording_events.append(ev)
+    config.record_max_sec = float(record_max_sec)
     config.show_debug_overlay = False
 
     _begin_rec = getattr(studio, "begin_recording_session", None)

@@ -17,6 +17,7 @@ import pygame
 from core.paths import get_repo_root
 from data.models import VocabularyWordRow
 from data.table_manager import get_word, get_word_by_hanzi
+from studio.conversation.bg_audio import ConversationBackgroundPlayer
 from studio.conversation.tools.fonts import (
     DEFAULT_CONVERSATION_RENDER_SETTINGS,
     ConversationRenderSettings,
@@ -191,6 +192,7 @@ class VocabularyStudio:
         self._last_config: Any = None
         self._intro_total_sec: float = _TITLE_INTRO_FADE_SEC
         self._intro_remaining_sec: float = _TITLE_INTRO_FADE_SEC
+        self._bg_player: ConversationBackgroundPlayer | None = None
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
@@ -261,6 +263,61 @@ class VocabularyStudio:
         self._font_title = load_font_korean(title_size, (230, 230, 235)) or self._font_kr
         self._title_image_surface = self._load_title_image_surface("단어_공부하기.png")
         self._conversation_title_reference_surface = self._load_title_image_surface("문장_이해하기.png")
+        self._bg_player = ConversationBackgroundPlayer(
+            on_bg_started=self._log_bg_insert_sound,
+            is_recording=self._is_recording_mode,
+        )
+
+    def start_playback(self) -> None:
+        """F5 debug: 창 표시·mixer 준비 후 배경음 재생."""
+        if self._bg_player is None:
+            return
+        self._bg_player.start_session(
+            duration_hint_sec=self._bg_duration_hint_sec(self._last_config),
+            reload=True,
+        )
+
+    def begin_recording_session(self, config: Any) -> None:
+        """record 루프 직전: 녹화 타임라인용 bg InsertSound 기록."""
+        self._last_config = config
+        if self._bg_player is None:
+            return
+        self._bg_player.start_session(duration_hint_sec=self._bg_duration_hint_sec(config))
+
+    def stop_background_audio(self) -> None:
+        if self._bg_player is not None:
+            self._bg_player.stop_session()
+
+    def _is_recording_mode(self) -> bool:
+        cfg = self._last_config
+        return getattr(cfg, "recording_log_event", None) is not None
+
+    def _bg_duration_hint_sec(self, config: Any) -> float:
+        if config is not None and getattr(config, "recording_log_event", None) is not None:
+            return max(60.0, float(getattr(config, "record_max_sec", 3600.0) or 3600.0))
+        return 3600.0
+
+    def _log_bg_insert_sound(self, path: str, duration_sec: float) -> None:
+        if not path:
+            return
+        cfg = self._last_config
+        log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+        if log is None:
+            return
+        try:
+            from studio.recording_events import InsertSound, recording_log_event
+
+            timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+            recording_log_event(
+                log,
+                InsertSound(
+                    timeline_sec=timeline_sec,
+                    path=str(path),
+                    duration_sec=max(0.0, float(duration_sec)),
+                ),
+            )
+        except Exception:
+            return
 
     def _load_title_image_surface(self, filename: str) -> Optional[pygame.Surface]:
         root = Path(__file__).resolve().parents[2]
@@ -335,7 +392,11 @@ class VocabularyStudio:
             dt = 1.0 / max(1.0, fps)
         if self._intro_remaining_sec > 0.0:
             self._intro_remaining_sec = max(0.0, self._intro_remaining_sec - max(0.0, dt))
+            if self._bg_player is not None:
+                self._bg_player.tick(duration_hint_sec=self._bg_duration_hint_sec(config))
             return
+        if self._bg_player is not None:
+            self._bg_player.tick(duration_hint_sec=self._bg_duration_hint_sec(config))
         self._tick_auto_sequence(dt)
         ordered = self._ordered_rows()
         self._clamp_selection(len(ordered))

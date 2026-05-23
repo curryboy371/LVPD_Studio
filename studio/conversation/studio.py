@@ -22,6 +22,7 @@ from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chines
 from .constants import _REPO_ROOT
 from .data_loading import build_data_list
 from .overlay_draw import draw_paused_and_debug
+from .bg_audio import ConversationBackgroundPlayer
 from .video_players import SimpleVideoPlayer, VideoAudioPlayer
 
 from .core.playback_manager import LastSceneSequencePolicy, PlaybackManager, SceneKind
@@ -98,6 +99,7 @@ class ConversationStudio:
         self._recording_video_segment_open: bool = False
         # 같은 item에서 비디오 구간 끝(end_time)에 도달해 segment를 닫은 뒤 재시작되는 것을 막는다.
         self._recording_video_segment_closed_for_item: bool = False
+        self._bg_player: ConversationBackgroundPlayer | None = None
 
         # 첫 아이템의 미디어 소스 적용
         if self._data_list:
@@ -183,7 +185,7 @@ class ConversationStudio:
             _record_insert_sound(path, snd=snd)
 
         def _on_bg_sound_started(path: str, duration_sec: float) -> None:
-            """practice 주황 게이지 bg 사운드도 녹화 InsertSound에 포함한다."""
+            """회화 세션 배경음을 녹화 InsertSound에 포함한다."""
             if not path:
                 return
             _record_insert_sound(path, duration_sec=max(0.0, float(duration_sec)))
@@ -226,13 +228,16 @@ class ConversationStudio:
             stage_audio_keys=getattr(settings, "learning_stage_audio_keys", None),
             wait_for_sound_end=_wait_for_sound_end,
         )
+        self._bg_player = ConversationBackgroundPlayer(
+            on_bg_started=_on_bg_sound_started,
+            is_recording=_is_recording_mode,
+        )
+
         practice_scene = PracticeScene(
             drawer=self._drawer,
             video_player=self._video_player,
             style=practice_style,
             play_voice=_play_insert_voice,
-            on_bg_sound_started=_on_bg_sound_started,
-            is_recording=_is_recording_mode,
             title_text=str(
                 getattr(settings, "practice_title_text", "듣고 따라해보기") or "듣고 따라해보기"
             ),
@@ -289,6 +294,23 @@ class ConversationStudio:
             scene_sequence=[SceneKind.VIDEO, SceneKind.LEARNING, SceneKind.PRACTICE],
             last_scene_sequence_policy=_last_scene_policy,
         )
+        # 배경음은 debug는 display.set_mode 이후 start_playback(), record는 begin_recording_session()에서 시작.
+
+    def start_playback(self) -> None:
+        """F5 debug: 창 표시·mixer 준비 후 배경음 재생."""
+        if self._bg_player is None:
+            return
+        self._bg_player.start_session(
+            duration_hint_sec=self._bg_duration_hint_sec(self._last_config),
+            reload=True,
+        )
+
+    def begin_recording_session(self, config: Any) -> None:
+        """record 루프 직전: 녹화 타임라인용 bg InsertSound 기록."""
+        self._last_config = config
+        if self._bg_player is None:
+            return
+        self._bg_player.start_session(duration_hint_sec=self._bg_duration_hint_sec(config))
 
     def get_title(self) -> str:
         """창 제목 표시용 문자열."""
@@ -317,10 +339,13 @@ class ConversationStudio:
             # playback controls
             if e.key == pygame.K_p:
                 self._manager.toggle_pause()
-                if self._video_player.is_paused():
+                paused = self._video_player.is_paused()
+                if paused:
                     self._video_audio.pause()
                 else:
                     self._video_audio.unpause()
+                if self._bg_player is not None:
+                    self._bg_player.set_paused(paused)
                 continue
             if e.key in (pygame.K_HOME, pygame.K_r):
                 self._manager.restart_segment()
@@ -411,6 +436,10 @@ class ConversationStudio:
         self._maybe_recording_start_video_segment_no_sidecar_mp3(config)
 
         self._sync_video_audio_pause_at_segment_end()
+
+        if self._bg_player is not None:
+            self._bg_player.set_paused(self._video_player.is_paused())
+            self._bg_player.tick(duration_hint_sec=self._bg_duration_hint_sec(config))
 
     def draw(self, screen: Any, config: Any) -> None:
         """배경 채우기 후 현재 Step 화면을 그리고 일시정지·디버그 오버레이를 덧씌운다."""
@@ -504,6 +533,11 @@ class ConversationStudio:
     def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
         """record 루프 종료 직전: 열린 비디오 오디오 구간을 VideoSegmentEnd로 닫는다."""
         self._recording_emit_video_segment_end(timeline_sec=float(timeline_end_sec))
+
+    def stop_background_audio(self) -> None:
+        """회화 세션 배경음 종료(복합 스튜디오 단어 단계 전환 등)."""
+        if self._bg_player is not None:
+            self._bg_player.stop_session()
 
     # ------------------------------------------------------------------
     # internals
@@ -601,6 +635,12 @@ class ConversationStudio:
             return path
         resolved = _REPO_ROOT / path.replace("\\", "/")
         return str(resolved)
+
+    def _bg_duration_hint_sec(self, config: Any) -> float:
+        """녹화 mux용 bg 길이 힌트. 실제 mux는 전체 타임라인 길이로 자른다."""
+        if config is not None and getattr(config, "recording_log_event", None) is not None:
+            return max(60.0, float(getattr(config, "record_max_sec", 3600.0) or 3600.0))
+        return 3600.0
 
     def _resolve_render_settings(self, config: Any) -> ConversationRenderSettings:
         """`config.conversation_render`가 있으면 사용, 없으면 기본값."""

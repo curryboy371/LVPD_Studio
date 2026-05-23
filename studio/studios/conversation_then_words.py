@@ -127,6 +127,19 @@ class ConversationThenWordsStudio:
             self._phase = "words"
             self._vocab = VocabularyStudio(word_rows=self._aggregated_word_rows)
             self._vocab.init(config)
+            # start_playback()은 runner에서 set_mode 이후 호출됨
+
+    def start_playback(self) -> None:
+        if self._phase == "conversation":
+            self._conversation.start_playback()
+        elif self._vocab is not None:
+            self._vocab.start_playback()
+
+    def begin_recording_session(self, config: Any) -> None:
+        if self._phase == "conversation":
+            self._conversation.begin_recording_session(config)
+        elif self._vocab is not None:
+            self._vocab.begin_recording_session(config)
 
     def get_title(self) -> str:
         if self._phase == "words" and self._vocab is not None:
@@ -142,9 +155,11 @@ class ConversationThenWordsStudio:
 
     def update(self, config: Any = None) -> None:
         if self._pending_words_phase:
+            self._conversation.stop_background_audio()
             self._phase = "words"
             self._vocab = VocabularyStudio(word_rows=self._aggregated_word_rows)
             self._vocab.init(config)
+            self._vocab.start_playback()
             self._pending_words_phase = False
 
         if self._phase == "conversation":
