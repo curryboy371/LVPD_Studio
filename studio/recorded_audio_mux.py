@@ -8,7 +8,12 @@ import sys
 from pathlib import Path
 from typing import List
 
-from core.paths import STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN, STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN
+from core.paths import (
+    STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN,
+    STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN,
+    STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN,
+    STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN,
+)
 from studio.recording_events import (
     InsertSound,
     RecordingEvent,
@@ -32,6 +37,18 @@ def _mux_segment_audio_role(path: str) -> str:
     return "embedded" if _is_embedded_video_audio_path(path) else "sidecar"
 
 
+def _insert_sound_mux_role(path: str) -> str:
+    """InsertSound mux 역할: bg(루프·페이드) vs 회화 삽입 음성 vs 기본 sidecar."""
+    norm = str(path or "").replace("\\", "/").lower()
+    if "/resource/sound/background/" in norm or "/resource/sound/bg/" in norm:
+        return "bg_insert"
+    if "/resource/sound/follow/" in norm:
+        return "bg_insert"
+    if "ko_sub_" in norm:
+        return "voice_ko"
+    return "voice"
+
+
 def _mux_volume_prefix(role: str) -> str:
     """녹화 mux용 역할별 선형 볼륨 필터 prefix."""
     if role == "embedded":
@@ -40,17 +57,13 @@ def _mux_volume_prefix(role: str) -> str:
     if role == "bg_insert":
         g = max(0.0, min(2.0, float(STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)))
         return f"volume={g},"
+    if role == "voice_ko":
+        g = max(0.0, min(2.0, float(STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN)))
+        return f"volume={g},"
+    if role == "voice":
+        g = max(0.0, min(2.0, float(STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN)))
+        return f"volume={g},"
     return ""
-
-
-def _is_background_insert_path(path: str) -> bool:
-    norm = str(path or "").replace("\\", "/").lower()
-    return (
-        "/resource/sound/background/" in norm
-        or "/resource/sound/bg/" in norm
-        or "/resource/sound/follow/" in norm
-        or "/ko_sub_" in norm
-    )
 
 
 def _preextract_embedded_audio_to_wav(
@@ -224,7 +237,7 @@ def _build_audio_from_events(
             current_video_path = None
         elif isinstance(ev, InsertSound):
             if os.path.exists(ev.path) and ev.duration_sec > 0:
-                role = "bg_insert" if _is_background_insert_path(ev.path) else "sidecar"
+                role = _insert_sound_mux_role(ev.path)
                 segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0, role))
 
     # 마지막 세그먼트: 녹화 끝까지 재생 중이었으면

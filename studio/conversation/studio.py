@@ -220,6 +220,7 @@ class ConversationStudio:
                 return 0.0
             try:
                 ch = pygame.mixer.Channel(int(channel_index))
+                ch.set_volume(max(0.0, min(2.0, _insert_voice_volume(path))))
                 ch.play(snd)
             except Exception:
                 try:
@@ -237,6 +238,17 @@ class ConversationStudio:
             dur = _play_insert_voice_on_channel(path)
             if dur > 0.0:
                 _record_insert_sound(path, duration_sec=dur)
+
+        def _insert_voice_volume(path: str) -> float:
+            from core.paths import (
+                STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN,
+                STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN,
+            )
+
+            norm = str(path or "").replace("\\", "/").lower()
+            if "ko_sub_" in norm:
+                return float(STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN)
+            return float(STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN)
 
         def _start_listen_clip(path: str, *, item: Any = None) -> float:
             """PRACTICE 듣기 클립 1개를 비동기 재생(채널 1). 녹화 시 InsertSound에 남긴다."""
@@ -261,6 +273,7 @@ class ConversationStudio:
             try:
                 snd = pygame.mixer.Sound(path)
                 ch = pygame.mixer.Channel(int(_INSERT_VOICE_CHANNEL))
+                ch.set_volume(max(0.0, min(2.0, _insert_voice_volume(path))))
                 ch.play(snd)
             except Exception:
                 try:
@@ -572,7 +585,10 @@ class ConversationStudio:
         """마지막 아이템·마지막 장면(PRACTICE 등)까지 끝나면 녹화 루프를 멈춘다."""
         if self._manager is None:
             return False
-        return self._manager.is_full_run_complete()
+        if self._manager.is_full_run_complete():
+            return True
+        # STAY 정책: is_done이 False로 돌아가도 마지막 PRACTICE 핸들러는 끝났을 수 있다.
+        return self._manager.is_words_handoff_ready()
 
     def recording_stop_summary(self) -> str:
         """녹화가 should_stop으로 끝났을 때 터미널에 찍을 한 줄 요약."""
