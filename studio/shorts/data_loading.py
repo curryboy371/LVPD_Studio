@@ -204,6 +204,25 @@ def resolve_hook_title(data: dict[str, Any] | Any) -> str:
     return ""
 
 
+def _normalize_multiline_field(raw: str) -> str:
+    return (raw or "").strip().replace("\\n", "\n")
+
+
+def parse_last_hold_sec_field(raw: Any) -> float:
+    """CTA_HOLD 대기(초). 비우면 CTA_HOLD_SEC(기본 2.5)."""
+    from studio.shorts.constants import CTA_HOLD_SEC
+
+    if raw is None:
+        return float(CTA_HOLD_SEC)
+    s = str(raw).strip()
+    if not s:
+        return float(CTA_HOLD_SEC)
+    try:
+        return max(0.0, float(s))
+    except (TypeError, ValueError):
+        return float(CTA_HOLD_SEC)
+
+
 def _parse_ko_narration_id(row: dict[str, str]) -> int:
     try:
         return int(float(row.get("ko_narration_id") or "0"))
@@ -256,6 +275,8 @@ def _common_clip_fields(
         "word_tip": "",
         "sound_repeat_count": 1,
         "after_sound_delay_sec": 0.0,
+        "last_hold_text": _normalize_multiline_field(row.get("last_hold_text") or ""),
+        "last_hold_sec": parse_last_hold_sec_field(row.get("last_hold_sec")),
         "video_path": _resolve_path(repo, row.get("video_path") or ""),
         "index": index,
     }
@@ -567,6 +588,8 @@ def build_shorts_vocabulary_clip_list(
             len(word_ids),
             default=True,
         )
+        last_hold_text = _normalize_multiline_field(row.get("last_hold_text") or "")
+        last_hold_sec = parse_last_hold_sec_field(row.get("last_hold_sec"))
 
         for wi, word_id in enumerate(word_ids, start=1):
             word_clip_id = _vocab_word_clip_id(topic_row_id, wi)
@@ -602,6 +625,8 @@ def build_shorts_vocabulary_clip_list(
             clip["sound_repeat_count"] = sound_repeat_counts[wi - 1]
             clip["after_sound_delay_sec"] = after_sound_delays[wi - 1]
             clip["read_meaning_ko"] = read_meaning_ko_flags[wi - 1]
+            clip["last_hold_text"] = last_hold_text
+            clip["last_hold_sec"] = last_hold_sec
             word = get_word(word_id)
             if word is None:
                 logger.warning(

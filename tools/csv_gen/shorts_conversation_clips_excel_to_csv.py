@@ -25,6 +25,8 @@ FIELDNAMES = [
     "syllable_times_ms",
     "sound_path",
     "video_path",
+    "last_hold_text",
+    "last_hold_sec",
 ]
 
 
@@ -73,6 +75,8 @@ def shorts_conversation_clips_excel_to_csv(
             "syllable_times_ms": _normalize(row.get("syllable_times_ms")),
             "sound_path": _normalize(row.get("sound_path")),
             "video_path": _normalize(row.get("video_path")),
+            "last_hold_text": _normalize(row.get("last_hold_text")),
+            "last_hold_sec": _normalize(row.get("last_hold_sec")),
         })
 
     out_path = Path(csv_path)

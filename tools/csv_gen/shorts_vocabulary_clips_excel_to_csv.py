@@ -26,6 +26,8 @@ FIELDNAMES = [
     "sound_repeat_count",
     "after_sound_delay_sec",
     "read_meaning_ko",
+    "last_hold_text",
+    "last_hold_sec",
 ]
 
 
@@ -73,6 +75,8 @@ def shorts_vocabulary_clips_excel_to_csv(
             "sound_repeat_count": _normalize(row.get("sound_repeat_count")),
             "after_sound_delay_sec": _normalize(row.get("after_sound_delay_sec")),
             "read_meaning_ko": _normalize(row.get("read_meaning_ko")),
+            "last_hold_text": _normalize(row.get("last_hold_text")),
+            "last_hold_sec": _normalize(row.get("last_hold_sec")),
         })
 
     out_path = Path(csv_path)

@@ -25,6 +25,7 @@ from studio.shorts.constants import (
     shorts_vocab_tip_font_pt,
     shorts_vocab_tip_line_gap,
     parse_vocab_tip_lines,
+    parse_last_hold_lines,
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
     KO_KARAOKE_ACTIVE,
@@ -472,6 +473,52 @@ class ShortsDrawer:
             self._tip_font_cn = load_font_chinese_for_tip(pt, color)
         font_kr = getattr(self, "_tip_font_kr", None)
         font_cn = getattr(self, "_tip_font_cn", None)
+        alpha = max(0, min(255, int(fade_alpha)))
+        line_gap = shorts_vocab_tip_line_gap(fh)
+        y_cur = int(y)
+        for i, line in enumerate(lines):
+            surf = render_mixed_kr_cn_line(
+                line,
+                size=pt,
+                color=color,
+                font_kr=font_kr,
+                font_cn=font_cn,
+            )
+            if surf is None:
+                continue
+            if alpha < 255:
+                surf = surf.copy()
+                surf.set_alpha(alpha)
+            screen.blit(surf, (int(center_x) - surf.get_width() // 2, y_cur))
+            y_cur += surf.get_height()
+            if i < len(lines) - 1:
+                y_cur += line_gap
+
+    def draw_last_hold_text(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        text: str,
+        fade_alpha: int = 255,
+        frame_height: int = 0,
+    ) -> None:
+        """CTA_HOLD(2.5초) — tip 아래 마무리 문구. `\\n` 줄바꿈."""
+        lines = parse_last_hold_lines(text)
+        if not lines or fade_alpha <= 0:
+            return
+        from utils.fonts import load_font_chinese_for_tip, load_font_korean, render_mixed_kr_cn_line
+
+        fh = max(1, int(frame_height) or screen.get_height())
+        pt = shorts_vocab_tip_font_pt(ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr))
+        color = (220, 225, 235)
+        if not hasattr(self, "_last_hold_font_pt") or self._last_hold_font_pt != pt:
+            self._last_hold_font_pt = pt
+            self._last_hold_font_kr = load_font_korean(pt, color)
+            self._last_hold_font_cn = load_font_chinese_for_tip(pt, color)
+        font_kr = getattr(self, "_last_hold_font_kr", None)
+        font_cn = getattr(self, "_last_hold_font_cn", None)
         alpha = max(0, min(255, int(fade_alpha)))
         line_gap = shorts_vocab_tip_line_gap(fh)
         y_cur = int(y)

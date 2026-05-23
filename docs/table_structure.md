@@ -84,6 +84,8 @@
 | ko_narration_id | int | - | `ko_narration_sets.id` 참조. 비우면 한국어 내레이션 없음 |
 | syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표). 비우면 균등 분할 |
 | sound_path | str | - | 비우면 base `sound_lv_path` |
+| last_hold_text | str | - | 클립 종료 **CTA_HOLD** 구간 문구. tip 없으면 TTS·비디오 자막 앵커 아래. `\\n` 줄바꿈 |
+| last_hold_sec | float | - | CTA_HOLD 대기 시간(초, 소수 가능). 비우면 **2.5** |
 
 ## 5) shorts_vocabulary_clips (숏츠·단어)
 
@@ -100,12 +102,14 @@
 | sound_repeat_count | str | - | 중국어 `sound_path` 재생 횟수. `1` 또는 `2\|1\|1` (`word_id` 순, 1개면 전체 동일). 기본 1 |
 | after_sound_delay_sec | str | - | 마지막 mp3 재생 후 다음 단어까지 대기(초). `1.5` 또는 `2\|1\|0.5` 형식. 기본 0 |
 | read_meaning_ko | str | - | 뜻 한국어 TTS 재생 여부. `true`/`false` 또는 `true\|false\|true` (`word_id` 순, 1개면 전체 동일). 기본 `true`. `false`면 뜻 나레이션 생략 후 바로 중국어 `sound_path` mp3 |
+| last_hold_text | str | - | **topic 전체** 마지막 단어 종료 후 CTA_HOLD 문구 — words.csv `tip` 아래. `\\n` 줄바꿈 |
+| last_hold_sec | float | - | CTA_HOLD 대기(초, 소수 가능). 비우면 **2.5** |
 
 단어 숏츠는 `syllable_times_ms` 없음(노래방은 발음 길이로 균등 진행). 회화 숏츠만 `syllable_times_ms` 사용.
 
 로드 시 단어 클립 내부 id는 `{id}001`, `{id}002` … (예: topic id=1 → 1001, 1002). 판다: `panda/vocabulary/{내부id}.png`.
 
-**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어 발음(`sound_repeat_count`회) → `after_sound_delay_sec` 대기 → 다음 단어.
+**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어 발음(`sound_repeat_count`회) → `after_sound_delay_sec` 대기 → 다음 단어 → (마지막) **CTA_HOLD** + `last_hold_text`.
 
 ### CSV 예 (topic 1행)
 

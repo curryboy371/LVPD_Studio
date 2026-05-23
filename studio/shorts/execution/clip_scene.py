@@ -87,7 +87,8 @@ class ClipScene:
         self._stop_learn_background = stop_learn_background
         self._follow_along_mp3 = follow_along_mp3
         self._hook_fade_sec = max(0.01, float(hook_fade_sec))
-        self._cta_hold_sec = max(0.0, float(cta_hold_sec))
+        self._default_cta_hold_sec = max(0.0, float(cta_hold_sec))
+        self._cta_hold_sec = self._default_cta_hold_sec
         self._clip: dict[str, Any] = {}
         self._hook_title: str = ""
         self._video_player = SimpleVideoPlayer()
@@ -1162,10 +1163,26 @@ class ClipScene:
                 return compute_karaoke_progress(self._learn_elapsed, dur)
         return None
 
+    def _last_hold_sec_for_clip(self) -> float:
+        """shorts_*_clips.last_hold_sec — 비우면 CTA_HOLD_SEC(2.5)."""
+        raw = self._clip.get("last_hold_sec")
+        if raw is None:
+            return self._default_cta_hold_sec
+        if isinstance(raw, (int, float)):
+            return max(0.0, float(raw))
+        s = str(raw).strip()
+        if not s:
+            return self._default_cta_hold_sec
+        try:
+            return max(0.0, float(s))
+        except (TypeError, ValueError):
+            return self._default_cta_hold_sec
+
     def _enter_cta_hold(self) -> None:
         self._stop_learn_audio()
         self._stage = ClipStage.CTA_HOLD
         self._timer = 0.0
+        self._cta_hold_sec = self._last_hold_sec_for_clip()
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
 
     def _should_post_follow_along_hold(self) -> bool:
@@ -1406,6 +1423,72 @@ class ClipScene:
             frame_height=fh,
         )
 
+    def _last_hold_text(self) -> str:
+        return str(self._clip.get("last_hold_text") or "").strip()
+
+    def _last_hold_anchor_y(
+        self, zones: ShortsLayoutZones, *, frame_height: int, frame_width: int
+    ) -> int:
+        """last_hold_text 시작 Y — tip 블록 아래 우선."""
+        from studio.shorts.constants import (
+            measure_vocab_tip_block_height,
+            shorts_ko_subtitle_font_size,
+            shorts_ko_subtitle_below_video_gap,
+            shorts_last_hold_below_tip_gap,
+            shorts_vocab_ko_subtitle_line_height,
+        )
+
+        fh = max(1, int(frame_height))
+        gap = shorts_last_hold_below_tip_gap(fh)
+
+        if self._is_vocabulary_clip():
+            _, _, overlay = self._vocab_overlay_layout(
+                zones, frame_height=fh, frame_width=frame_width
+            )
+            tip = str(self._clip.get("word_tip") or "").strip()
+            ko_pt = shorts_ko_subtitle_font_size(fh)
+            if tip and overlay.tip_y > 0:
+                return (
+                    int(overlay.tip_y)
+                    + measure_vocab_tip_block_height(tip, fh, ko_subtitle_pt=ko_pt)
+                    + gap
+                )
+            if overlay.meaning_y > 0:
+                return (
+                    int(overlay.meaning_y)
+                    + shorts_vocab_ko_subtitle_line_height(fh, ko_subtitle_pt=ko_pt)
+                    + gap
+                )
+            if overlay.tip_y > 0:
+                return int(overlay.tip_y) + gap
+            return int(zones.middle.centery)
+
+        anchor = self._ko_subtitle_anchor_rect(zones, frame_height=fh)
+        below = shorts_ko_subtitle_below_video_gap(fh)
+        if anchor.height > 0:
+            return int(anchor.bottom) + below + gap
+        return int(zones.middle.centery) + gap
+
+    def _draw_last_hold_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
+        if self._stage != ClipStage.CTA_HOLD:
+            return
+        text = self._last_hold_text()
+        if not text:
+            return
+        fh = max(1, int(screen.get_height()))
+        fw = max(1, int(screen.get_width()))
+        y = self._last_hold_anchor_y(zones, frame_height=fh, frame_width=fw)
+        if y <= 0:
+            return
+        self._drawer.draw_last_hold_text(
+            screen,
+            center_x=zones.middle.centerx,
+            y=y,
+            text=text,
+            fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
+            frame_height=fh,
+        )
+
     def _draw_pinned_video(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
         """고정된 마지막 프레임(문장 단계에서도 유지)."""
         if self._frozen_video_frame is None:
@@ -1554,6 +1637,7 @@ class ClipScene:
         if overlay_sub:
             self._draw_ko_subtitle_if_any(screen, zones)
         self._draw_vocab_tip_if_any(screen, zones)
+        self._draw_last_hold_if_any(screen, zones)
         if show_bottom:
             situation = self._situation_subtitle_for_bottom()
             self._drawer.draw_bottom_zone(

@@ -66,12 +66,14 @@ SHORTS_VOCAB_CN_ABOVE_MEANING_GAP = 12
 SHORTS_VOCAB_TIP_FONT_RATIO = 0.78
 # tip 줄 간격 (1080×1920 기준, `\n` 줄바꿈)
 SHORTS_VOCAB_TIP_LINE_GAP = 6
+# CTA_HOLD(마지막 대기) — tip 하단 ↔ last_hold_text 상단 (1080×1920)
+SHORTS_LAST_HOLD_BELOW_TIP_GAP = 28
 # 훅 타이틀 하단 ↔ 연상 이미지 상단 간격 (1080×1920 기준)
 SHORTS_VOCAB_BELOW_HOOK_GAP = 4
 # 훅 타이틀 제외 — 단어 모드 본문(병음·한자·품사·뜻) y 보정 (1080×1920, 양수=아래)
 SHORTS_VOCAB_TEXT_Y_OFFSET = 16
-# 연상 이미지만 y 보정 (1080×1920, 음수=위·텍스트는 그대로)
-SHORTS_VOCAB_IMAGE_Y_OFFSET = -32
+# 연상 이미지·비디오 슬롯 y 보정 (1080×1920, 음수=위·병음·한자 텍스트는 그대로)
+SHORTS_VOCAB_IMAGE_Y_OFFSET = -56
 # 연상 이미지 슬롯 높이 — middle − 양쪽 패딩(비디오 contain 영역과 동일)
 # 이미지/동영상 슬롯 하단 ↔ 뜻·TTS 자막 상단 (슬롯 밖으로, 1080×1920 기준)
 SHORTS_VOCAB_MEANING_BELOW_SLOT_GAP = 24
@@ -225,6 +227,31 @@ def parse_vocab_tip_lines(text: str) -> list[str]:
     if not raw:
         return []
     return [ln.strip() for ln in raw.split("\n") if ln.strip()]
+
+
+parse_last_hold_lines = parse_vocab_tip_lines
+
+
+def shorts_last_hold_below_tip_gap(frame_height: int) -> int:
+    """CTA_HOLD last_hold_text — tip 블록 바로 아래."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(4, int(SHORTS_LAST_HOLD_BELOW_TIP_GAP * sy))
+
+
+def measure_vocab_tip_block_height(
+    text: str,
+    frame_height: int,
+    *,
+    ko_subtitle_pt: int = 46,
+) -> int:
+    """tip 여러 줄 블록 높이(px)."""
+    lines = parse_vocab_tip_lines(text)
+    if not lines:
+        return 0
+    line_h = shorts_vocab_tip_line_height(frame_height, ko_subtitle_pt=ko_subtitle_pt)
+    gap = shorts_vocab_tip_line_gap(frame_height)
+    return len(lines) * line_h + max(0, len(lines) - 1) * gap
 
 
 def shorts_vocab_meaning_to_tip_gap(frame_height: int) -> int:
