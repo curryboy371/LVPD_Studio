@@ -24,6 +24,7 @@ from ..core.types import (
     build_sentence_render_data_with_tone_icons,
 )
 from ..core.conversation_step import IConversationStep
+from ..follow_audio import PracticeFollowSoundPlayer
 from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
 from ..tools.playback_bar import PlaybackBarRenderer
 from utils.pinyin_processor import get_pinyin_processor
@@ -96,6 +97,8 @@ class PracticeScene(IConversationStep):
         video_player,
         style: SentenceStyleConfig,
         play_voice: Callable[..., None] | None = None,
+        on_follow_sound_started: Callable[[str, float], None] | None = None,
+        is_recording: Callable[[], bool] | None = None,
         title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
@@ -114,6 +117,8 @@ class PracticeScene(IConversationStep):
         self.drawer = drawer
         self.video_player = video_player
         self.play_voice = play_voice
+        self.on_follow_sound_started = on_follow_sound_started
+        self.is_recording = is_recording
         self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
@@ -164,6 +169,10 @@ class PracticeScene(IConversationStep):
         self._title_reference_surface = self._load_title_image_surface("문장_이해하기.png")
         self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
         self._speak_icon_surface = self._load_mode_icon_surface("speak.png")
+        self._follow_player = PracticeFollowSoundPlayer(
+            on_follow_started=on_follow_sound_started,
+            is_recording=is_recording,
+        )
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
         self._practice_stage_log_last: "PracticeScene.Stage | None" = None
@@ -195,6 +204,7 @@ class PracticeScene(IConversationStep):
             self._sub_content_sound_sec = 0.0
             self._base_to_sub_transition = None
             self._base_to_sub_elapsed = 0.0
+            self._stop_follow_sound()
             self.drawer.hide_now(self._title_channel)
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.hide_now(self._tip_intro_channel)
@@ -290,6 +300,7 @@ class PracticeScene(IConversationStep):
             self._sub_phase_log_last = None
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
+            self._stop_follow_sound()
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.hide_now(self._tip_intro_channel)
             self.drawer.fade_on(self._title_channel, self.title_fade_in_sec)
@@ -393,6 +404,7 @@ class PracticeScene(IConversationStep):
                 return
             if self._sub_play_phase != "playing":
                 return
+            self._sync_follow_sound_for_sub_content()
             if self._sub_content_wait_remaining_sec > 0.0:
                 now_mono = time.monotonic()
                 wall_dt = 0.0
@@ -432,9 +444,65 @@ class PracticeScene(IConversationStep):
                     )
                 except Exception:
                     pass
+                self._stop_follow_sound()
                 self.complete()
                 self.allow_transition()
         return
+
+    def _sync_follow_sound_for_sub_content(self) -> None:
+        """말하기(주황) + 말하기 완료 후 대기 구간까지 follow mp3를 재생한다."""
+        if not self._is_follow_active_phase():
+            self._stop_follow_sound()
+            return
+        if self._follow_player.is_playing:
+            return
+        self._play_random_follow_sound()
+
+    def _is_follow_active_phase(self) -> bool:
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        if total_sec <= 1e-6:
+            return False
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        listen_sec = max(0.0, float(self._sub_content_sound_sec))
+        if listen_sec <= 1e-6:
+            return False
+        gap_sec = max(0.0, float(self._listen_to_speak_gap_sec))
+        after_speak_sec = max(0.0, float(self._speak_complete_hold_sec))
+        speak_sec = max(0.0, total_sec - listen_sec - gap_sec - after_speak_sec)
+        if speak_sec <= 1e-6:
+            return False
+        t_speak_start = listen_sec + gap_sec
+        t_follow_end = t_speak_start + speak_sec + after_speak_sec
+        return t_speak_start <= elapsed_sec < t_follow_end
+
+    def _follow_active_remaining_sec(self) -> float:
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        if total_sec <= 1e-6:
+            return 0.0
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        listen_sec = max(0.0, float(self._sub_content_sound_sec))
+        if listen_sec <= 1e-6:
+            return 0.0
+        gap_sec = max(0.0, float(self._listen_to_speak_gap_sec))
+        after_speak_sec = max(0.0, float(self._speak_complete_hold_sec))
+        speak_sec = max(0.0, total_sec - listen_sec - gap_sec - after_speak_sec)
+        if speak_sec <= 1e-6:
+            return 0.0
+        t_speak_start = listen_sec + gap_sec
+        t_follow_end = t_speak_start + speak_sec + after_speak_sec
+        if elapsed_sec < t_speak_start or elapsed_sec >= t_follow_end:
+            return 0.0
+        return max(0.0, t_follow_end - elapsed_sec)
+
+    def _play_random_follow_sound(self) -> None:
+        self._follow_player.play_random(
+            duration_hint_sec=self._follow_active_remaining_sec(),
+        )
+
+    def _stop_follow_sound(self) -> None:
+        self._follow_player.stop()
 
     def _pick_sub_variants(self, item: ConversationItemLike) -> list[dict]:
         """아이템의 sub_variants(=sub_sentences.csv 변형)에서 유효 항목만 반환한다."""

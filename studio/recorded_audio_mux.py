@@ -45,7 +45,11 @@ def _mux_volume_prefix(role: str) -> str:
 
 def _is_background_insert_path(path: str) -> bool:
     norm = str(path or "").replace("\\", "/").lower()
-    return "/resource/sound/background/" in norm or "/resource/sound/bg/" in norm
+    return (
+        "/resource/sound/background/" in norm
+        or "/resource/sound/bg/" in norm
+        or "/resource/sound/follow/" in norm
+    )
 
 
 def _preextract_embedded_audio_to_wav(

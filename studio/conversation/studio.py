@@ -190,6 +190,12 @@ class ConversationStudio:
                 return
             _record_insert_sound(path, duration_sec=max(0.0, float(duration_sec)))
 
+        def _on_follow_sound_started(path: str, duration_sec: float) -> None:
+            """PRACTICE 말하기 구간 follow mp3를 녹화 InsertSound에 포함한다."""
+            if not path:
+                return
+            _record_insert_sound(path, duration_sec=max(0.0, float(duration_sec)))
+
         def _is_recording_mode() -> bool:
             cfg = self._last_config
             return getattr(cfg, "recording_log_event", None) is not None
@@ -238,6 +244,8 @@ class ConversationStudio:
             video_player=self._video_player,
             style=practice_style,
             play_voice=_play_insert_voice,
+            on_follow_sound_started=_on_follow_sound_started,
+            is_recording=_is_recording_mode,
             title_text=str(
                 getattr(settings, "practice_title_text", "듣고 따라해보기") or "듣고 따라해보기"
             ),
