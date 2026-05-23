@@ -35,10 +35,8 @@ logger = logging.getLogger(__name__)
 _SUB_VARIANT_WAIT_WARN_SEC = 90.0
 _SUB_VARIANT_WAIT_MAX_SEC = 180.0
 
-# sub 변형: 팁 인 → 문장 인 → 팁 아웃 → 듣기/말하기 재생
-_SubPlayPhase = Literal[
-    "tip_in", "tip_hold", "sentence_in", "sentence_hold", "tip_out", "playing"
-]
+# sub 변형: 팁·문장 동시 표시 → 팁 아웃 → 듣기/말하기 재생
+_SubPlayPhase = Literal["intro_hold", "tip_out", "playing"]
 
 
 def _sanitize_wait_sec(v: float, *, fallback: float) -> float:
@@ -389,31 +387,7 @@ class PracticeScene(IConversationStep):
                     )
                 except Exception:
                     pass
-            if self._sub_play_phase == "tip_in":
-                self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
-                if self._sub_intro_wait_remaining_sec <= 0.0:
-                    self._sub_play_phase = "tip_hold"
-                    self._sub_intro_wait_remaining_sec = self._compute_sub_tip_hold_sec()
-                return
-            if self._sub_play_phase == "tip_hold":
-                self._stop_background_sound()
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
-                if self._sub_intro_wait_remaining_sec <= 0.0:
-                    self._sub_play_phase = "sentence_in"
-                    self.drawer.fade_on(self._sentence_channel, self._sentence_intro_fade_in_sec)
-                    self._sub_intro_wait_remaining_sec = self._sentence_intro_fade_in_sec
-                    self._sub_slide_in_elapsed = 0.0
-                return
-            if self._sub_play_phase == "sentence_in":
-                self._stop_background_sound()
-                self._sub_slide_in_elapsed += eff_dt
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
-                if self._sub_intro_wait_remaining_sec <= 0.0:
-                    self._sub_play_phase = "sentence_hold"
-                    self._sub_intro_wait_remaining_sec = self._sentence_intro_hold_sec
-                return
-            if self._sub_play_phase == "sentence_hold":
+            if self._sub_play_phase == "intro_hold":
                 self._stop_background_sound()
                 self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
@@ -501,14 +475,17 @@ class PracticeScene(IConversationStep):
         return valid
 
     def _begin_sub_variant_intro(self) -> None:
-        """sub 변형: 팁 인 →(대기)→ 문장 인 →(대기)→ 팁 아웃 → 음성/게이지. 대기 길이는 `tip_intro_hold_sec`·`sentence_intro_hold_sec`."""
-        self.drawer.hide_now(self._sentence_channel)
-        self.drawer.hide_now(self._tip_intro_channel)
-        self._sub_play_phase = "tip_in"
+        """sub 변형: 팁·문장 동시 표시 → 팁 아웃 → 음성/게이지."""
+        self.drawer.show_now(self._tip_intro_channel)
+        self.drawer.show_now(self._sentence_channel)
+        self._sub_play_phase = "intro_hold"
         self._sub_play_started_mono_sec = 0.0
         self._sub_play_last_tick_mono_sec = 0.0
-        self.drawer.fade_on(self._tip_intro_channel, self._tip_intro_fade_in_sec)
-        self._sub_intro_wait_remaining_sec = self._tip_intro_fade_in_sec
+        hold = max(
+            float(self._sentence_intro_hold_sec),
+            self._compute_sub_tip_hold_sec(),
+        )
+        self._sub_intro_wait_remaining_sec = hold
         self._sub_slide_in_elapsed = 0.0
 
     def _sub_variant_render_item(self, item: ConversationItemLike) -> ConversationItemLike:
@@ -636,7 +613,7 @@ class PracticeScene(IConversationStep):
         if (
             self.stage == self.Stage.SHOW_SUB_CONTENT
             and self._sub_play_phase
-            in ("tip_in", "tip_hold", "sentence_in", "sentence_hold", "tip_out")
+            in ("intro_hold", "tip_out")
             and self._current_sub_variant is not None
         ):
             variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
@@ -665,7 +642,7 @@ class PracticeScene(IConversationStep):
                 scale_y=0.36,
                 scale_x=0.55,
             )
-            if self._sub_play_phase not in ("tip_in", "tip_hold"):
+            if self._sub_play_phase in ("intro_hold", "tip_out", "playing"):
                 slide_y = self._sentence_slide_y_offset_px()
                 render_item = self._sub_variant_render_item(item)
                 self._draw_sub_sentence_with_highlight(

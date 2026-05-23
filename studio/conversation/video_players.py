@@ -379,12 +379,12 @@ class SimpleVideoPlayer:
 
     def width(self) -> int:
         """스냅샷·FrameContext용 폭(마지막 디코드 크기가 있으면 그것을 쓴다)."""
-        w, _ = self._cached_size
+        w, _, _ = self._cached_size
         return int(w) if w > 0 else int(STUDIO_WIDTH)
 
     def height(self) -> int:
         """스냅샷·FrameContext용 높이."""
-        _, h = self._cached_size
+        _, h, _ = self._cached_size
         return int(h) if h > 0 else int(STUDIO_HEIGHT)
 
 

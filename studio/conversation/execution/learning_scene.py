@@ -26,9 +26,6 @@ class LearningScene(FSMConversationStep):
     class Stage(Enum):
         TITLE = auto()
         INTRO_TIP_IN = auto()
-        INTRO_TIP_HOLD = auto()
-        INTRO_SENTENCE_IN = auto()
-        INTRO_SENTENCE_HOLD = auto()
         INTRO_TIP_OUT = auto()
         PLAY_L1 = auto()
         WAIT_AFTER_L1 = auto()
@@ -134,18 +131,6 @@ class LearningScene(FSMConversationStep):
             ),
             S.INTRO_TIP_IN: StageConfig(
                 on_enter=self._enter_intro_tip_in,
-                next_stage=S.INTRO_TIP_HOLD,
-            ),
-            S.INTRO_TIP_HOLD: StageConfig(
-                on_enter=self._enter_intro_tip_hold,
-                next_stage=S.INTRO_SENTENCE_IN,
-            ),
-            S.INTRO_SENTENCE_IN: StageConfig(
-                on_enter=self._enter_intro_sentence_in,
-                next_stage=S.INTRO_SENTENCE_HOLD,
-            ),
-            S.INTRO_SENTENCE_HOLD: StageConfig(
-                on_enter=self._enter_intro_sentence_hold,
                 next_stage=S.INTRO_TIP_OUT,
             ),
             S.INTRO_TIP_OUT: StageConfig(
@@ -213,22 +198,11 @@ class LearningScene(FSMConversationStep):
         return self.title_fade_in_sec
 
     def _enter_intro_tip_in(self) -> float:
+        """팁 박스·문장을 동시에 표시한 뒤 잠시 유지."""
         self.drawer.show_now(self.title_channel)
-        self.drawer.hide_now(self.sentence_channel)
-        self.drawer.fade_on(self.tip_intro_channel, self.tip_box_intro_fade_in_sec)
-        return self.tip_box_intro_fade_in_sec
-
-    def _enter_intro_tip_hold(self) -> float:
-        """팁 페이드 인 완료 후 대기(문장은 아직 숨김)."""
-        return 1.5
-
-    def _enter_intro_sentence_in(self) -> float:
-        self.drawer.fade_on(self.sentence_channel, self.sentence_intro_fade_in_sec)
-        return self.sentence_intro_fade_in_sec
-
-    def _enter_intro_sentence_hold(self) -> float:
-        """문장 페이드 인 완료 후 대기(팁·문장 동시 표시)."""
-        return 3.0
+        self.drawer.show_now(self.tip_intro_channel)
+        self.drawer.show_now(self.sentence_channel)
+        return max(0.0, self.sentence_intro_hold_sec)
 
     def _enter_intro_tip_out(self) -> float:
         self.drawer.fade_off(self.tip_intro_channel, self.tip_box_intro_fade_out_sec)
@@ -327,13 +301,7 @@ class LearningScene(FSMConversationStep):
         )
 
         self._draw_title(screen, ctx=ctx)
-        if self.stage in (
-            self.Stage.INTRO_TIP_IN,
-            self.Stage.INTRO_TIP_HOLD,
-            self.Stage.INTRO_SENTENCE_IN,
-            self.Stage.INTRO_SENTENCE_HOLD,
-            self.Stage.INTRO_TIP_OUT,
-        ):
+        if self.stage in (self.Stage.INTRO_TIP_IN, self.Stage.INTRO_TIP_OUT):
             tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
             self._draw_tip_box_above_gauge(
                 screen,

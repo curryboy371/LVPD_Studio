@@ -123,11 +123,11 @@ def _raw_sentence_to_words(raw: str) -> list[str]:
 def _replace_multiple_slots_in_raw_sentence(
     raw_sentence: str,
     *,
-    replacements: list[tuple[Union[int, str, float], str]],
+    replacements: list[tuple[Union[int, str, float], Optional[str]]],
 ) -> str:
     """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다.
 
-    `studio/conversation/data_loading.py`와 동일: 정수=슬롯 통째 교체, 소수=해당 슬롯 직후 삽입.
+    `studio/conversation/data_loading.py`와 동일: 정수=슬롯 통째 교체·``None``=제거, 소수=해당 슬롯 직후 삽입.
     """
     if not raw_sentence:
         return ""
@@ -148,9 +148,14 @@ def _replace_multiple_slots_in_raw_sentence(
     prefix_words: list[str] = []
     suffix_words: list[str] = []
     slot_replacements: dict[int, str] = {}
+    slots_to_remove: set[int] = set()
     insert_after: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
 
     for slot_order, new_word in replacements:
+        if new_word is None:
+            if isinstance(slot_order, int) and not isinstance(slot_order, bool) and slot_order >= 0:
+                slots_to_remove.add(slot_order)
+            continue
         w = str(new_word or "").strip()
         if not w:
             continue
@@ -182,6 +187,25 @@ def _replace_multiple_slots_in_raw_sentence(
             merged_slots[si] = w
         else:
             suffix_words.append(w)
+
+    for si in sorted(slots_to_remove, reverse=True):
+        if not (0 <= si < len(merged_slots)):
+            continue
+        merged_slots.pop(si)
+        if si + 1 < len(literals):
+            literals[si] = literals[si] + literals[si + 1]
+            del literals[si + 1]
+
+    if slots_to_remove:
+        remapped: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
+        for k, items in insert_after.items():
+            if k in slots_to_remove:
+                continue
+            shift = sum(1 for r in slots_to_remove if r < k)
+            nk = k - shift
+            if 0 <= nk < len(merged_slots):
+                remapped[nk].extend(items)
+        insert_after = remapped
 
     orphan_inserts: list[tuple[float, str]] = []
     for k in list(insert_after.keys()):
@@ -295,13 +319,19 @@ def _build_sentence_lines(
             )
             if not replacement_specs:
                 continue
-            resolved: list[tuple[Union[int, str, float], int, str]] = []
+            resolved: list[tuple[Union[int, str, float], int, Optional[str]]] = []
+            spec_ok = True
             for slot_order, alt_word_id in replacement_specs:
-                w = (words_index.get(int(alt_word_id), {}).get("word") or "").strip()
-                if not w:
+                wid = int(alt_word_id)
+                if wid == 0:
+                    resolved.append((slot_order, wid, None))
                     continue
-                resolved.append((slot_order, int(alt_word_id), w))
-            if len(resolved) != len(replacement_specs):
+                w = (words_index.get(wid, {}).get("word") or "").strip()
+                if not w:
+                    spec_ok = False
+                    break
+                resolved.append((slot_order, wid, w))
+            if not spec_ok or len(resolved) != len(replacement_specs):
                 continue
             resolved.sort(key=lambda x: _sort_key_slot_order(x[0]))
             replaced = _replace_multiple_slots_in_raw_sentence(

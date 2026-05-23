@@ -63,7 +63,7 @@
 | id | int | O | 서브 문장 ID |
 | base_id | int | O | `base_sentences.id` |
 | target_slot_order | str | O | 슬롯 위치. **정수**면 해당 슬롯 통째 교체, **소수**(예 `1.1`)면 정수 부분 슬롯 **직후**에 삽입. 파이프로 다중 지정(`0\|0.1\|0.2`). 자세한 규칙은 `docs/slot_format_guide.md` §3.1 |
-| alt_word_id | int | O | 대체 단어 ID(`words.id`) |
+| alt_word_id | int | O | 대체 단어 ID(`words.id`). **`0`** 이면 해당 `target_slot_order` 슬롯을 문장에서 **제거** (다중 시 1:1 매핑). 소수 슬롯+`0`은 삽입 생략 |
 | alt_translation | str | - | 대체 문장 번역 |
 | alt_sound_path | str | - | 대체 문장 음성 경로 |
 

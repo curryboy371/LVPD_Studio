@@ -58,6 +58,14 @@ def apply_mask_to_lexical_syllables(
     return adjusted
 
 
+def normalize_word_masking(raw: str) -> str:
+    """words.csv masking 셀 정규화 (`\"\"\"40\"\"\"` → `40`)."""
+    s = str(raw or "").strip()
+    while len(s) >= 2 and s[0] == s[1] and s[0] in "\"'`":
+        s = s[1:-1].strip()
+    return s
+
+
 def get_masked_pinyin_marks(
     hanzi: str,
     masking: str,

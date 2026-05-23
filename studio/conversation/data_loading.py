@@ -12,12 +12,17 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union
 
-from utils.pinyin_masking import apply_mask_to_lexical_syllables
+from utils.pinyin_masking import (
+    apply_mask_to_lexical_syllables,
+    normalize_word_masking,
+)
 from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
 
 _SLOT_APPEND = "__append__"
+# sub_sentences.alt_word_id=0 → 해당 target_slot_order 슬롯을 문장에서 제거
+ALT_WORD_ID_REMOVE_SLOT = 0
 
 
 def _parse_time_sec(val: Any, default: float = 0.0) -> float:
@@ -43,6 +48,169 @@ def _raw_sentence_to_words(raw: str) -> list[str]:
     if not raw:
         return []
     return [str(x).strip() for x in re.findall(r"\{([^}]*)\}", raw) if str(x).strip()]
+
+
+def _find_hanzi_span_in_display(
+    display_sentence: str, hanzi: str, *, start_pos: int = 0
+) -> Optional[Tuple[int, int]]:
+    """표시 문장에서 한자 구간 [시작, 길이]. syllable 인덱스와 1:1(한 글자=한 음절) 가정."""
+    h = (hanzi or "").strip()
+    if not h or not display_sentence:
+        return None
+    pos = display_sentence.find(h, max(0, int(start_pos)))
+    if pos < 0:
+        return None
+    return (pos, len(h))
+
+
+def _apply_mask_spans_to_syllable_lists(
+    lexical_list: list[str],
+    phonetic_list: list[str],
+    spans: list[tuple[int, int, str]],
+    *,
+    processor: Any,
+) -> tuple[list[str], list[str]]:
+    """음절 리스트에 문자 위치 기준 masking 적용."""
+    if not spans or not lexical_list:
+        return lexical_list, phonetic_list
+    masked_lex = list(lexical_list)
+    masked_ph = list(phonetic_list) if phonetic_list else list(masked_lex)
+    for start_i, len_i, mask_raw in sorted(spans, key=lambda x: x[0]):
+        mask = normalize_word_masking(mask_raw)
+        if not mask:
+            continue
+        end_i = min(len(masked_lex), int(start_i) + int(len_i))
+        si = int(start_i)
+        if si >= len(masked_lex) or end_i <= si:
+            continue
+        masked_lex[si:end_i] = apply_mask_to_lexical_syllables(
+            masked_lex[si:end_i], mask, processor=processor
+        )
+        if phonetic_list and end_i <= len(masked_ph):
+            masked_ph[si:end_i] = apply_mask_to_lexical_syllables(
+                masked_ph[si:end_i], mask, processor=processor
+            )
+    return masked_lex, masked_ph
+
+
+def _collect_word_mask_spans(
+    display_sentence: str,
+    raw_sentence: str,
+    *,
+    words_by_id: dict[int, str],
+    maskings_by_id: dict[int, str],
+    replacement_mask_pairs: Optional[list[tuple[str, str]]] = None,
+) -> list[tuple[int, int, str]]:
+    """sub `alt_word_id` + raw 슬롯(words.csv 한자 매칭) masking 구간."""
+    spans: list[tuple[int, int, str]] = []
+    used_starts: set[int] = set()
+    search_pos = 0
+
+    def _add(hanzi: str, masking: str, *, from_pos: int) -> int:
+        nonlocal spans, used_starts
+        mask = normalize_word_masking(masking)
+        if not mask:
+            return from_pos
+        sp = _find_hanzi_span_in_display(display_sentence, hanzi, start_pos=from_pos)
+        if sp is None:
+            return from_pos
+        start_i, len_i = sp
+        if start_i in used_starts:
+            return from_pos
+        spans.append((start_i, len_i, mask))
+        used_starts.add(start_i)
+        return start_i + len_i
+
+    for hanzi, masking in replacement_mask_pairs or []:
+        search_pos = _add(str(hanzi or "").strip(), str(masking or ""), from_pos=search_pos)
+
+    hanzi_to_mask: dict[str, str] = {}
+    for wid, hz in words_by_id.items():
+        hz = str(hz or "").strip()
+        if not hz:
+            continue
+        mk = normalize_word_masking(maskings_by_id.get(int(wid), ""))
+        if mk:
+            hanzi_to_mask[hz] = mk
+
+    search_pos = 0
+    for slot_word in _raw_sentence_to_words(raw_sentence):
+        mk = hanzi_to_mask.get(slot_word.strip())
+        if mk:
+            search_pos = _add(slot_word.strip(), mk, from_pos=search_pos)
+
+    return spans
+
+
+def _build_masked_pinyin_for_sentence(
+    display_sentence: str,
+    raw_sentence: str,
+    *,
+    words_by_id: dict[int, str],
+    maskings_by_id: dict[int, str],
+    replacement_mask_pairs: Optional[list[tuple[str, str]]] = None,
+) -> tuple[str, str, str]:
+    """문장 병음(표기·발음·성조기호)에 words.csv masking 반영."""
+    text = (display_sentence or "").strip()
+    if not text:
+        return "", "", ""
+    pp = get_pinyin_processor()
+    if not pp.available:
+        return "", "", ""
+    try:
+        lexical_list = pp.get_lexical_pinyin(text)
+        if not lexical_list:
+            return "", "", ""
+        phonetic_list = pp.get_phonetic_pinyin(text) or lexical_list
+        spans = _collect_word_mask_spans(
+            text,
+            raw_sentence,
+            words_by_id=words_by_id,
+            maskings_by_id=maskings_by_id,
+            replacement_mask_pairs=replacement_mask_pairs,
+        )
+        if spans:
+            lexical_list, phonetic_list = _apply_mask_spans_to_syllable_lists(
+                lexical_list, phonetic_list, spans, processor=pp
+            )
+        marks = " ".join(pp.tone3_to_mark(s) for s in lexical_list).strip()
+        return marks, " ".join(lexical_list).strip(), " ".join(phonetic_list).strip()
+    except Exception:
+        return "", "", ""
+
+
+def _apply_word_maskings_to_base_rows(
+    base_rows: list[dict],
+    *,
+    words_by_id: dict[int, str],
+    maskings_by_id: dict[int, str],
+) -> None:
+    """base 문장 pinyin에 슬롯 한자(words.csv) masking 적용."""
+    if not base_rows or not words_by_id:
+        return
+    for row in base_rows:
+        raw = str(row.get("raw_sentence") or "").strip()
+        if not raw:
+            sen = row.get("sentence") or []
+            if isinstance(sen, list):
+                raw = "".join(str(x) for x in sen if str(x).strip())
+            else:
+                raw = str(sen or "")
+        display = _raw_sentence_to_display(raw)
+        if not display:
+            continue
+        marks, lex, ph = _build_masked_pinyin_for_sentence(
+            display,
+            raw,
+            words_by_id=words_by_id,
+            maskings_by_id=maskings_by_id,
+        )
+        if not marks:
+            continue
+        row["pinyin_marks"] = marks
+        row["pinyin"] = marks
+        row["pinyin_lexical"] = lex
+        row["pinyin_phonetic"] = ph
 
 
 def _copy_sub_variants_list(raw: Any) -> list[dict]:
@@ -398,7 +566,7 @@ def _load_words_and_meanings_csv(
             m = str(row.get("meaning") or "").strip()
             if m:
                 meanings_by_id[wid] = m
-            maskings_by_id[wid] = str(row.get("masking") or "").strip()
+            maskings_by_id[wid] = normalize_word_masking(row.get("masking") or "")
     return words_by_id, meanings_by_id, maskings_by_id
 
 
@@ -548,16 +716,41 @@ def _sort_resolved_replacements(
     return sorted(resolved, key=lambda x: _sort_key_slot_order(x[0]))
 
 
+def _is_alt_word_remove(alt_word_id: int) -> bool:
+    return int(alt_word_id) == ALT_WORD_ID_REMOVE_SLOT
+
+
+def _replacement_word_for_slot(
+    slot_order: Union[int, str, float], alt_word_id: int, alt_word: str
+) -> Optional[str]:
+    """`_replace_multiple_slots_in_raw_sentence`용: None이면 슬롯 제거(정수) 또는 삽입 생략(소수)."""
+    if _is_alt_word_remove(alt_word_id):
+        return None
+    return str(alt_word or "").strip() or None
+
+
+def _primary_sub_replacement(
+    resolved: list[tuple[Union[int, str, float], int, str, str, str]],
+) -> Optional[tuple[Union[int, str, float], int, str, str, str]]:
+    """하이라이트·primary 메타: 첫 번째 실제 단어 치환(제거-only 변형은 None)."""
+    for entry in resolved:
+        if not _is_alt_word_remove(entry[1]) and str(entry[2] or "").strip():
+            return entry
+    return None
+
+
 def _replace_multiple_slots_in_raw_sentence(
     raw_sentence: str,
     *,
-    replacements: list[tuple[Union[int, str, float], str]],
+    replacements: list[tuple[Union[int, str, float], Optional[str]]],
 ) -> str:
     """원문 슬롯 여러 개를 바꾸고, 필요 시 문장 앞/뒤에 단어를 붙여 display 문장을 만든다.
 
     - `target_slot_order`가 **정수**이면 해당 슬롯 내용을 alt 단어로 **통째로 교체**한다.
+      `new_word`가 ``None``이면 해당 슬롯(및 슬롯 사이 구두점)을 **제거**한다.
     - **소수**(예: `1.1`, `1.2`)이면 정수 부분 `n`에 대해, n번 슬롯 **직후**(n과 n+1번 슬롯 사이)에
       소수 오름차순으로 단어를 **삽입**한다. 기존 슬롯 텍스트는 유지한다.
+      `new_word`가 ``None``이면 해당 삽입을 **하지 않는다**.
     """
     if not raw_sentence:
         return ""
@@ -580,9 +773,14 @@ def _replace_multiple_slots_in_raw_sentence(
     prefix_words: list[str] = []
     suffix_words: list[str] = []
     slot_replacements: dict[int, str] = {}
+    slots_to_remove: set[int] = set()
     insert_after: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
 
     for slot_order, new_word in replacements:
+        if new_word is None:
+            if isinstance(slot_order, int) and not isinstance(slot_order, bool) and slot_order >= 0:
+                slots_to_remove.add(slot_order)
+            continue
         w = str(new_word or "").strip()
         if not w:
             continue
@@ -614,6 +812,25 @@ def _replace_multiple_slots_in_raw_sentence(
             merged_slots[si] = w
         else:
             suffix_words.append(w)
+
+    for si in sorted(slots_to_remove, reverse=True):
+        if not (0 <= si < len(merged_slots)):
+            continue
+        merged_slots.pop(si)
+        if si + 1 < len(literals):
+            literals[si] = literals[si] + literals[si + 1]
+            del literals[si + 1]
+
+    if slots_to_remove:
+        remapped: defaultdict[int, list[tuple[float, str]]] = defaultdict(list)
+        for k, items in insert_after.items():
+            if k in slots_to_remove:
+                continue
+            shift = sum(1 for r in slots_to_remove if r < k)
+            nk = k - shift
+            if 0 <= nk < len(merged_slots):
+                remapped[nk].extend(items)
+        insert_after = remapped
 
     orphan_inserts: list[tuple[float, str]] = []
     for k in list(insert_after.keys()):
@@ -741,24 +958,26 @@ def _attach_sub_variants_to_base_rows(
                 continue
 
             resolved_replacements: list[tuple[Union[int, str, float], int, str, str, str]] = []
+            spec_ok = True
             for slot_order, alt_word_id in replacement_specs:
-                alt_word = words_by_id.get(int(alt_word_id), "").strip()
-                if not alt_word:
+                wid = int(alt_word_id)
+                if _is_alt_word_remove(wid):
+                    resolved_replacements.append((slot_order, wid, "", "", ""))
                     continue
+                alt_word = words_by_id.get(wid, "").strip()
+                if not alt_word:
+                    spec_ok = False
+                    break
                 alt_meaning = ""
                 if meanings_by_id:
-                    alt_meaning = str(meanings_by_id.get(int(alt_word_id), "") or "").strip()
-                alt_masking = ""
-                if maskings_by_id:
-                    alt_masking = str(maskings_by_id.get(int(alt_word_id), "") or "").strip()
-                resolved_replacements.append(
-                    (slot_order, int(alt_word_id), alt_word, alt_meaning, alt_masking)
+                    alt_meaning = str(meanings_by_id.get(wid, "") or "").strip()
+                alt_masking = normalize_word_masking(
+                    maskings_by_id.get(wid, "") if maskings_by_id else ""
                 )
-            if not resolved_replacements:
-                continue
-            # 요청한 다중 치환은 "전부 성공"해야 한다.
-            # 일부만 해석되면 원문 슬롯이 남아 보이므로 해당 변형을 스킵한다.
-            if len(resolved_replacements) != len(replacement_specs):
+                resolved_replacements.append(
+                    (slot_order, wid, alt_word, alt_meaning, alt_masking)
+                )
+            if not spec_ok or len(resolved_replacements) != len(replacement_specs):
                 continue
 
             resolved_replacements = _sort_resolved_replacements(resolved_replacements)
@@ -770,24 +989,34 @@ def _attach_sub_variants_to_base_rows(
             replaced_sentence = _replace_multiple_slots_in_raw_sentence(
                 raw_sentence,
                 replacements=[
-                    (slot_order, alt_word)
-                    for slot_order, _wid, alt_word, _m, _mask in resolved_replacements
+                    (slot_order, _replacement_word_for_slot(slot_order, wid, alt_word))
+                    for slot_order, wid, alt_word, _m, _mask in resolved_replacements
                 ],
             )
             if not replaced_sentence:
                 continue
 
-            primary_slot_order, primary_alt_word_id, primary_alt_word, primary_alt_meaning, _primary_masking = (
-                resolved_replacements[0]
-            )
+            primary = _primary_sub_replacement(resolved_replacements)
+            if primary is not None:
+                primary_slot_order, primary_alt_word_id, primary_alt_word, primary_alt_meaning, _primary_masking = (
+                    primary
+                )
+            else:
+                primary_slot_order = resolved_replacements[0][0]
+                primary_alt_word_id = ALT_WORD_ID_REMOVE_SLOT
+                primary_alt_word = ""
+                primary_alt_meaning = ""
+                _primary_masking = ""
             primary_f: Optional[float] = None
             try:
                 primary_f = float(primary_slot_order)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 primary_f = None
             # 치환 후 문장 기준으로 찾는다. 앞 슬롯 길이가 바뀌면(两→十二 등) 원문 슬롯 누적 길이 방식은 인덱스가 어긋난다.
-            span = _find_word_span_in_display_sentence(replaced_sentence, primary_alt_word)
-            if span is None and (
+            span = None
+            if primary_alt_word:
+                span = _find_word_span_in_display_sentence(replaced_sentence, primary_alt_word)
+            if span is None and primary_alt_word and (
                 primary_f is not None
                 and primary_f >= 0
                 and primary_f == int(primary_f)
@@ -817,6 +1046,8 @@ def _attach_sub_variants_to_base_rows(
             spans: list[dict[str, int]] = []
             search_pos = 0
             for slot_order, _wid, alt_word, _m, _mask in resolved_replacements:
+                if not str(alt_word or "").strip():
+                    continue
                 cur_span = _find_word_span_in_display_sentence_from(
                     replaced_sentence,
                     alt_word,
@@ -845,71 +1076,22 @@ def _attach_sub_variants_to_base_rows(
                 variant_dict["alt_hanzi_len"] = int(span[1])
             if spans:
                 variant_dict["alt_hanzi_spans"] = spans
-                if pp.available:
-                    try:
-                        lexical_list = pp.get_lexical_pinyin(replaced_sentence)
-                        if lexical_list:
-                            masked_lexical = list(lexical_list)
-                            for si, span_info in enumerate(spans):
-                                start_i = int(span_info.get("start", 0))
-                                len_i = int(span_info.get("len", 0))
-                                if len_i <= 0:
-                                    continue
-                                end_i = max(start_i, start_i + len_i)
-                                if start_i >= len(masked_lexical):
-                                    continue
-                                end_i = min(len(masked_lexical), end_i)
-                                if end_i <= start_i:
-                                    continue
-                                mask_raw = ""
-                                if si < len(variant_dict["alt_word_maskings"]):
-                                    mask_raw = str(variant_dict["alt_word_maskings"][si] or "").strip()
-                                if not mask_raw:
-                                    continue
-                                window = masked_lexical[start_i:end_i]
-                                masked_window = apply_mask_to_lexical_syllables(
-                                    window,
-                                    mask_raw,
-                                    processor=pp,
-                                )
-                                masked_lexical[start_i:end_i] = masked_window
-                            variant_dict["pinyin_lexical"] = " ".join(masked_lexical).strip()
-                            variant_dict["pinyin_marks"] = " ".join(
-                                pp.tone3_to_mark(syl) for syl in masked_lexical
-                            ).strip()
-                            # 발음형도 단어 masking 기준으로 계산해야 아이콘 비교가 일관된다.
-                            # (기본 g2pM 발음형 위에 동일 마스크를 다시 적용)
-                            phonetic_list = pp.get_phonetic_pinyin(replaced_sentence)
-                            if phonetic_list:
-                                masked_phonetic = list(phonetic_list)
-                                for si, span_info in enumerate(spans):
-                                    start_i = int(span_info.get("start", 0))
-                                    len_i = int(span_info.get("len", 0))
-                                    if len_i <= 0:
-                                        continue
-                                    end_i = max(start_i, start_i + len_i)
-                                    if start_i >= len(masked_phonetic):
-                                        continue
-                                    end_i = min(len(masked_phonetic), end_i)
-                                    if end_i <= start_i:
-                                        continue
-                                    mask_raw = ""
-                                    if si < len(variant_dict["alt_word_maskings"]):
-                                        mask_raw = str(variant_dict["alt_word_maskings"][si] or "").strip()
-                                    if not mask_raw:
-                                        continue
-                                    ph_window = masked_phonetic[start_i:end_i]
-                                    masked_ph_window = apply_mask_to_lexical_syllables(
-                                        ph_window,
-                                        mask_raw,
-                                        processor=pp,
-                                    )
-                                    masked_phonetic[start_i:end_i] = masked_ph_window
-                                variant_dict["pinyin_phonetic"] = " ".join(masked_phonetic).strip()
-                            else:
-                                variant_dict["pinyin_phonetic"] = ""
-                    except Exception:
-                        pass
+            replacement_pairs = [
+                (w, m)
+                for _slot, _wid, w, _mean, m in resolved_replacements
+                if str(w or "").strip()
+            ]
+            marks, lex, ph = _build_masked_pinyin_for_sentence(
+                replaced_sentence,
+                raw_sentence,
+                words_by_id=words_by_id,
+                maskings_by_id=maskings_by_id or {},
+                replacement_mask_pairs=replacement_pairs,
+            )
+            if marks:
+                variant_dict["pinyin_marks"] = marks
+                variant_dict["pinyin_lexical"] = lex
+                variant_dict["pinyin_phonetic"] = ph
             sub_variants.append(variant_dict)
         if sub_variants:
             # LearningScene의 전용 Stage에서 바로 사용할 공통 키.
@@ -1023,6 +1205,11 @@ def build_data_list(
                     maskings_by_id=maskings_by_id,
                     sub_rows_by_base_id=sub_rows_by_base_id,
                 )
+                _apply_word_maskings_to_base_rows(
+                    rows,
+                    words_by_id=words_by_id,
+                    maskings_by_id=maskings_by_id,
+                )
         except Exception:
             pass
         out = _sort_data_list_for_playback(_data_list_from_csv_rows(rows, repo=repo))
@@ -1048,6 +1235,11 @@ def build_data_list(
             meanings_by_id=meanings_by_id,
             maskings_by_id=maskings_by_id,
             sub_rows_by_base_id=sub_rows_by_base_id,
+        )
+        _apply_word_maskings_to_base_rows(
+            base_rows,
+            words_by_id=words_by_id,
+            maskings_by_id=maskings_by_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)
         out = _sort_data_list_for_playback(_data_list_from_csv_rows(base_rows, repo=repo))

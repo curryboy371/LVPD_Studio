@@ -139,6 +139,7 @@ class ToneIconRenderer:
             min_margin_x=style.layout.min_margin_x,
             align=align,
         )
+        shown_sandhi_labels: set[str] = set()
         for i, slot in enumerate(aligned):
             if slot is None or i >= len(centers):
                 continue
@@ -161,15 +162,18 @@ class ToneIconRenderer:
             if alpha <= 0:
                 continue
             label_surf = None
+            label_text = str(slot.sandhi_label or "").strip()
             if (
                 render_sandhi_label is not None
-                and slot.sandhi_label
-                and str(slot.sandhi_label).strip()
+                and label_text
+                and label_text not in shown_sandhi_labels
             ):
                 try:
-                    label_surf = render_sandhi_label(str(slot.sandhi_label).strip())
+                    label_surf = render_sandhi_label(label_text)
                 except Exception:
                     label_surf = None
+                if label_surf is not None:
+                    shown_sandhi_labels.add(label_text)
             if label_surf is not None:
                 iy_label = iy_icon - TONE_SANDHI_LABEL_GAP_PX - int(label_surf.get_height())
                 lx = cx - label_surf.get_width() // 2

@@ -52,7 +52,7 @@
         "--mode",
         "debug",
         "--topic",
-        "fruit_store"
+        "hair"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
@@ -70,7 +70,7 @@
         "--mode",
         "debug",
         "--topic",
-        "fruit_store"
+        "hair"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
