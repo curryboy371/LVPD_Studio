@@ -45,6 +45,7 @@ from studio.shorts.constants import (
     shorts_pinyin_hanzi_gap,
     shorts_pinyin_y_offset,
     shorts_translation_extra_gap,
+    shorts_vocab_mode_hint_above_pinyin_gap,
 )
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
@@ -424,6 +425,28 @@ class ShortsDrawer:
             text = text.split(" · ", 1)[0].strip()
         return text
 
+    def _draw_vocab_cn_mode_hint(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        pinyin_y: int,
+        hint: tuple[str, tuple[int, int, int]],
+        frame_height: int,
+    ) -> None:
+        """병음 위 듣기(녹색)·말하기(주황) 안내."""
+        from utils.fonts import load_font_korean
+
+        text, color = hint
+        pt = max(18, int(self._font_sizes.kr * 0.72))
+        font = load_font_korean(pt, color)
+        if font is None:
+            return
+        surf = font.render(text, True, color)
+        gap = shorts_vocab_mode_hint_above_pinyin_gap(frame_height)
+        y = int(pinyin_y) - gap - surf.get_height()
+        screen.blit(surf, (center_x - surf.get_width() // 2, max(0, y)))
+
     def _draw_vocab_meaning_line(
         self,
         screen: pygame.Surface,
@@ -677,6 +700,7 @@ class ShortsDrawer:
         style: Any,
         hook_title: str = "",
         vocab_meaning_karaoke: Optional[tuple[float, float]] = None,
+        cn_mode_hint: Optional[tuple[str, tuple[int, int, int]]] = None,
     ) -> None:
         """clip_type에 따라 상황극(노래방) 또는 단어 중앙 UI."""
         if (item.get("clip_type") or "") == CLIP_TYPE_VOCABULARY:
@@ -701,6 +725,7 @@ class ShortsDrawer:
                 layout_top=layout_top,
                 img_band_h=img_band_h,
                 meaning_karaoke=vocab_meaning_karaoke,
+                cn_mode_hint=cn_mode_hint,
             )
             return
         self.draw_middle_karaoke(
@@ -779,6 +804,7 @@ class ShortsDrawer:
         layout_top: Optional[int] = None,
         img_band_h: Optional[int] = None,
         meaning_karaoke: Optional[tuple[float, float]] = None,
+        cn_mode_hint: Optional[tuple[str, tuple[int, int, int]]] = None,
     ) -> None:
         """단어 숏츠: 연상 이미지 + 노래방(한 글자/음절)."""
         rect = zones.middle
@@ -839,6 +865,14 @@ class ShortsDrawer:
         )
         pinyin_y = overlay.pinyin_y
         hanzi_y = overlay.hanzi_y
+        if cn_mode_hint is not None:
+            self._draw_vocab_cn_mode_hint(
+                screen,
+                center_x=rect.centerx,
+                pinyin_y=pinyin_y,
+                hint=cn_mode_hint,
+                frame_height=fh,
+            )
         hanzi_line_h = shorts_vocab_hanzi_line_height(fh, cn_font_pt=int(self._font_sizes.cn))
         sub_rect = pygame.Rect(
             rect.left, int(layout_top), rect.width, max(80, int(img_band_h))

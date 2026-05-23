@@ -48,9 +48,9 @@ SHORTS_TRANSLATION_EXTRA_GAP = 28
 SHORTS_VOCAB_WORD_IMG_PAD = 32
 SHORTS_VOCAB_WORD_IMG_MAX_RATIO = 0.90
 # 단어 숏츠 품사 줄 — 뜻(kr) 대비 글자 크기 비율
-SHORTS_VOCAB_POS_FONT_RATIO = 0.72
+SHORTS_VOCAB_POS_FONT_RATIO = 0.62
 # 한자 하단 ↔ 품사 줄 간격 (1080×1920 기준)
-SHORTS_VOCAB_POS_AFTER_HANZI_GAP = 5
+SHORTS_VOCAB_POS_AFTER_HANZI_GAP = 16
 # 품사 ↔ TTS 뜻 자막 간격
 SHORTS_VOCAB_MEANING_SUBTITLE_GAP = 10
 # TTS 자막(뜻) 하단 ↔ tip 상단 (1080×1920 기준)
@@ -408,6 +408,13 @@ def shorts_vocab_pinyin_hanzi_gap(frame_height: int) -> int:
     return max(4, int(SHORTS_VOCAB_PINYIN_HANZI_GAP * sy))
 
 
+def shorts_vocab_mode_hint_above_pinyin_gap(frame_height: int) -> int:
+    """병음 위 듣기·말하기 안내 문구 간격."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(6, int(10 * sy))
+
+
 def shorts_vocab_hanzi_y(
     layout_top: int,
     img_band_h: int,
@@ -577,6 +584,11 @@ SHORTS_SOUND_PLAY_COUNT = 2
 SHORTS_NATIVE_LISTEN_LABEL = "원어민 발음을 잘 들어보세요"
 # 학습 3회 follow_along.mp3 TTS + 3·4회 화면 자막
 SHORTS_FOLLOW_ALONG_LABEL = "따라해보세요"
+# 단어 모드: 병음 위 듣기·말하기 안내 (F5 단어장·숏츠 단어 공통)
+VOCAB_CN_LISTEN_HINT = "잘 들어보세요"
+VOCAB_CN_SPEAK_HINT = "따라 말해보세요"
+VOCAB_CN_LISTEN_HINT_COLOR = (46, 204, 113)
+VOCAB_CN_SPEAK_HINT_COLOR = (255, 159, 67)
 # 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
 SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC = 1.5
 SHORTS_BG_PRACTICE_MIN_SEC = 4.0

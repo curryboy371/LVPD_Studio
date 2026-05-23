@@ -17,6 +17,10 @@ from studio.shorts.constants import (
     SHORTS_BG_PRACTICE_MIN_SEC,
     SHORTS_FOLLOW_ALONG_LABEL,
     SHORTS_NATIVE_LISTEN_LABEL,
+    VOCAB_CN_LISTEN_HINT,
+    VOCAB_CN_LISTEN_HINT_COLOR,
+    VOCAB_CN_SPEAK_HINT,
+    VOCAB_CN_SPEAK_HINT_COLOR,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
@@ -1170,11 +1174,27 @@ class ClipScene:
         """학습 구간 비디오 하단 안내 자막( KO 내레이션 cue 와 별도 )."""
         if self._stage != ClipStage.LEARN_PLAY:
             return ""
+        if self._is_vocabulary_clip():
+            return ""
         if self._learn_round in (1, 2):
             return SHORTS_NATIVE_LISTEN_LABEL
         if self._learn_round in (3, 4):
             return SHORTS_FOLLOW_ALONG_LABEL
         return ""
+
+    def _vocab_cn_mode_hint(self) -> Optional[tuple[str, tuple[int, int, int]]]:
+        """단어 숏츠: 병음 위 듣기·말하기 안내."""
+        if not self._is_vocabulary_clip():
+            return None
+        if self._stage == ClipStage.VOCAB_MEANING_KO:
+            return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
+        if self._stage != ClipStage.LEARN_PLAY:
+            return None
+        if self._learn_round in (1, 2):
+            return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
+        if self._learn_round in (3, 4):
+            return (VOCAB_CN_SPEAK_HINT, VOCAB_CN_SPEAK_HINT_COLOR)
+        return None
 
     def _overlay_subtitle_text(self) -> str:
         ko = self._active_ko_subtitle()
@@ -1655,6 +1675,7 @@ class ClipScene:
                     style=self._style,
                     hook_title=self._hook_title,
                     vocab_meaning_karaoke=meaning_karaoke,
+                    cn_mode_hint=self._vocab_cn_mode_hint(),
                 )
             finally:
                 screen.set_clip(None)

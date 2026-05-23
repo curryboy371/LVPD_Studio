@@ -34,6 +34,12 @@ from studio.conversation.tools.fonts import (
     RED,
     WHITE,
 )
+from studio.shorts.constants import (
+    VOCAB_CN_LISTEN_HINT,
+    VOCAB_CN_LISTEN_HINT_COLOR,
+    VOCAB_CN_SPEAK_HINT,
+    VOCAB_CN_SPEAK_HINT_COLOR,
+)
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
 from studio.shorts.tools.karaoke_renderer import KaraokeRenderer
 from studio.studios.components.hanzi_animator import HanziAnimator
@@ -59,8 +65,10 @@ _AUTO_SOUND_REPEAT_COUNT = 2
 _AUTO_WAIT_SOUND_LEN_SCALE = 1.5
 _AUTO_MEANING_GAP_SEC = 0.5
 # 한자 블록 아래 품사·뜻 (숏츠 단어 모드와 동일: 품사 → 뜻)
-_VOCAB_POS_AFTER_HANZI_GAP = 16
+_VOCAB_POS_AFTER_HANZI_GAP = 42
 _VOCAB_MEANING_AFTER_POS_GAP = 12
+_VOCAB_MODE_HINT_TOP_PAD = 6
+_VOCAB_MODE_HINT_ABOVE_PINYIN_GAP = 22
 # words.sound_path 없음·파일 없음·길이 0일 때 자동 시퀀스 타이밍(초)
 _FALLBACK_SOUND_LEN_SEC = 1.0
 _AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
@@ -180,6 +188,7 @@ class VocabularyStudio:
         self._font_cn_hero_detail: Optional[pygame.font.Font] = None
         self._font_kr_detail: Optional[pygame.font.Font] = None
         self._font_kr_pos_detail: Optional[pygame.font.Font] = None
+        self._font_vocab_mode_hint: Optional[pygame.font.Font] = None
         self._font_hint: Optional[pygame.font.Font] = None
         self._font_title: Optional[pygame.font.Font] = None
         self._title_image_surface: Optional[pygame.Surface] = None
@@ -241,12 +250,16 @@ class VocabularyStudio:
         cn_detail_size = fs.cn_step1_pinyin
         hero_detail_size = max(72, int(round(hero_size * detail_scale)))
         kr_detail_size = max(24, int(round(kr_size * detail_scale)))
-        pos_detail_size = max(24, int(round(kr_size * detail_scale * 0.82)))
+        pos_detail_size = max(20, int(round(kr_size * detail_scale * 0.68)))
+        mode_hint_size = max(36, int(round(kr_detail_size * 1.08)))
         self._font_cn_detail_ft = load_font_chinese_freetype(cn_detail_size, RED)
         self._font_cn_detail = load_font_chinese(cn_detail_size, RED)
         self._font_cn_hero_detail = load_font_chinese(hero_detail_size, WHITE)
         self._font_kr_detail = load_font_korean(kr_detail_size, GRAY_MUTED)
         self._font_kr_pos_detail = load_font_korean(pos_detail_size, GRAY_MUTED)
+        self._font_vocab_mode_hint = load_font_korean(
+            mode_hint_size, WHITE, weight="bold"
+        )
 
         if self._font_cn_big is None:
             from core.paths import DEFAULT_FONT_DIR, FONT_CN_FILENAME
@@ -275,6 +288,10 @@ class VocabularyStudio:
         if self._font_kr_pos_detail is None:
             self._font_kr_pos_detail = attach_font_fgcolor(
                 pygame.font.Font(None, pos_detail_size), GRAY_MUTED
+            )
+        if self._font_vocab_mode_hint is None:
+            self._font_vocab_mode_hint = attach_font_fgcolor(
+                pygame.font.Font(None, mode_hint_size), WHITE
             )
         hint_size = max(16, int(round(fs.kr * 0.82)))
         self._font_hint = load_font_korean(hint_size, (140, 140, 150)) or self._font_kr
@@ -633,6 +650,17 @@ class VocabularyStudio:
             return ("hanzi", sl, sl)
         return ("", 0.0, 0.0)
 
+    def _vocab_cn_mode_hint(self) -> tuple[str, tuple[int, int, int]] | None:
+        """듣기·말하기 구간 병음 위 안내 문구."""
+        if not self._auto_started:
+            return None
+        ph = self._auto_phase
+        if ph in ("play_meaning_ko", "wait_after_meaning_ko", "play_sound", "wait_after_play"):
+            return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
+        if ph in ("wait_sound_len", "wait_after_len", "wait_sync_hold"):
+            return (VOCAB_CN_SPEAK_HINT, VOCAB_CN_SPEAK_HINT_COLOR)
+        return None
+
     def _draw_vocab_cn_detail_block(
         self,
         screen: pygame.Surface,
@@ -642,12 +670,31 @@ class VocabularyStudio:
         upper_h: int,
         row: VocabularyWordRow,
         cn_karaoke_active: bool = False,
+        mode_hint: tuple[str, tuple[int, int, int]] | None = None,
     ) -> dict[str, int]:
         """상단: 병음·한자만. 노래방 구간에서는 정적 blit 생략(이중 흰색 방지)."""
         pinyin = self._pronunciation_subline(row)
         hero_text = self._hanzi_only(row)
         top_pad = 14
         layout_rows: list[tuple[pygame.Surface | None, int, str, bool]] = []
+        y_map: dict[str, int] = {}
+
+        hint_surf: pygame.Surface | None = None
+        cn_zone_top = main_top + top_pad
+        if mode_hint is not None:
+            hint_font = self._font_vocab_mode_hint
+            if hint_font is not None:
+                hint_text, hint_color = mode_hint
+                hint_surf = hint_font.render(hint_text, True, hint_color)
+                hint_y = main_top + _VOCAB_MODE_HINT_TOP_PAD
+                y_map["mode_hint"] = hint_y
+                screen.blit(
+                    hint_surf,
+                    (center_x - hint_surf.get_width() // 2, hint_y),
+                )
+                cn_zone_top = (
+                    hint_y + hint_surf.get_height() + _VOCAB_MODE_HINT_ABOVE_PINYIN_GAP
+                )
 
         pinyin_surf = self._render_pinyin_surface(pinyin) if pinyin else None
         if pinyin_surf is not None:
@@ -658,9 +705,11 @@ class VocabularyStudio:
         total_h = sum(
             (surf.get_height() if surf is not None else 0) for surf, g, _, _ in layout_rows
         ) + sum(g for surf, g, _, _ in layout_rows[:-1])
-        upper_center_y = main_top + (upper_h // 2)
-        draw_y = max(main_top + top_pad, upper_center_y - total_h // 2)
-        y_map: dict[str, int] = {"block_bottom": draw_y, "hanzi_height": hanzi_surf.get_height()}
+        cn_zone_bottom = main_top + upper_h - 8
+        cn_zone_h = max(1, cn_zone_bottom - cn_zone_top)
+        draw_y = cn_zone_top + max(0, (cn_zone_h - total_h) // 2)
+        y_map.setdefault("block_bottom", draw_y)
+        y_map["hanzi_height"] = hanzi_surf.get_height()
         for surf, gap_after, kind, do_blit in layout_rows:
             if surf is None:
                 continue
@@ -1164,6 +1213,7 @@ class VocabularyStudio:
             upper_h=upper_h,
             row=cur,
             cn_karaoke_active=bool(karaoke_mode),
+            mode_hint=self._vocab_cn_mode_hint(),
         )
         meta_layout = self._draw_vocab_meaning_pos_block(
             screen,
