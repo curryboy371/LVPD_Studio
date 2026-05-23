@@ -8,6 +8,10 @@ import pygame
 
 from studio.conversation.core.types import SentenceRenderData, SentenceStyleConfig
 from studio.conversation.tools.common_drawer import CommonDrawer
+from studio.conversation.tools.karaoke_wipe import (
+    blit_horizontal_karaoke_wipe,
+    compute_karaoke_progress,
+)
 from studio.shorts.constants import (
     KARAOKE_ACTIVE_HANZI,
     KARAOKE_ACTIVE_PINYIN,
@@ -18,36 +22,11 @@ from studio.shorts.constants import (
     SHORTS_VOCAB_POS_FONT_RATIO,
 )
 
-
-def compute_karaoke_progress(elapsed_sec: float, duration_sec: float) -> float:
-    """0..1 재생 진행률. duration 없으면 재생 시작 전 0, 경과 후 1."""
-    dur = max(0.0, float(duration_sec))
-    if dur <= 1e-6:
-        return 1.0 if float(elapsed_sec) > 1e-6 else 0.0
-    return max(0.0, min(1.0, float(elapsed_sec) / dur))
-
-
-def blit_horizontal_karaoke_wipe(
-    screen: pygame.Surface,
-    surf_inactive: pygame.Surface,
-    surf_active: pygame.Surface,
-    *,
-    center_x: int,
-    y: int,
-    progress: float,
-) -> None:
-    """비활성 색 전체 + 활성 색을 왼쪽부터 progress 비율만큼 덮어 그린다."""
-    progress = max(0.0, min(1.0, float(progress)))
-    w = surf_inactive.get_width()
-    h = surf_inactive.get_height()
-    if w <= 0 or h <= 0:
-        return
-    x = center_x - w // 2
-    screen.blit(surf_inactive, (x, y))
-    if progress <= 0:
-        return
-    fill_w = w if progress >= 1.0 else max(1, int(round(w * progress)))
-    screen.blit(surf_active, (x, y), area=pygame.Rect(0, 0, fill_w, h))
+__all__ = [
+    "KaraokeRenderer",
+    "blit_horizontal_karaoke_wipe",
+    "compute_karaoke_progress",
+]
 
 
 class KaraokeRenderer:
@@ -243,6 +222,7 @@ class KaraokeRenderer:
         elapsed_sec: float,
         sound_duration_sec: float,
         vocab_kr_font_pt: int = 36,
+        alpha: int | None = None,
     ) -> None:
         """한국어 뜻만 좌→우 노래방 채움(TTS 구간)."""
         line = (text or "").strip()
@@ -258,14 +238,35 @@ class KaraokeRenderer:
         surf_in = font.render(line, True, KO_KARAOKE_INACTIVE)
         surf_ac = font.render(line, True, KO_KARAOKE_ACTIVE)
         y = rect.centery - surf_in.get_height() // 2
-        blit_horizontal_karaoke_wipe(
-            screen,
-            surf_in,
-            surf_ac,
-            center_x=rect.centerx,
-            y=max(rect.top, y),
-            progress=progress,
-        )
+        a: int | None = None
+        if alpha is not None:
+            a = int(max(0, min(255, alpha)))
+            if a <= 0:
+                return
+        old_in = surf_in.get_alpha()
+        old_ac = surf_ac.get_alpha()
+        if a is not None and a < 255:
+            surf_in.set_alpha(a)
+            surf_ac.set_alpha(a)
+        try:
+            blit_horizontal_karaoke_wipe(
+                screen,
+                surf_in,
+                surf_ac,
+                center_x=rect.centerx,
+                y=max(rect.top, y),
+                progress=progress,
+            )
+        finally:
+            if a is not None and a < 255:
+                if old_in is None:
+                    surf_in.set_alpha(None)
+                else:
+                    surf_in.set_alpha(old_in)
+                if old_ac is None:
+                    surf_ac.set_alpha(None)
+                else:
+                    surf_ac.set_alpha(old_ac)
 
     def _draw_hanzi_wipe(
         self,

@@ -811,6 +811,23 @@ class PracticeScene(IConversationStep):
         # 하단 단어(노란 텍스트) 렌더링은 비활성화한다.
         # PRACTICE 화면은 문장/번역 표시에만 집중한다.
 
+    def _sub_ko_translation_karaoke_timing(self) -> tuple[bool, float, float]:
+        """한국어 alt_translation TTS 구간 (active, elapsed, duration)."""
+        if self.stage != self.Stage.SHOW_SUB_CONTENT or self._sub_play_phase != "playing":
+            return False, 0.0, 0.0
+        ko_sec = max(0.0, float(self._sub_content_ko_listen_sec))
+        if ko_sec <= 1e-6:
+            return False, 0.0, 0.0
+        variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
+        if not str(variant.get("alt_translation") or "").strip():
+            return False, 0.0, 0.0
+        total_sec = max(0.0, float(self._sub_content_wait_total_sec))
+        remaining_sec = max(0.0, float(self._sub_content_wait_remaining_sec))
+        elapsed_sec = max(0.0, total_sec - remaining_sec)
+        if elapsed_sec >= ko_sec:
+            return False, 0.0, 0.0
+        return True, elapsed_sec, ko_sec
+
     def _draw_sub_sentence_with_highlight(
         self,
         screen: pygame.Surface,
@@ -844,15 +861,20 @@ class PracticeScene(IConversationStep):
             )
             + int(y_offset_px)
         )
+        ko_karaoke_active, ko_elapsed, ko_dur = self._sub_ko_translation_karaoke_timing()
+        trans_line = (data.translation or "").strip()
+        line_ys = self.drawer.compute_sentence_line_ys(y_base, data, white_style)
+        center_x = int(ctx.width) // 2
         # SHOW_SUB_CONTENT에서는 한자 줄을 별도 수동 렌더링하므로,
         # drawer에는 병음/번역만 그리게 한다(겹침/잔상 방지).
         self.drawer.draw_sentence(
             screen,
             replace(data, sentence=""),
             channel=self._sentence_channel,
-            center_x=int(ctx.width) // 2,
+            center_x=center_x,
             y_base=y_base,
             style=white_style,
+            skip_translation=bool(ko_karaoke_active and trans_line),
         )
 
         replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
@@ -904,8 +926,7 @@ class PracticeScene(IConversationStep):
         if hanzi_pg is None or cache_hanzi is None:
             return
 
-        y_hanzi = y_base + (white_style.layout.line_gap_px if (data.pinyin or "").strip() else 0)
-        center_x = int(ctx.width) // 2
+        y_hanzi = int(line_ys.get("hanzi", y_base))
         # 오버레이(흰색 전체 + 노란색 덧그리기) 대신,
         # 문장을 색 구간으로 쪼개 "한 번만" 그려서 겹침 테두리를 제거한다.
         color_flags = [False] * len(hanzi_text)
@@ -979,6 +1000,19 @@ class PracticeScene(IConversationStep):
                     else:
                         surf.set_alpha(old_alpha)
             cur_x += int(surf.get_width())
+
+        if ko_karaoke_active and trans_line and "translation" in line_ys:
+            alpha = int(max(0, min(255, self.drawer.fade_alpha(self._sentence_channel))))
+            self.drawer.draw_translation_karaoke(
+                screen,
+                trans_line,
+                center_x=center_x,
+                y=int(line_ys["translation"]),
+                elapsed_sec=ko_elapsed,
+                duration_sec=ko_dur,
+                min_margin_x=white_style.layout.min_margin_x,
+                alpha=alpha,
+            )
 
     def _draw_sub_content_playback_bar(
         self,

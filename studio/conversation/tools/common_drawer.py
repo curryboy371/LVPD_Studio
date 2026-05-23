@@ -18,6 +18,7 @@ from ..core.types import (
     build_sentence_render_data_with_tone_icons,
 )
 from .fade_controller import FadeController
+from .karaoke_wipe import blit_horizontal_karaoke_wipe, compute_karaoke_progress
 from .tone_icon_renderer import ToneIconRenderer
 
 
@@ -25,6 +26,9 @@ Align = Literal["center", "left", "right"]
 # 성조 변화 설명(소형 한글 폰트)
 SANDHI_HINT_COLOR: tuple[int, int, int] = (255, 210, 125)
 SANDHI_HINT_FONT_PX = 38
+# 숏츠 KO_KARAOKE_* 와 동일 (shorts.constants import 시 패키지 순환 방지)
+KO_KARAOKE_INACTIVE: tuple[int, int, int] = (120, 125, 140)
+KO_KARAOKE_ACTIVE: tuple[int, int, int] = (255, 240, 180)
 # 병음 줄이 있을 때 위쪽 성조 아이콘·변화 설명용으로만 확보하는 고정 돌출(px).
 # 측정값을 쓰면 성조 슬롯 유무·PNG 높이·텍스트 유무에 따라 병음·한자 블록 세로 위치가 달라진다.
 PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104
@@ -406,6 +410,75 @@ class CommonDrawer:
         finally:
             self._restore_surface_alpha(surf, old)
 
+    def compute_sentence_line_ys(
+        self,
+        y_base: int,
+        data: SentenceRenderData,
+        style: SentenceStyleConfig,
+    ) -> dict[str, int]:
+        """`draw_sentence`와 동일 규칙으로 병음·한자·번역 줄 상단 y."""
+        pinyin = (data.pinyin or "")[: style.text.max_pinyin]
+        trans = (data.translation or "")[: style.text.max_translation]
+        y = int(y_base)
+        out: dict[str, int] = {}
+        if (pinyin or "").strip():
+            out["pinyin"] = y
+            y += style.layout.line_gap_px
+        out["hanzi"] = y
+        y += style.layout.line_gap_px
+        if (trans or "").strip():
+            y += style.layout.translation_extra_gap_px
+            out["translation"] = y
+        return out
+
+    def draw_translation_karaoke(
+        self,
+        screen: pygame.Surface,
+        text: str,
+        *,
+        center_x: int,
+        y: int,
+        elapsed_sec: float,
+        duration_sec: float,
+        align: Align = "center",
+        min_margin_x: int = 20,
+        alpha: Optional[int] = None,
+        inactive_color: tuple[int, int, int] = KO_KARAOKE_INACTIVE,
+        active_color: tuple[int, int, int] = KO_KARAOKE_ACTIVE,
+    ) -> None:
+        """번역 줄(`translation_pg`)과 동일 폰트·y로 좌→우 노래방 채움."""
+        line = (text or "").strip()
+        if not line:
+            return
+        font_pg = self._fonts.translation_pg
+        if font_pg is None:
+            return
+        progress = compute_karaoke_progress(elapsed_sec, duration_sec)
+        surf_in = font_pg.render(line, True, inactive_color)
+        surf_ac = font_pg.render(line, True, active_color)
+        a = 255 if alpha is None else int(max(0, min(255, alpha)))
+        if a <= 0:
+            return
+        old_in = surf_in.get_alpha()
+        old_ac = surf_ac.get_alpha()
+        if a < 255:
+            surf_in.set_alpha(a)
+            surf_ac.set_alpha(a)
+        try:
+            blit_horizontal_karaoke_wipe(
+                screen,
+                surf_in,
+                surf_ac,
+                center_x=center_x,
+                y=int(y),
+                progress=progress,
+                min_margin_x=int(min_margin_x),
+            )
+        finally:
+            if a < 255:
+                self._restore_surface_alpha(surf_in, old_in)
+                self._restore_surface_alpha(surf_ac, old_ac)
+
     def draw_sentence(
         self,
         screen: pygame.Surface,
@@ -417,6 +490,7 @@ class CommonDrawer:
         style: SentenceStyleConfig,
         align: Align = "center",
         alpha: Optional[int] = None,
+        skip_translation: bool = False,
     ) -> None:
         """병음 → 한자 → 번역 순으로 y_base부터 line_gap만큼 내려가며 그린다.
         한자와 번역 사이는 line_gap + translation_extra_gap_px.
@@ -480,7 +554,7 @@ class CommonDrawer:
         )
         y += style.layout.line_gap_px
 
-        if trans:
+        if trans and not skip_translation:
             y += style.layout.translation_extra_gap_px
             surf = self._get_cached_translation_surf(trans, style.colors.translation_color)
             self._blit_surface_with_alpha(
