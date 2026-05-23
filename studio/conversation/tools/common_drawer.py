@@ -29,6 +29,8 @@ SANDHI_HINT_FONT_PX = 38
 # 숏츠 KO_KARAOKE_* 와 동일 (shorts.constants import 시 패키지 순환 방지)
 KO_KARAOKE_INACTIVE: tuple[int, int, int] = (120, 125, 140)
 KO_KARAOKE_ACTIVE: tuple[int, int, int] = (255, 240, 180)
+# 회화 PRACTICE 한자 노래방 — 미재생 구간
+HANZI_KARAOKE_INACTIVE: tuple[int, int, int] = (120, 125, 140)
 # 병음 줄이 있을 때 위쪽 성조 아이콘·변화 설명용으로만 확보하는 고정 돌출(px).
 # 측정값을 쓰면 성조 슬롯 유무·PNG 높이·텍스트 유무에 따라 병음·한자 블록 세로 위치가 달라진다.
 PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104
@@ -478,6 +480,144 @@ class CommonDrawer:
             if a < 255:
                 self._restore_surface_alpha(surf_in, old_in)
                 self._restore_surface_alpha(surf_ac, old_ac)
+
+    def draw_hanzi_karaoke_wipe(
+        self,
+        screen: pygame.Surface,
+        text: str,
+        *,
+        center_x: int,
+        y: int,
+        elapsed_sec: float,
+        duration_sec: float,
+        inactive_color: tuple[int, int, int],
+        active_color: tuple[int, int, int],
+        min_margin_x: int = 20,
+        alpha: Optional[int] = None,
+    ) -> None:
+        """한자 줄만 좌→우 노래방 채움(병음·번역 제외)."""
+        line = (text or "").strip()
+        if not line:
+            return
+        progress = compute_karaoke_progress(elapsed_sec, duration_sec)
+        surf_in, _ = self._get_cached_text_pair(
+            self._cache_hanzi,
+            self._fonts.hanzi_ft,
+            self._fonts.hanzi_pg,
+            line,
+            inactive_color,
+        )
+        surf_ac, _ = self._get_cached_text_pair(
+            self._cache_hanzi,
+            self._fonts.hanzi_ft,
+            self._fonts.hanzi_pg,
+            line,
+            active_color,
+        )
+        a = 255 if alpha is None else int(max(0, min(255, alpha)))
+        if a <= 0:
+            return
+        old_in = surf_in.get_alpha()
+        old_ac = surf_ac.get_alpha()
+        if a < 255:
+            surf_in.set_alpha(a)
+            surf_ac.set_alpha(a)
+        try:
+            blit_horizontal_karaoke_wipe(
+                screen,
+                surf_in,
+                surf_ac,
+                center_x=center_x,
+                y=int(y),
+                progress=progress,
+                min_margin_x=int(min_margin_x),
+            )
+        finally:
+            if a < 255:
+                self._restore_surface_alpha(surf_in, old_in)
+                self._restore_surface_alpha(surf_ac, old_ac)
+
+    def draw_hanzi_karaoke_wipe_segments(
+        self,
+        screen: pygame.Surface,
+        segments: list[tuple[str, tuple[int, int, int]]],
+        *,
+        center_x: int,
+        y: int,
+        elapsed_sec: float,
+        duration_sec: float,
+        inactive_color: tuple[int, int, int] = HANZI_KARAOKE_INACTIVE,
+        min_margin_x: int = 20,
+        alpha: Optional[int] = None,
+    ) -> None:
+        """한자 노래방: 세그먼트 단위 회색 → 좌→우로 동일 레이아웃의 색 채움."""
+        if not segments:
+            return
+        progress = compute_karaoke_progress(elapsed_sec, duration_sec)
+
+        pieces: list[tuple[pygame.Surface, pygame.Surface, int, int]] = []
+        total_w = 0
+        max_h = 0
+        for seg_text, seg_color in segments:
+            if not seg_text:
+                continue
+            surf_color, _ = self._get_cached_text_pair(
+                self._cache_hanzi,
+                self._fonts.hanzi_ft,
+                self._fonts.hanzi_pg,
+                seg_text,
+                seg_color,
+            )
+            surf_gray, _ = self._get_cached_text_pair(
+                self._cache_hanzi,
+                self._fonts.hanzi_ft,
+                self._fonts.hanzi_pg,
+                seg_text,
+                inactive_color,
+            )
+            w = int(surf_color.get_width())
+            h = max(int(surf_color.get_height()), int(surf_gray.get_height()))
+            pieces.append((surf_gray, surf_color, w, h))
+            total_w += w
+            max_h = max(max_h, h)
+        if total_w <= 0 or max_h <= 0 or not pieces:
+            return
+
+        gray_layer = pygame.Surface((total_w, max_h), pygame.SRCALPHA)
+        colored = pygame.Surface((total_w, max_h), pygame.SRCALPHA)
+        cx = 0
+        for surf_gray, surf_color, w, h in pieces:
+            y_off = max(0, (max_h - h) // 2)
+            gray_layer.blit(surf_gray, (cx, y_off))
+            colored.blit(surf_color, (cx, y_off))
+            cx += w
+
+        a = 255 if alpha is None else int(max(0, min(255, alpha)))
+        if a <= 0:
+            return
+        x = max(int(min_margin_x), int(center_x) - total_w // 2)
+        yi = int(y)
+
+        def _blit_with_alpha(target: pygame.Surface, alpha_val: int) -> None:
+            if alpha_val >= 255:
+                screen.blit(target, (x, yi))
+                return
+            old = target.get_alpha()
+            target.set_alpha(alpha_val)
+            try:
+                screen.blit(target, (x, yi))
+            finally:
+                self._restore_surface_alpha(target, old)
+
+        _blit_with_alpha(gray_layer, a)
+        if progress <= 0:
+            return
+        fill_w = total_w if progress >= 1.0 else max(1, int(round(total_w * progress)))
+        if a >= 255:
+            screen.blit(colored, (x, yi), area=pygame.Rect(0, 0, fill_w, max_h))
+        else:
+            clip = colored.subsurface(pygame.Rect(0, 0, fill_w, max_h)).copy()
+            _blit_with_alpha(clip, a)
 
     def draw_sentence(
         self,

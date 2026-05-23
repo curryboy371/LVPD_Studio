@@ -90,7 +90,7 @@ STUDIO_MUX_AUDIO_BITRATE = "256k"
 STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN = 0.5
 
 # 회화 연습 주황 게이지 배경음 선형 볼륨(1.0=원본). pygame 재생과 녹화 mux에 동일 적용.
-STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN = 0.2
+STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN = 0.4
 
 # utils/video_audio_extract: 비디오→동명 MP3 시 libmp3lame -q:a (0=최고 VBR)
 STUDIO_VIDEO_EXTRACT_MP3_LAME_Q = 0
