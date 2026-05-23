@@ -109,7 +109,7 @@
 
 로드 시 단어 클립 내부 id는 `{id}001`, `{id}002` … (예: topic id=1 → 1001, 1002). 판다: `panda/vocabulary/{내부id}.png`.
 
-**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어 발음(`sound_repeat_count`회) → `after_sound_delay_sec` 대기 → 다음 단어 → (마지막) **CTA_HOLD** + `last_hold_text`.
+**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어(`sound_repeat_count`회) → 따라해보세요(follow+BG). **word_video/mp3 타임라인에 여유가 있으면** 뜻 TTS 없이 중국어→따라발음만 반복. F5 단어장도 동일(뜻 `ko_word_*` → 중국어→주황 따라발음, 여유 시 TTS 생략 반복).
 
 ### CSV 예 (topic 1행)
 

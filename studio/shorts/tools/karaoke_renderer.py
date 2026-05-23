@@ -13,6 +13,8 @@ from studio.shorts.constants import (
     KARAOKE_ACTIVE_PINYIN,
     KARAOKE_INACTIVE_HANZI,
     KARAOKE_INACTIVE_PINYIN,
+    KO_KARAOKE_ACTIVE,
+    KO_KARAOKE_INACTIVE,
     SHORTS_VOCAB_POS_FONT_RATIO,
 )
 
@@ -230,6 +232,39 @@ class KaraokeRenderer:
             progress=progress,
             inactive_color=KARAOKE_INACTIVE_PINYIN,
             active_color=KARAOKE_ACTIVE_PINYIN,
+        )
+
+    def draw_meaning_karaoke(
+        self,
+        screen: pygame.Surface,
+        *,
+        text: str,
+        rect: pygame.Rect,
+        elapsed_sec: float,
+        sound_duration_sec: float,
+        vocab_kr_font_pt: int = 36,
+    ) -> None:
+        """한국어 뜻만 좌→우 노래방 채움(TTS 구간)."""
+        line = (text or "").strip()
+        if not line:
+            return
+        progress = compute_karaoke_progress(elapsed_sec, sound_duration_sec)
+        from utils.fonts import load_font_korean
+
+        pt = max(14, int(vocab_kr_font_pt))
+        font = load_font_korean(pt, KO_KARAOKE_INACTIVE)
+        if font is None:
+            return
+        surf_in = font.render(line, True, KO_KARAOKE_INACTIVE)
+        surf_ac = font.render(line, True, KO_KARAOKE_ACTIVE)
+        y = rect.centery - surf_in.get_height() // 2
+        blit_horizontal_karaoke_wipe(
+            screen,
+            surf_in,
+            surf_ac,
+            center_x=rect.centerx,
+            y=max(rect.top, y),
+            progress=progress,
         )
 
     def _draw_hanzi_wipe(

@@ -676,6 +676,7 @@ class ShortsDrawer:
         sound_duration_sec: float,
         style: Any,
         hook_title: str = "",
+        vocab_meaning_karaoke: Optional[tuple[float, float]] = None,
     ) -> None:
         """clip_type에 따라 상황극(노래방) 또는 단어 중앙 UI."""
         if (item.get("clip_type") or "") == CLIP_TYPE_VOCABULARY:
@@ -699,6 +700,7 @@ class ShortsDrawer:
                 style=style,
                 layout_top=layout_top,
                 img_band_h=img_band_h,
+                meaning_karaoke=vocab_meaning_karaoke,
             )
             return
         self.draw_middle_karaoke(
@@ -776,6 +778,7 @@ class ShortsDrawer:
         style: Any,
         layout_top: Optional[int] = None,
         img_band_h: Optional[int] = None,
+        meaning_karaoke: Optional[tuple[float, float]] = None,
     ) -> None:
         """단어 숏츠: 연상 이미지 + 노래방(한 글자/음절)."""
         rect = zones.middle
@@ -840,11 +843,11 @@ class ShortsDrawer:
         sub_rect = pygame.Rect(
             rect.left, int(layout_top), rect.width, max(80, int(img_band_h))
         )
+        trans_color = getattr(getattr(style, "colors", None), "translation_color", WHITE)
+        fade = self.fade_alpha(_CHANNEL_BOTTOM)
         item_karaoke = dict(item)
         item_karaoke["translation"] = []
         data = build_sentence_render_data_with_tone_icons(item_karaoke)
-        trans_color = getattr(getattr(style, "colors", None), "translation_color", WHITE)
-        fade = self.fade_alpha(_CHANNEL_BOTTOM)
         stack = self._measure_vocab_cn_stack(
             data,
             pinyin_y=pinyin_y,
@@ -857,17 +860,39 @@ class ShortsDrawer:
             self._draw_vocab_cn_stack_background(
                 screen, center_x=rect.centerx, stack=stack, fade_alpha=fade
             )
+        cn_elapsed = float(elapsed_sec)
+        cn_dur = max(1e-6, float(sound_duration_sec))
+        if meaning_karaoke is not None:
+            cn_elapsed = 0.0
+            cn_dur = 1.0
         self._karaoke.draw(
             screen,
             data=data,
             rect=sub_rect,
             style=style,
-            elapsed_sec=elapsed_sec,
+            elapsed_sec=cn_elapsed,
             syllable_times=syllable_times,
-            sound_duration_sec=sound_duration_sec,
+            sound_duration_sec=cn_dur,
             fixed_pinyin_y=pinyin_y,
             fixed_hanzi_y=hanzi_y,
         )
+        if meaning_karaoke is not None:
+            el, dur = meaning_karaoke
+            mw = max(120, rect.width - 64)
+            meaning_rect = pygame.Rect(
+                rect.centerx - mw // 2,
+                max(sub_rect.top, int(overlay.meaning_y) - 8),
+                mw,
+                96,
+            )
+            self._karaoke.draw_meaning_karaoke(
+                screen,
+                text=meaning_text,
+                rect=meaning_rect,
+                elapsed_sec=float(el),
+                sound_duration_sec=max(1e-6, float(dur)),
+                vocab_kr_font_pt=int(self._font_sizes.kr),
+            )
         if pos:
             self._draw_vocab_pos_line(
                 screen,
@@ -878,6 +903,7 @@ class ShortsDrawer:
                 frame_height=fh,
                 text_color=trans_color,
             )
+
     def draw_vocab_meaning_if_any(
         self,
         screen: pygame.Surface,

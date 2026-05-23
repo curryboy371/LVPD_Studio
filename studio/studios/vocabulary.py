@@ -18,13 +18,24 @@ from core.paths import get_repo_root
 from data.models import VocabularyWordRow
 from data.table_manager import get_word, get_word_by_hanzi
 from studio.conversation.bg_audio import ConversationBackgroundPlayer
+from studio.conversation.core.types import (
+    ColorStyle,
+    LayoutStyle,
+    SentenceStyleConfig,
+    TextStyle,
+    build_sentence_render_data_with_tone_icons,
+)
+from studio.conversation.tools.common_drawer import CommonDrawer
 from studio.conversation.tools.fonts import (
     DEFAULT_CONVERSATION_RENDER_SETTINGS,
+    ConversationFontSizes,
     ConversationRenderSettings,
     GRAY_MUTED,
     RED,
     WHITE,
 )
+from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
+from studio.shorts.tools.karaoke_renderer import KaraokeRenderer
 from studio.studios.components.hanzi_animator import HanziAnimator
 from utils.pinyin_masking import get_masked_pinyin_marks
 from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chinese_freetype, load_font_korean
@@ -46,12 +57,14 @@ _LOWER_SLOTS_BOTTOM_PAD = 14  # 슬롯 하단 여백
 _AUTO_SOUND_GAP_SEC = 1.5
 _AUTO_SOUND_REPEAT_COUNT = 2
 _AUTO_WAIT_SOUND_LEN_SCALE = 1.5
+_AUTO_MEANING_GAP_SEC = 0.5
+# 한자 블록 아래 품사·뜻 (숏츠 단어 모드와 동일: 품사 → 뜻)
+_VOCAB_POS_AFTER_HANZI_GAP = 16
+_VOCAB_MEANING_AFTER_POS_GAP = 12
 # words.sound_path 없음·파일 없음·길이 0일 때 자동 시퀀스 타이밍(초)
 _FALLBACK_SOUND_LEN_SEC = 1.0
 _AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
 _STROKE_FIXED_PLAY_SPEED = 1.0
-_GAUGE_H = 18
-_GAUGE_PAD_TOP = 10
 _IMAGE_CORNER_RADIUS = 16
 _TITLE_INTRO_FADE_SEC = 1.4
 
@@ -183,6 +196,8 @@ class VocabularyStudio:
         self._auto_cycle_index: int = 0
         self._auto_sound_path: str = ""
         self._auto_sound_len: float = 0.0
+        self._auto_meaning_ko_path: str = ""
+        self._auto_meaning_ko_len: float = 0.0
         self._auto_word_elapsed: float = 0.0
         self._auto_word_target_duration: float = 0.0
         self._auto_hanzi_replay_enabled: bool = False
@@ -193,6 +208,10 @@ class VocabularyStudio:
         self._intro_total_sec: float = _TITLE_INTRO_FADE_SEC
         self._intro_remaining_sec: float = _TITLE_INTRO_FADE_SEC
         self._bg_player: ConversationBackgroundPlayer | None = None
+        self._common_drawer: CommonDrawer | None = None
+        self._karaoke: KaraokeRenderer | None = None
+        self._karaoke_style: SentenceStyleConfig | None = None
+        self._render_font_sizes: ConversationFontSizes | None = None
 
     def init(self, config: Any = None) -> None:
         """회화 스튜디오와 동일한 폰트 로드(`ConversationStudio._load_fonts`와 동일 소스)."""
@@ -267,6 +286,9 @@ class VocabularyStudio:
             on_bg_started=self._log_bg_insert_sound,
             is_recording=self._is_recording_mode,
         )
+        fs = _resolve_conversation_render_settings(config).font_sizes
+        self._render_font_sizes = fs
+        self._init_karaoke_drawer(fs)
 
     def start_playback(self) -> None:
         """F5 debug: 창 표시·mixer 준비 후 배경음 재생."""
@@ -563,11 +585,266 @@ class VocabularyStudio:
         except Exception:
             return
 
+    def _init_karaoke_drawer(self, fs: ConversationFontSizes) -> None:
+        sizes = ShortsFontSizes(
+            cn=max(48, int(fs.cn_step1_hanzi)),
+            pinyin=max(28, int(fs.cn_step1_pinyin)),
+            kr=max(28, int(fs.kr_step1)),
+        )
+        self._common_drawer = CommonDrawer(fonts=build_font_bundle(sizes))
+        self._karaoke = KaraokeRenderer(drawer=self._common_drawer)
+        self._karaoke_style = SentenceStyleConfig(
+            colors=ColorStyle(hanzi_color=WHITE, pinyin_color=RED, translation_color=GRAY_MUTED),
+            layout=LayoutStyle(line_gap_px=20, translation_extra_gap_px=8, min_margin_x=16),
+            text=TextStyle(max_hanzi=12, max_pinyin=80, max_translation=120),
+        )
+
+    def _word_karaoke_item(self, row: VocabularyWordRow, word: Any) -> dict:
+        hanzi = self._hanzi_only(row)
+        pinyin = self._pronunciation_subline(row)
+        meanings = self._parse_meaning_items((word.meaning or "").strip() if word else "")
+        meaning_line = " · ".join(meanings) if meanings else ""
+        return {
+            "sentence": [hanzi],
+            "pinyin": pinyin,
+            "pinyin_marks": pinyin,
+            "translation": [meaning_line] if meaning_line else [],
+        }
+
+    def _vocab_karaoke_timing(self) -> tuple[str, float, float]:
+        """('meaning'|'hanzi'|'', elapsed, duration) — 자동 재생 구간 노래방."""
+        if not self._auto_started:
+            return ("", 0.0, 0.0)
+        ph = self._auto_phase
+        if ph == "play_meaning_ko":
+            return ("meaning", float(self._auto_phase_elapsed), float(self._auto_phase_duration))
+        if ph == "wait_after_meaning_ko":
+            sl = max(0.0, float(self._auto_meaning_ko_len))
+            return ("meaning", sl, sl)
+        if ph == "play_sound":
+            return ("hanzi", float(self._auto_phase_elapsed), float(self._auto_phase_duration))
+        if ph == "wait_after_play":
+            sl = max(0.0, float(self._auto_sound_len))
+            return ("hanzi", sl, sl)
+        if ph == "wait_sound_len":
+            return ("hanzi", float(self._auto_phase_elapsed), float(self._auto_phase_duration))
+        if ph in ("wait_after_len", "wait_sync_hold"):
+            sl = max(0.0, float(self._auto_sound_len))
+            return ("hanzi", sl, sl)
+        return ("", 0.0, 0.0)
+
+    def _draw_vocab_cn_detail_block(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        main_top: int,
+        upper_h: int,
+        row: VocabularyWordRow,
+        cn_karaoke_active: bool = False,
+    ) -> dict[str, int]:
+        """상단: 병음·한자만. 노래방 구간에서는 정적 blit 생략(이중 흰색 방지)."""
+        pinyin = self._pronunciation_subline(row)
+        hero_text = self._hanzi_only(row)
+        top_pad = 14
+        layout_rows: list[tuple[pygame.Surface | None, int, str, bool]] = []
+
+        pinyin_surf = self._render_pinyin_surface(pinyin) if pinyin else None
+        if pinyin_surf is not None:
+            layout_rows.append((pinyin_surf, 16, "pinyin", not cn_karaoke_active))
+        hanzi_surf = self._font_cn_hero_detail.render(hero_text, True, WHITE)
+        layout_rows.append((hanzi_surf, 24, "hanzi", not cn_karaoke_active))
+
+        total_h = sum(
+            (surf.get_height() if surf is not None else 0) for surf, g, _, _ in layout_rows
+        ) + sum(g for surf, g, _, _ in layout_rows[:-1])
+        upper_center_y = main_top + (upper_h // 2)
+        draw_y = max(main_top + top_pad, upper_center_y - total_h // 2)
+        y_map: dict[str, int] = {"block_bottom": draw_y, "hanzi_height": hanzi_surf.get_height()}
+        for surf, gap_after, kind, do_blit in layout_rows:
+            if surf is None:
+                continue
+            y_map[kind] = draw_y
+            if do_blit:
+                draw_x = center_x - (surf.get_width() // 2)
+                screen.blit(surf, (draw_x, draw_y))
+            draw_y += surf.get_height() + gap_after
+        y_map["block_bottom"] = draw_y
+        return y_map
+
+    def _render_vocab_meaning_surface(self, word: Any) -> pygame.Surface | None:
+        meaning_items = self._parse_meaning_items((word.meaning or "").strip() if word else "")
+        meaning_parts = [(m, GRAY_MUTED) for m in meaning_items]
+        if not meaning_parts:
+            return None
+        rendered = [
+            self._font_kr_detail.render(text, True, color) for text, color in meaning_parts
+        ]
+        if len(rendered) == 1:
+            return rendered[0]
+        gap = 36
+        total_w = sum(s.get_width() for s in rendered) + gap * (len(rendered) - 1)
+        row_h = max(s.get_height() for s in rendered)
+        meaning_surf = pygame.Surface((max(1, total_w), max(1, row_h)), pygame.SRCALPHA)
+        x = 0
+        for idx, surf in enumerate(rendered):
+            y = (row_h - surf.get_height()) // 2
+            meaning_surf.blit(surf, (x, y))
+            x += surf.get_width() + (gap if idx < len(rendered) - 1 else 0)
+        return meaning_surf
+
+    def _draw_vocab_meaning_pos_block(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        cn_layout: dict[str, int],
+        lower_top: int,
+        word: Any,
+        pos_items: list[str],
+    ) -> dict[str, int]:
+        """한자 아래: 품사 → 뜻 (숏츠 단어 모드와 동일 순서)."""
+        y_map: dict[str, int] = {}
+        meta_top = int(cn_layout.get("block_bottom", cn_layout.get("hanzi", 0))) + _VOCAB_POS_AFTER_HANZI_GAP
+
+        pos_parts: list[pygame.Surface] = []
+        if pos_items:
+            pos_row_font = self._font_kr_pos_detail
+            assert pos_row_font is not None
+            pos_parts = [
+                pos_row_font.render(pos, True, _POS_COLOR_TABLE.get(pos, _POS_DEFAULT_COLOR))
+                for pos in pos_items
+            ]
+
+        meaning_surf = self._render_vocab_meaning_surface(word)
+        pos_h = max((s.get_height() for s in pos_parts), default=0)
+        pos_gap = _VOCAB_MEANING_AFTER_POS_GAP if pos_parts and meaning_surf is not None else 0
+        meaning_h = meaning_surf.get_height() if meaning_surf is not None else 0
+        total_h = pos_h + pos_gap + meaning_h
+        if total_h <= 0:
+            return y_map
+
+        limit_y = lower_top - 10
+        if meta_top + total_h > limit_y:
+            meta_top = max(int(cn_layout.get("hanzi", meta_top)), limit_y - total_h)
+
+        draw_y = meta_top
+        if pos_parts:
+            gap = 36
+            total_w = sum(s.get_width() for s in pos_parts) + gap * (len(pos_parts) - 1)
+            row_h = max(s.get_height() for s in pos_parts)
+            y_map["pos"] = draw_y
+            x = center_x - total_w // 2
+            for i, surf in enumerate(pos_parts):
+                screen.blit(surf, (x, draw_y))
+                x += surf.get_width() + (gap if i < len(pos_parts) - 1 else 0)
+            draw_y += row_h + pos_gap
+
+        if meaning_surf is not None:
+            y_map["meaning"] = draw_y
+            screen.blit(meaning_surf, (center_x - meaning_surf.get_width() // 2, draw_y))
+            draw_y += meaning_h
+
+        y_map["meta_bottom"] = draw_y
+        return y_map
+
+    def _draw_vocab_karaoke(
+        self,
+        screen: pygame.Surface,
+        *,
+        karaoke_rect: pygame.Rect,
+        layout: dict[str, int],
+        row: VocabularyWordRow,
+        word: Any,
+    ) -> None:
+        if self._karaoke is None or self._karaoke_style is None:
+            return
+        mode, elapsed, duration = self._vocab_karaoke_timing()
+        if not mode or duration <= 1e-6:
+            return
+        item = self._word_karaoke_item(row, word)
+        fs = self._render_font_sizes
+        kr_pt = int(fs.kr_step1) if fs is not None else 56
+        pinyin_y = int(layout.get("pinyin", karaoke_rect.top + 40))
+        hanzi_y = int(layout.get("hanzi", pinyin_y + 28))
+        meaning_y = int(layout.get("meaning", layout.get("block_bottom", hanzi_y + 40)))
+        item_cn = dict(item)
+        item_cn["translation"] = []
+        data_cn = build_sentence_render_data_with_tone_icons(item_cn)
+        cn_elapsed = float(elapsed)
+        cn_dur = max(1e-6, float(duration))
+        if mode == "meaning":
+            cn_elapsed = 0.0
+            cn_dur = 1.0
+        elif mode == "hanzi" and elapsed <= 1e-6:
+            cn_elapsed = 0.0
+        self._karaoke.draw(
+            screen,
+            data=data_cn,
+            rect=karaoke_rect,
+            style=self._karaoke_style,
+            elapsed_sec=cn_elapsed,
+            syllable_times=[],
+            sound_duration_sec=cn_dur,
+            fixed_pinyin_y=pinyin_y,
+            fixed_hanzi_y=hanzi_y,
+            pinyin_hanzi_gap=12,
+        )
+        meanings = self._parse_meaning_items((word.meaning or "").strip() if word else "")
+        meaning_text = " · ".join(meanings)
+        if not meaning_text:
+            return
+        meaning_rect = pygame.Rect(
+            karaoke_rect.left,
+            max(karaoke_rect.top, meaning_y - 4),
+            karaoke_rect.width,
+            max(32, self._font_kr_detail.get_height() + 8),
+        )
+        if mode == "meaning":
+            self._karaoke.draw_meaning_karaoke(
+                screen,
+                text=meaning_text,
+                rect=meaning_rect,
+                elapsed_sec=elapsed,
+                sound_duration_sec=duration,
+                vocab_kr_font_pt=kr_pt,
+            )
+
+    def _resolve_vocab_meaning_ko_path(self, word_id: int) -> str:
+        """batch_tts 모드 2 산출: resource/sound/shorts/ko_word_{word_id}_0.mp3"""
+        from core.paths import DEFAULT_KO_NARRATION_SOUND_DIR
+
+        wid = int(word_id)
+        if wid < 1:
+            return ""
+        for name in (f"ko_word_{wid}_0.mp3", f"ko_word_{wid}.mp3"):
+            p = DEFAULT_KO_NARRATION_SOUND_DIR / name
+            if p.is_file():
+                return str(p.resolve())
+        return ""
+
+    def _one_cn_follow_cycle_sec(self) -> float:
+        """중국어 1회 + gap + 따라발음(주황) + gap."""
+        sl = max(0.0, float(self._auto_sound_len))
+        return sl + _AUTO_SOUND_GAP_SEC + sl * _AUTO_WAIT_SOUND_LEN_SCALE + _AUTO_SOUND_GAP_SEC
+
+    def _try_begin_extra_cn_follow_cycle(self) -> bool:
+        """단어 타임라인에 여유가 있으면 TTS 없이 중국어→따라발음만 한 번 더."""
+        remain = max(0.0, float(self._auto_word_target_duration) - float(self._auto_word_elapsed))
+        need = self._one_cn_follow_cycle_sec()
+        if remain < need * 0.9:
+            return False
+        self._auto_cycle_index = 0
+        self._begin_phase("play_sound", self._auto_sound_len)
+        return True
+
     def _begin_phase(self, phase: str, duration: float) -> None:
         self._auto_phase = phase
         self._auto_phase_duration = max(0.0, float(duration))
         self._auto_phase_elapsed = 0.0
-        if phase == "play_sound" and self._auto_sound_path:
+        if phase == "play_meaning_ko" and self._auto_meaning_ko_path:
+            self._play_sound_now(self._auto_meaning_ko_path)
+        elif phase == "play_sound" and self._auto_sound_path:
             self._play_sound_now(self._auto_sound_path)
 
     def _sync_hanzi_anim_for_selected_word(self) -> None:
@@ -610,13 +887,24 @@ class VocabularyStudio:
             self._auto_sound_len = raw_sound_len
         self._auto_cycle_index = 0
         self._auto_word_elapsed = 0.0
+        self._auto_meaning_ko_path = self._resolve_vocab_meaning_ko_path(cur.word_id)
+        self._auto_meaning_ko_len = (
+            self._get_sound_length_sec(self._auto_meaning_ko_path)
+            if self._auto_meaning_ko_path
+            else 0.0
+        )
+        meaning_lead_sec = (
+            (self._auto_meaning_ko_len + _AUTO_MEANING_GAP_SEC)
+            if self._auto_meaning_ko_len > 1e-6
+            else 0.0
+        )
         sound_cycle_duration = (
             self._auto_sound_len
             + _AUTO_SOUND_GAP_SEC
             + (self._auto_sound_len * _AUTO_WAIT_SOUND_LEN_SCALE)
             + _AUTO_SOUND_GAP_SEC
         )
-        sound_total_duration = sound_cycle_duration * _AUTO_SOUND_REPEAT_COUNT
+        sound_total_duration = meaning_lead_sec + sound_cycle_duration * _AUTO_SOUND_REPEAT_COUNT
         hanzi_total_duration = self._hanzi_animator.total_duration_sec()
         similarity_ratio = 0.0
         if sound_cycle_duration > 1e-6 and hanzi_total_duration > 1e-6:
@@ -629,7 +917,11 @@ class VocabularyStudio:
             hanzi_total_duration * 2.0 if self._auto_hanzi_replay_enabled else hanzi_total_duration
         )
         self._auto_word_target_duration = max(sound_total_duration, hanzi_target_duration)
-        self._begin_phase("play_sound", self._auto_sound_len)
+        if self._auto_meaning_ko_len > 1e-6:
+            self._begin_phase("play_meaning_ko", self._auto_meaning_ko_len)
+        else:
+            self._auto_cycle_index = 0
+            self._begin_phase("play_sound", self._auto_sound_len)
 
     def _advance_to_next_word_or_done(self, rows_count: int) -> None:
         if self._selected_index >= rows_count - 1:
@@ -656,6 +948,21 @@ class VocabularyStudio:
             return
 
         self._auto_word_elapsed += dt
+
+        if self._auto_phase == "play_meaning_ko":
+            self._auto_phase_elapsed += dt
+            if self._auto_phase_elapsed < self._auto_phase_duration:
+                return
+            self._begin_phase("wait_after_meaning_ko", _AUTO_MEANING_GAP_SEC)
+            return
+
+        if self._auto_phase == "wait_after_meaning_ko":
+            self._auto_phase_elapsed += dt
+            if self._auto_phase_elapsed < self._auto_phase_duration:
+                return
+            self._auto_cycle_index = 0
+            self._begin_phase("play_sound", self._auto_sound_len)
+            return
 
         if self._auto_phase == "play_sound":
             self._auto_phase_elapsed += dt
@@ -685,6 +992,8 @@ class VocabularyStudio:
             if self._auto_cycle_index + 1 < _AUTO_SOUND_REPEAT_COUNT:
                 self._auto_cycle_index += 1
                 self._begin_phase("play_sound", self._auto_sound_len)
+                return
+            if self._try_begin_extra_cn_follow_cycle():
                 return
             remain = max(0.0, self._auto_word_target_duration - self._auto_word_elapsed)
             if remain > 1e-6:
@@ -839,117 +1148,40 @@ class VocabularyStudio:
         lower_h = main_h - upper_h
         pygame.draw.line(screen, (55, 55, 62), (right_x, lower_top), (w, lower_top), 1)
 
-        pinyin = self._pronunciation_subline(cur)
-        meaning_items = self._parse_meaning_items((word.meaning or "").strip() if word else "")
         pos_items = self._parse_pos_items((word.pos or "").strip() if word else "")
-        hero_text = self._hanzi_only(cur)
-
-        # 요청 UI: 병음(빨강) → 한자(흰색, 가장 크게) → 뜻(회색) → 품사(회색), 모두 가운데 정렬
-        # 품사는 전용 폰트(대형)로 렌더링한다.
         center_x = right_rect.x + right_rect.width // 2
-        top_pad = 14
-        block_items: list[tuple[pygame.Surface, int]] = []
-
-        def compose_inline_row(
-            items: list[tuple[str, tuple[int, int, int]]],
-            font: pygame.font.Font,
-            item_gap: int,
-        ) -> Optional[pygame.Surface]:
-            rendered = [font.render(text, True, color) for text, color in items if text]
-            if not rendered:
-                return None
-            if len(rendered) == 1:
-                return rendered[0]
-            total_w = sum(s.get_width() for s in rendered) + item_gap * (len(rendered) - 1)
-            row_h = max(s.get_height() for s in rendered)
-            row = pygame.Surface((max(1, total_w), max(1, row_h)), pygame.SRCALPHA)
-            x = 0
-            for idx, surf in enumerate(rendered):
-                y = (row_h - surf.get_height()) // 2
-                row.blit(surf, (x, y))
-                x += surf.get_width()
-                if idx < len(rendered) - 1:
-                    x += item_gap
-            return row
-
-        if pinyin:
-            pinyin_surf = self._render_pinyin_surface(pinyin)
-            if pinyin_surf is not None:
-                block_items.append((pinyin_surf, 16))
-        block_items.append((self._font_cn_hero_detail.render(hero_text, True, WHITE), 24))
-        meaning_row = compose_inline_row(
-            [(meaning, GRAY_MUTED) for meaning in meaning_items],
-            self._font_kr_detail,
-            item_gap=36,
+        karaoke_rect = pygame.Rect(
+            right_x + 24,
+            main_top + 12,
+            max(80, right_w - 48),
+            max(80, upper_h - 24),
         )
-        if meaning_row is not None:
-            block_items.append((meaning_row, 12))
-        pos_row = compose_inline_row(
-            [(pos, _POS_COLOR_TABLE.get(pos, _POS_DEFAULT_COLOR)) for pos in pos_items],
-            self._font_kr_pos_detail,
-            item_gap=36,
+        karaoke_mode, _, _ = self._vocab_karaoke_timing()
+        cn_layout = self._draw_vocab_cn_detail_block(
+            screen,
+            center_x=center_x,
+            main_top=main_top,
+            upper_h=upper_h,
+            row=cur,
+            cn_karaoke_active=bool(karaoke_mode),
         )
-        if pos_row is not None:
-            block_items.append((pos_row, 0))
-
-        total_h = 0
-        for idx, (surf, gap_after) in enumerate(block_items):
-            total_h += surf.get_height()
-            if idx < len(block_items) - 1:
-                total_h += gap_after
-        upper_center_y = main_top + (upper_h // 2)
-        start_y = max(main_top + top_pad, upper_center_y - total_h // 2)
-
-        draw_y = start_y
-        for idx, (surf, gap_after) in enumerate(block_items):
-            draw_x = center_x - (surf.get_width() // 2)
-            screen.blit(surf, (draw_x, draw_y))
-            draw_y += surf.get_height()
-            if idx < len(block_items) - 1:
-                draw_y += gap_after
-
-        # 진행 게이지:
-        # - 오디오 재생 구간: 파란색
-        # - 오디오 길이 대기 구간: 주황색
-        gauge_color: Optional[tuple[int, int, int]] = None
-        gauge_progress: float = 0.0
-        if not self._auto_started:
-            gauge_color = None
-        elif self._auto_phase == "play_sound":
-            gauge_color = (90, 220, 120)
-            gauge_progress = (
-                min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
-                if self._auto_phase_duration > 0
-                else 1.0
+        meta_layout = self._draw_vocab_meaning_pos_block(
+            screen,
+            center_x=center_x,
+            cn_layout=cn_layout,
+            lower_top=lower_top,
+            word=word,
+            pos_items=pos_items,
+        )
+        text_layout = {**cn_layout, **meta_layout}
+        if karaoke_mode:
+            self._draw_vocab_karaoke(
+                screen,
+                karaoke_rect=karaoke_rect,
+                layout=text_layout,
+                row=cur,
+                word=word,
             )
-        elif self._auto_phase == "wait_after_play":
-            gauge_color = (90, 220, 120)
-            gauge_progress = 1.0
-        elif self._auto_phase == "wait_sound_len":
-            gauge_color = (255, 170, 85)
-            gauge_progress = (
-                min(1.0, max(0.0, self._auto_phase_elapsed / self._auto_phase_duration))
-                if self._auto_phase_duration > 0
-                else 1.0
-            )
-        elif self._auto_phase == "wait_after_len":
-            gauge_color = (255, 170, 85)
-            gauge_progress = 1.0
-        elif self._auto_phase == "wait_sync_hold":
-            gauge_color = (255, 170, 85)
-            gauge_progress = 1.0
-        if gauge_color is not None:
-            gauge_w = min(max(140, int(right_w * 0.62)), max(140, right_w - 60))
-            gauge_x = right_x + (right_w - gauge_w) // 2
-            gauge_y = int(draw_y + _GAUGE_PAD_TOP)
-            gauge_y = min(gauge_y, lower_top - _GAUGE_H - 8)
-            gauge_y = max(main_top + 6, gauge_y)
-            gauge_bg = pygame.Rect(gauge_x, gauge_y, gauge_w, _GAUGE_H)
-            pygame.draw.rect(screen, (55, 55, 62), gauge_bg, border_radius=8)
-            fill_w = int(gauge_w * min(1.0, max(0.0, gauge_progress)))
-            if fill_w > 0:
-                gauge_fg = pygame.Rect(gauge_x, gauge_y, fill_w, _GAUGE_H)
-                pygame.draw.rect(screen, gauge_color, gauge_fg, border_radius=8)
 
         # --- 하단: 연상 이미지 | 획순 슬롯 ---
         slot_y = lower_top + _LOWER_SLOTS_TOP_PAD

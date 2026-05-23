@@ -703,6 +703,8 @@ class ClipScene:
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
                     self._stop_learn_background_only()
+                    if self._is_vocabulary_clip() and self._try_vocab_extra_cn_follow_cycle():
+                        return
                     if self._should_post_follow_along_hold():
                         self._enter_post_follow_along_hold()
                     else:
@@ -933,6 +935,38 @@ class ClipScene:
         except (TypeError, ValueError):
             return 0.0
 
+    def _word_video_remaining_sec(self) -> float:
+        """단어 mp4 타임라인 잔여(초). 동결·미시작이면 0."""
+        if not self._word_video_started or self._word_video_frozen_frame is not None:
+            return 0.0
+        if not self._word_video_player.has_source():
+            return 0.0
+        end_sec = max(0.0, float(self._word_video_player.get_effective_end_sec()))
+        return max(0.0, end_sec - float(self._word_video_clock))
+
+    def _vocab_cn_follow_cycle_sec(self) -> float:
+        """중국어 N회 + 따라해보세요 + BG 따라발음 1사이클 추정 길이."""
+        cn = max(0.1, float(self._sentence_sound_duration or self._sound_once_duration))
+        target = max(1, int(self._vocab_sound_repeat_target()))
+        follow = max(2.5, float(self._sound_once_duration) if self._learn_round == 3 else 2.5)
+        bg = max(
+            float(SHORTS_BG_PRACTICE_MIN_SEC),
+            cn + float(SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC),
+        )
+        return target * cn + follow + bg + 1.0
+
+    def _try_vocab_extra_cn_follow_cycle(self) -> bool:
+        """word_video 잔여 시간이 있으면 뜻 TTS 없이 중국어→따라발음만 반복."""
+        remain = self._word_video_remaining_sec()
+        need = self._vocab_cn_follow_cycle_sec()
+        if remain < need * 0.85:
+            return False
+        self._learn_round = 0
+        self._learn_elapsed = 0.0
+        self._sound_play_count = 0
+        self._start_sentence_play(play_index=1)
+        return True
+
     def _enter_vocab_gap(self) -> None:
         self._stop_learn_audio()
         self._stage = ClipStage.VOCAB_GAP
@@ -941,8 +975,13 @@ class ClipScene:
 
     def _advance_learn_voice_step(self) -> None:
         if self._is_vocabulary_clip():
-            if self._sound_play_count < self._vocab_sound_repeat_target():
+            target = self._vocab_sound_repeat_target()
+            if self._sound_play_count < target:
                 self._start_sentence_play(play_index=self._sound_play_count + 1)
+            elif self._learn_round < 3:
+                self._start_follow_along_voice()
+            elif self._learn_round == 3:
+                self._start_bg_practice()
             else:
                 self._finish_learn_sequence()
             return
@@ -1130,8 +1169,6 @@ class ClipScene:
     def _learn_overlay_subtitle(self) -> str:
         """학습 구간 비디오 하단 안내 자막( KO 내레이션 cue 와 별도 )."""
         if self._stage != ClipStage.LEARN_PLAY:
-            return ""
-        if self._is_vocabulary_clip():
             return ""
         if self._learn_round in (1, 2):
             return SHORTS_NATIVE_LISTEN_LABEL
@@ -1592,12 +1629,13 @@ class ClipScene:
         ):
             self._draw_pinned_video(screen, zones)
 
+        meaning_karaoke: Optional[tuple[float, float]] = None
         if show_karaoke:
             k_elapsed, k_dur = self._learn_karaoke_timing()
             if self._stage == ClipStage.VOCAB_MEANING_KO:
-                # 뜻 TTS 구간: 한자·병음 전체 표시(노래방 0%는 빈 화면처럼 보임)
-                k_dur = max(1.0, float(k_dur))
-                k_elapsed = k_dur
+                k_elapsed = float(self._ko_cue_elapsed)
+                k_dur = max(1e-6, float(self._ko_cue_duration))
+                meaning_karaoke = (k_elapsed, k_dur)
             clip_rect = (
                 zones.vocab_middle_draw_clip()
                 if self._is_vocabulary_clip()
@@ -1616,6 +1654,7 @@ class ClipScene:
                     sound_duration_sec=k_dur,
                     style=self._style,
                     hook_title=self._hook_title,
+                    vocab_meaning_karaoke=meaning_karaoke,
                 )
             finally:
                 screen.set_clip(None)
