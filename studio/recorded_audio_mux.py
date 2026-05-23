@@ -49,6 +49,7 @@ def _is_background_insert_path(path: str) -> bool:
         "/resource/sound/background/" in norm
         or "/resource/sound/bg/" in norm
         or "/resource/sound/follow/" in norm
+        or "/ko_sub_" in norm
     )
 
 

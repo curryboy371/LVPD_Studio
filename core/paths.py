@@ -29,6 +29,8 @@ DEFAULT_KO_NARRATION_LINES_CSV = _RESOURCE_CSV_DIR / "ko_narration_lines.csv"
 # 숏츠 한국어 TTS 배치(batch_ko_tts) 산출 mp3·timeline JSON
 DEFAULT_KO_NARRATION_SOUND_DIR = _REPO_ROOT / "resource" / "sound" / "shorts"
 LEGACY_KO_NARRATION_SOUND_DIR = _REPO_ROOT / "resource" / "sound"
+# 회화 PRACTICE sub_sentences.alt_translation TTS (batch_tts 모드 1)
+CONVERSATION_SUB_KO_SOUND_DIR = _REPO_ROOT / "resource" / "sound" / "sentense"
 
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "output"
 
@@ -96,3 +98,8 @@ STUDIO_VIDEO_EXTRACT_MP3_LAME_Q = 0
 
 def get_repo_root() -> Path:
     return _REPO_ROOT
+
+
+def conversation_sub_ko_mp3_path(sub_sentence_id: int) -> Path:
+    """회화 sub 문장 한국어 번역 TTS: ko_sub_{id}.mp3"""
+    return CONVERSATION_SUB_KO_SOUND_DIR / f"ko_sub_{int(sub_sentence_id)}.mp3"

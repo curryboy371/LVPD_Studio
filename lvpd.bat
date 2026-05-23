@@ -202,10 +202,11 @@ echo   lvpd.bat 7 [topic]     숏츠 회화 F5
 echo   lvpd.bat 8 [topic]     단어장 F5
 echo   lvpd.bat 9 [topic]     회화 F5
 echo   lvpd.bat f5 shorts-vocab bao
-echo   lvpd.bat tts 1 1-3 1001   숏츠단어 - ko 인트로 set 1001
-echo   lvpd.bat tts 1 set 1001   위와 동일
-echo   lvpd.bat tts 1 id 3       clips 행 id -^> 단어 뜻
-echo   lvpd.bat tts 1 topic jingyesi   topic -^> 단어 뜻
+echo   lvpd.bat tts 1 fruit_store     회화 topic -^> ko_sub_*.mp3
+echo   lvpd.bat tts 2 hair            단어장 topic -^> ko_word_*
+echo   lvpd.bat tts 3 1001            숏츠 회화 ko set
+echo   lvpd.bat tts 4 topic jingyesi  숏츠 단어 topic
+echo   lvpd.bat tts 4 set 1001        숏츠 단어 인트로 set
 echo   lvpd.bat csv / tts / run / audio / hanzi
 echo.
 if not "%SKIP_PAUSE%"=="1" pause
@@ -242,6 +243,7 @@ goto :eof
 call :setup_py
 echo.
 echo [한자 프레임]
+%_PY% -m pip install -q playwright 2>nul
 %_PY% tools\hanzi\render_svg_frames.py --skip-existing %*
 goto :eof
 

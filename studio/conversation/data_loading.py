@@ -986,6 +986,18 @@ def _attach_sub_variants_to_base_rows(
             if alt_sound_path and not os.path.isabs(alt_sound_path):
                 alt_sound_path = str(_REPO_ROOT / alt_sound_path.replace("\\", "/"))
 
+            alt_ko_sound_path = ""
+            try:
+                from core.paths import conversation_sub_ko_mp3_path
+
+                sub_row_id = int(v.get("id") or 0)
+                if sub_row_id > 0:
+                    ko_mp3 = conversation_sub_ko_mp3_path(sub_row_id)
+                    if ko_mp3.is_file():
+                        alt_ko_sound_path = str(ko_mp3.resolve())
+            except Exception:
+                alt_ko_sound_path = ""
+
             replaced_sentence = _replace_multiple_slots_in_raw_sentence(
                 raw_sentence,
                 replacements=[
@@ -1041,6 +1053,7 @@ def _attach_sub_variants_to_base_rows(
                 "replaced_sentence": replaced_sentence,
                 "alt_translation": str(v.get("alt_translation") or "").strip(),
                 "alt_sound_path": alt_sound_path,
+                "alt_ko_sound_path": alt_ko_sound_path,
             }
             # 추가/치환된 단어를 모두 하이라이트할 수 있도록 span 목록을 저장한다.
             spans: list[dict[str, int]] = []

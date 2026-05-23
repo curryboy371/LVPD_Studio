@@ -142,7 +142,13 @@ class ConversationStudio:
         )
         self._drawer = CommonDrawer(fonts=fonts)
 
-        def _record_insert_sound(path: str, *, snd: Any = None, duration_sec: float | None = None) -> None:
+        def _record_insert_sound(
+            path: str,
+            *,
+            snd: Any = None,
+            duration_sec: float | None = None,
+            timeline_sec: float | None = None,
+        ) -> None:
             """record 모드면 InsertSound 이벤트를 남긴다."""
             cfg = self._last_config
             log = getattr(cfg, "recording_log_event", None)
@@ -150,39 +156,119 @@ class ConversationStudio:
                 return
             try:
                 from studio.recording_events import InsertSound, recording_log_event
-                timeline_sec = float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
-                dur = float(duration_sec) if duration_sec is not None else float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
-                recording_log_event(log, InsertSound(timeline_sec=timeline_sec, path=path, duration_sec=dur))
+
+                tl = (
+                    float(timeline_sec)
+                    if timeline_sec is not None
+                    else float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+                )
+                dur = (
+                    float(duration_sec)
+                    if duration_sec is not None
+                    else float(getattr(snd, "get_length", lambda: 0.0)() or 0.0)
+                )
+                recording_log_event(log, InsertSound(timeline_sec=tl, path=path, duration_sec=dur))
             except Exception:
                 return
 
-        def _play_insert_voice(path: str, *, item: Any = None) -> None:
-            """학습 단계 삽입 음성을 재생하고, 녹화 모드면 타임라인 이벤트로 남긴다."""
-            _ = item
-            if not path:
+        _INSERT_VOICE_CHANNEL = 1
+
+        def _sound_length_sec(path: str) -> float:
+            if not path or not os.path.isfile(path):
+                return 0.0
+            try:
+                if pygame.mixer.get_init() is None:
+                    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                    pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+                return max(0.0, float(pygame.mixer.Sound(path).get_length() or 0.0))
+            except Exception:
+                return 0.0
+
+        def _wait_channel_idle(channel_index: int, *, timeout_sec: float) -> None:
+            import time
+
+            deadline = time.monotonic() + max(0.05, float(timeout_sec))
+            try:
+                ch = pygame.mixer.Channel(int(channel_index))
+            except Exception:
+                time.sleep(max(0.0, float(timeout_sec)))
                 return
+            while time.monotonic() < deadline:
+                try:
+                    if not ch.get_busy():
+                        return
+                except Exception:
+                    return
+                time.sleep(0.02)
+
+        def _play_insert_voice_on_channel(path: str, *, channel_index: int = _INSERT_VOICE_CHANNEL) -> float:
+            """삽입 음성 1개 재생 후 채널이 비워질 때까지 대기. 길이(초) 반환."""
+            if not path:
+                return 0.0
             try:
                 if pygame.mixer.get_init() is None:
                     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
                     pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             except Exception:
-                return
+                return 0.0
+            dur = _sound_length_sec(path)
             try:
                 snd = pygame.mixer.Sound(path)
             except Exception:
-                return
-            # mixer.music(VideoAudioPlayer)와 충돌 방지: 전용 채널 사용
+                return 0.0
             try:
-                ch = pygame.mixer.Channel(1)
+                ch = pygame.mixer.Channel(int(channel_index))
                 ch.play(snd)
             except Exception:
                 try:
                     snd.play()
                 except Exception:
-                    pass
+                    return 0.0
+            _wait_channel_idle(channel_index, timeout_sec=dur + 0.35)
+            return dur
 
-            _record_insert_sound(path, snd=snd)
+        def _play_insert_voice(path: str, *, item: Any = None) -> None:
+            """학습 단계 삽입 음성을 재생하고, 녹화 모드면 타임라인 이벤트로 남긴다."""
+            _ = item
+            if not path:
+                return
+            dur = _play_insert_voice_on_channel(path)
+            if dur > 0.0:
+                _record_insert_sound(path, duration_sec=dur)
+
+        def _start_listen_clip(path: str, *, item: Any = None) -> float:
+            """PRACTICE 듣기 클립 1개를 비동기 재생(채널 1). 녹화 시 InsertSound에 남긴다."""
+            _ = item
+            if not path:
+                return 0.0
+            path = str(path).replace("\\", "/")
+            if not os.path.isabs(path):
+                path = str(_REPO_ROOT / path.lstrip("/"))
+            if not os.path.isfile(path):
+                return 0.0
+            dur = _sound_length_sec(path)
+            if dur <= 1e-6:
+                return 0.0
+            try:
+                if pygame.mixer.get_init() is None:
+                    from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                    pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            except Exception:
+                return 0.0
+            try:
+                snd = pygame.mixer.Sound(path)
+                ch = pygame.mixer.Channel(int(_INSERT_VOICE_CHANNEL))
+                ch.play(snd)
+            except Exception:
+                try:
+                    snd.play()
+                except Exception:
+                    return 0.0
+            _record_insert_sound(path, duration_sec=dur)
+            return dur
 
         def _on_bg_sound_started(path: str, duration_sec: float) -> None:
             """회화 세션 배경음을 녹화 InsertSound에 포함한다."""
@@ -209,6 +295,7 @@ class ConversationStudio:
             style=learn_style,
             hold_sec=float(getattr(settings, "learning_hold_sec", 1.0) or 1.0),
             play_voice=_play_insert_voice,
+            start_listen_clip=_start_listen_clip,
             title_text=str(
                 getattr(settings, "learning_title_text", "문장 이해하기") or "문장 이해하기"
             ),
@@ -244,6 +331,7 @@ class ConversationStudio:
             video_player=self._video_player,
             style=practice_style,
             play_voice=_play_insert_voice,
+            start_listen_clip=_start_listen_clip,
             on_follow_sound_started=_on_follow_sound_started,
             is_recording=_is_recording_mode,
             title_text=str(

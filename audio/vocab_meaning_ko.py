@@ -399,6 +399,26 @@ def parse_word_id_list_field(raw: str) -> list[int]:
     return out
 
 
+def batch_build_vocab_meaning_ko_for_studio_topic(
+    topic: str,
+    *,
+    tts: str = "edge",
+    tts_voice: str = "ko-KR-SunHiNeural",
+    force_tts: bool = False,
+) -> tuple[int, int, int]:
+    """단어장 모드: vocabulary_word_rows.topic → words.csv 뜻 TTS (숏츠 CSV 무관)."""
+    pairs = collect_vocab_word_ids_from_vocabulary_rows(topic)
+    if not pairs:
+        logger.warning("vocabulary_word_rows에 topic=%s 없음", topic.strip())
+        return 0, 0, 0
+    return _batch_build_vocab_meaning_ko_for_pairs(
+        pairs,
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+
+
 def batch_build_vocab_meaning_ko_for_word_ids(
     word_ids: list[int],
     *,

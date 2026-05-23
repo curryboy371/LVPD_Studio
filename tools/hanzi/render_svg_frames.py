@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import csv
 import json
+import subprocess
 from pathlib import Path
 import sys
 
@@ -196,6 +197,30 @@ def _hanzi_frames_output_complete(out_dir: Path) -> bool:
         return False
 
 
+def _install_playwright_chromium() -> None:
+    print("[info] Playwright Chromium 다운로드 중... (최초 1회, 약 300MB)")
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        check=True,
+    )
+
+
+async def _launch_chromium(pw):
+    """Chromium headless 실행. 실행 파일 없으면 install 후 1회 재시도."""
+    from playwright.async_api import Error as PlaywrightError
+
+    try:
+        return await pw.chromium.launch(headless=True)
+    except PlaywrightError as ex:
+        msg = str(ex)
+        if "Executable doesn't exist" not in msg and "executable doesn't exist" not in msg.lower():
+            raise
+        print("[warn] Chromium 실행 파일이 없습니다.")
+        print("       python -m playwright install chromium")
+        _install_playwright_chromium()
+        return await pw.chromium.launch(headless=True)
+
+
 async def _amain(args) -> None:
     try:
         from playwright.async_api import async_playwright
@@ -224,7 +249,7 @@ async def _amain(args) -> None:
         return
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await _launch_chromium(pw)
         page = await browser.new_page(viewport={"width": args.size, "height": args.size})
         for svg_path in targets:
             code = svg_path.stem

@@ -57,6 +57,7 @@ class LearningScene(FSMConversationStep):
         style: SentenceStyleConfig,
         hold_sec: float = 1.0,
         play_voice: Callable[..., None] | None = None,
+        start_listen_clip: Callable[..., float] | None = None,
         title_text: str = "문장 이해하기",
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
@@ -74,6 +75,7 @@ class LearningScene(FSMConversationStep):
         self.drawer = drawer
         self.video_player = video_player
         self.play_voice = play_voice
+        self.start_listen_clip = start_listen_clip
         self.wait_for_sound_end = bool(wait_for_sound_end)
 
         # UI
@@ -208,29 +210,42 @@ class LearningScene(FSMConversationStep):
         self.drawer.fade_off(self.tip_intro_channel, self.tip_box_intro_fade_out_sec)
         return self.tip_box_intro_fade_out_sec
 
-    def _enter_play(self, stage: "LearningScene.Stage") -> float:
-        self.drawer.show_now(self.title_channel)
-        self.drawer.hide_now(self.tip_intro_channel)
-        self.drawer.show_now(self.sentence_channel)
-
-        path = str(self.current_item.get(self.stage_audio_keys[stage]) or "")
-        if path and self.play_voice:
-            try:
-                self.play_voice(path, item=self.current_item)
-            except Exception:
-                pass
-
+    @staticmethod
+    def _clip_duration_sec(path: str) -> float:
+        if not path:
+            return 0.0
         try:
             if pygame.mixer.get_init() is None:
                 from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
                 pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
-            sound_len = float(pygame.mixer.Sound(path).get_length())
-            self._current_play_total_sec = max(0.0, sound_len)
-            return sound_len
+            return max(0.0, float(pygame.mixer.Sound(path).get_length() or 0.0))
         except Exception:
-            self._current_play_total_sec = 0.0
             return 0.0
+
+    def _enter_play(self, stage: "LearningScene.Stage") -> float:
+        self.drawer.show_now(self.title_channel)
+        self.drawer.hide_now(self.tip_intro_channel)
+        self.drawer.show_now(self.sentence_channel)
+
+        path = str(self.current_item.get(self.stage_audio_keys[stage]) or "").strip()
+        sound_len = self._clip_duration_sec(path) if path else 0.0
+        if path:
+            if self.start_listen_clip is not None:
+                try:
+                    started = float(self.start_listen_clip(path, item=self.current_item) or 0.0)
+                    if started > 1e-6:
+                        sound_len = started
+                except Exception:
+                    pass
+            elif self.play_voice is not None:
+                try:
+                    self.play_voice(path, item=self.current_item)
+                except Exception:
+                    pass
+
+        self._current_play_total_sec = max(0.0, sound_len)
+        return self._current_play_total_sec
 
     def _enter_wait(self) -> float:
         return self.hold_sec

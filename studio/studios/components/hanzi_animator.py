@@ -121,10 +121,10 @@ class HanziAnimator:
             )
             if res.returncode != 0:
                 output = (res.stderr or res.stdout or "").strip()
-                if "No module named 'playwright'" in output:
+                if "No module named 'playwright'" in output or "Executable doesn't exist" in output:
                     logger.warning(
-                        "한자 프레임 자동 생성 실패 U+%04X: playwright 미설치. "
-                        "pip install playwright && python -m playwright install chromium",
+                        "한자 프레임 자동 생성 실패 U+%04X: playwright/Chromium 미설치. "
+                        "lvpd.bat → 5 또는: pip install playwright && python -m playwright install chromium",
                         codepoint,
                     )
                     return

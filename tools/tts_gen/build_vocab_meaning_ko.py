@@ -26,6 +26,7 @@ if str(_REPO) not in sys.path:
 
 from audio.vocab_meaning_ko import (
     batch_build_vocab_meaning_ko_for_clip_row_id,
+    batch_build_vocab_meaning_ko_for_studio_topic,
     batch_build_vocab_meaning_ko_for_topic,
     batch_build_vocab_meaning_ko_for_word_ids,
     parse_word_id_list_field,
@@ -45,7 +46,16 @@ def main() -> int:
         default=0,
         help="shorts_vocabulary_clips.csv 행 id (topic당 1행). word_id | 목록 처리",
     )
-    parser.add_argument("--topic", default="", help="예: fruit_store (--id·--word-id 없을 때)")
+    parser.add_argument(
+        "--topic",
+        default="",
+        help="숏츠 단어 클립 topic (shorts_vocabulary_clips). --studio-topic 과 동시 사용 불가",
+    )
+    parser.add_argument(
+        "--studio-topic",
+        default="",
+        help="단어장 모드 topic (vocabulary_word_rows → words 뜻 TTS)",
+    )
     parser.add_argument(
         "--word-id",
         default="",
@@ -58,8 +68,21 @@ def main() -> int:
     args = parser.parse_args()
 
     csv_path = args.csv or None
+    studio_topic = (args.studio_topic or "").strip()
+    if studio_topic and (args.topic or "").strip():
+        logger.error("--topic 과 --studio-topic 은 동시에 지정할 수 없습니다.")
+        return 1
+
     word_ids = parse_word_id_list_field(args.word_id or "")
-    if word_ids:
+    if studio_topic:
+        ok, skip, fail = batch_build_vocab_meaning_ko_for_studio_topic(
+            studio_topic,
+            tts=args.tts,
+            tts_voice=args.tts_voice,
+            force_tts=args.force,
+        )
+        label = f"studio-topic={studio_topic}"
+    elif word_ids:
         ok, skip, fail = batch_build_vocab_meaning_ko_for_word_ids(
             word_ids,
             tts=args.tts,
@@ -86,7 +109,7 @@ def main() -> int:
         )
         label = f"topic={args.topic.strip()}"
     else:
-        logger.error("--id, --topic, --word-id 중 하나가 필요합니다.")
+        logger.error("--id, --topic, --studio-topic, --word-id 중 하나가 필요합니다.")
         return 1
 
     logger.info("완료 %s: 생성=%d 스킵=%d 실패=%d", label, ok, skip, fail)
