@@ -100,6 +100,11 @@ def get_repo_root() -> Path:
     return _REPO_ROOT
 
 
-def conversation_sub_ko_mp3_path(sub_sentence_id: int) -> Path:
-    """회화 sub 문장 한국어 번역 TTS: ko_sub_{id}.mp3"""
+def conversation_sub_ko_mp3_path(base_id: int, sub_sentence_id: int) -> Path:
+    """회화 sub 한국어 TTS: ko_sub_{base_id}_{sub_id}.mp3 (base·변형별 1파일)."""
+    return CONVERSATION_SUB_KO_SOUND_DIR / f"ko_sub_{int(base_id)}_{int(sub_sentence_id)}.mp3"
+
+
+def conversation_sub_ko_mp3_path_legacy(sub_sentence_id: int) -> Path:
+    """구 산출물 ko_sub_{id}.mp3 — id만 쓰면 base_id 간 충돌 가능."""
     return CONVERSATION_SUB_KO_SOUND_DIR / f"ko_sub_{int(sub_sentence_id)}.mp3"

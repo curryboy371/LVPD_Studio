@@ -110,7 +110,7 @@ def batch_build_conversation_sub_ko_for_topic(
 
     ok = skip = fail = 0
     for sub_id, base_id, text in jobs:
-        out = conversation_sub_ko_mp3_path(sub_id)
+        out = conversation_sub_ko_mp3_path(base_id, sub_id)
         if not force_tts and out.is_file() and cached_cue_audio_usable(out):
             skip += 1
             continue
@@ -119,9 +119,9 @@ def batch_build_conversation_sub_ko_for_topic(
             if cached_cue_audio_usable(out):
                 ok += 1
                 logger.info(
-                    "sub_id=%s base_id=%s → %s (%s)",
-                    sub_id,
+                    "base_id=%s sub_id=%s → %s (%s)",
                     base_id,
+                    sub_id,
                     out.relative_to(get_repo_root()),
                     text[:48],
                 )

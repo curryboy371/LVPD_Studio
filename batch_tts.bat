@@ -66,7 +66,8 @@ echo   TTS 배치 (4단계)
 echo ========================================
 echo   1  회화 모드 - F5 conversation
 echo      topic -^> sub_sentences.alt_translation
-echo      산출: resource/sound/sentense/ko_sub_숫자.mp3
+echo      산출: resource/sound/sentense/ko_sub_baseId_subId.mp3
+echo      검증: python -m tools.tts_gen.verify_conversation_sub_ko --topic ^<topic^>
 echo.
 echo   2  단어장 모드 - F5 vocabulary
 echo      산출: resource/sound/shorts/ko_word_숫자.mp3

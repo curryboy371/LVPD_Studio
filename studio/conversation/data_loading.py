@@ -988,11 +988,18 @@ def _attach_sub_variants_to_base_rows(
 
             alt_ko_sound_path = ""
             try:
-                from core.paths import conversation_sub_ko_mp3_path
+                from core.paths import (
+                    conversation_sub_ko_mp3_path,
+                    conversation_sub_ko_mp3_path_legacy,
+                )
 
                 sub_row_id = int(v.get("id") or 0)
-                if sub_row_id > 0:
-                    ko_mp3 = conversation_sub_ko_mp3_path(sub_row_id)
+                if sub_row_id > 0 and sid > 0:
+                    ko_mp3 = conversation_sub_ko_mp3_path(sid, sub_row_id)
+                    if not ko_mp3.is_file():
+                        legacy = conversation_sub_ko_mp3_path_legacy(sub_row_id)
+                        if legacy.is_file():
+                            ko_mp3 = legacy
                     if ko_mp3.is_file():
                         alt_ko_sound_path = str(ko_mp3.resolve())
             except Exception:

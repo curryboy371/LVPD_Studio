@@ -1,7 +1,8 @@
 """
 회화 모드 TTS 배치 — topic별 sub_sentences.alt_translation.
 
-산출: resource/sound/sentense/ko_sub_{sub_sentences.id}.mp3
+산출: resource/sound/sentense/ko_sub_{base_id}_{sub_id}.mp3
+검증: python -m tools.tts_gen.verify_conversation_sub_ko --topic <topic>
 """
 from __future__ import annotations
 
