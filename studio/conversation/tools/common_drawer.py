@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Optional
 
 import pygame
@@ -298,6 +298,74 @@ class CommonDrawer:
             y_base=y_base + int(y_offset_px),
             style=style,
             align=align,
+        )
+
+    def draw_item_sentence_hanzi_karaoke(
+        self,
+        screen: pygame.Surface,
+        item: ConversationItemLike,
+        *,
+        ctx: FrameContext,
+        channel: str,
+        style: SentenceStyleConfig,
+        elapsed_sec: float,
+        duration_sec: float,
+        segments: list[tuple[str, tuple[int, int, int]]] | None = None,
+        align: Align = "center",
+        align_v: AlignV = "center",
+        top_y_ratio: float = 0.12,
+        bottom_margin_px: int = 48,
+        title_clearance: Optional[tuple[str, float, int]] = None,
+        y_offset_px: int = 0,
+    ) -> None:
+        """병음·번역은 정적, 한자만 회색→구간색 노래방(PLAY_L1/L2 등)."""
+        key = self._sentence_item_cache_key(item)
+        cached = self._sentence_data_cache.get(key)
+        if cached is not None:
+            data = cached
+        else:
+            data = build_sentence_render_data_with_tone_icons(item)
+            self._sentence_data_cache.put(key, data)
+        center_y_ratio = self.ITEM_SENTENCE_CENTER_Y_RATIO if align_v == "center" else 0.43
+        y_base = self.layout_sentence_y_base(
+            ctx,
+            data,
+            style,
+            align_v=align_v,
+            center_y_ratio=center_y_ratio,
+            top_y_ratio=top_y_ratio,
+            bottom_margin_px=bottom_margin_px,
+            title_clearance=title_clearance,
+        ) + int(y_offset_px)
+        center_x = int(ctx.width) // 2
+        alpha = int(max(0, min(255, self.fade_alpha(str(channel or "").strip()))))
+        self.draw_sentence(
+            screen,
+            replace(data, sentence=""),
+            channel=channel,
+            center_x=center_x,
+            y_base=y_base,
+            style=style,
+            align=align,
+        )
+        hanzi = (data.sentence or "")[: style.text.max_hanzi]
+        if not (hanzi or "").strip() or alpha <= 0:
+            return
+        line_ys = self.compute_sentence_line_ys(y_base, data, style)
+        if "hanzi" not in line_ys:
+            return
+        segs = segments
+        if not segs:
+            segs = [(hanzi, style.colors.hanzi_color)]
+        self.draw_hanzi_karaoke_wipe_segments(
+            screen,
+            segs,
+            center_x=center_x,
+            y=int(line_ys["hanzi"]),
+            elapsed_sec=elapsed_sec,
+            duration_sec=duration_sec,
+            min_margin_x=style.layout.min_margin_x,
+            alpha=alpha,
         )
 
     def draw_item_title(

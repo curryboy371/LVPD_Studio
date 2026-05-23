@@ -301,19 +301,44 @@ class LearningScene(FSMConversationStep):
     # ------------------------
     # Render
     # ------------------------
+    def _hanzi_karaoke_timing(self) -> tuple[bool, float, float]:
+        """PLAY_L1/PLAY_L2 sound_lv 재생 구간 (active, elapsed, duration)."""
+        if self.stage not in (self.Stage.PLAY_L1, self.Stage.PLAY_L2):
+            return False, 0.0, 0.0
+        total_sec = max(0.0, float(self._current_play_total_sec))
+        if total_sec <= 1e-6:
+            return False, 0.0, 0.0
+        remaining_sec = max(0.0, float(self.timer))
+        elapsed_sec = min(total_sec, max(0.0, total_sec - remaining_sec))
+        return True, elapsed_sec, total_sec
+
     def render(self, screen: pygame.Surface, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         frame = self.bg_frame or self.video_player.get_frame(ctx.width, ctx.height)
         if frame:
             screen.blit(frame, (0, 0))
 
-        self.drawer.draw_item_sentence(
-            screen,
-            item,
-            ctx=ctx,
-            channel=self.sentence_channel,
-            style=self.style,
-            title_clearance=(self.title_text, 0.12, 12),
-        )
+        karaoke_active, k_elapsed, k_dur = self._hanzi_karaoke_timing()
+        title_clearance = (self.title_text, 0.12, 12)
+        if karaoke_active:
+            self.drawer.draw_item_sentence_hanzi_karaoke(
+                screen,
+                item,
+                ctx=ctx,
+                channel=self.sentence_channel,
+                style=self.style,
+                elapsed_sec=k_elapsed,
+                duration_sec=k_dur,
+                title_clearance=title_clearance,
+            )
+        else:
+            self.drawer.draw_item_sentence(
+                screen,
+                item,
+                ctx=ctx,
+                channel=self.sentence_channel,
+                style=self.style,
+                title_clearance=title_clearance,
+            )
 
         self._draw_title(screen, ctx=ctx)
         if self.stage in (self.Stage.INTRO_TIP_IN, self.Stage.INTRO_TIP_OUT):
