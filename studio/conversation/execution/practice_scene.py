@@ -191,6 +191,9 @@ class PracticeScene(IConversationStep):
         self._sub_slide_in_elapsed = 0.0
         self._sub_play_started_mono_sec: float = 0.0
         self._sub_all_variants_finished: bool = False
+        self._sub_render_item_cache_key: tuple | None = None
+        self._sub_render_item_cached: ConversationItemLike | None = None
+        self._clip_duration_cache: dict[str, float] = {}
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
         self.drawer.hide_now(self._tip_intro_channel)
@@ -227,6 +230,11 @@ class PracticeScene(IConversationStep):
             self._sub_play_started_mono_sec = 0.0
             self._sub_all_variants_finished = False
             self._practice_stage_log_last = None
+            self._invalidate_sub_render_cache()
+
+    def _invalidate_sub_render_cache(self) -> None:
+        self._sub_render_item_cache_key = None
+        self._sub_render_item_cached = None
 
     def _sub_playing_elapsed_sec(self) -> float:
         """playing 단계 경과(초). 프레임 dt 누적 대신 monotonic 기준(녹화·0 dt에서도 진행)."""
@@ -331,6 +339,7 @@ class PracticeScene(IConversationStep):
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
             self._sub_all_variants_finished = False
+            self._invalidate_sub_render_cache()
             self._stop_follow_sound()
             self.drawer.hide_now(self._sentence_channel)
             self.drawer.hide_now(self._tip_intro_channel)
@@ -543,6 +552,16 @@ class PracticeScene(IConversationStep):
         """현재 `sub` 변형으로 `draw_item_sentence` / 하이라이트용 렌더 항목을 만든다."""
         if self._current_sub_variant is None or not isinstance(item, dict):
             return item
+        cache_key = (
+            self._playback_item_key(item),
+            self._sub_variant_index,
+            str(self._current_sub_variant.get("replaced_sentence") or ""),
+        )
+        if (
+            cache_key == self._sub_render_item_cache_key
+            and self._sub_render_item_cached is not None
+        ):
+            return self._sub_render_item_cached
         base_map = item
         replaced_sentence = str(self._current_sub_variant.get("replaced_sentence") or "").strip()
         pinyin_marks = str(self._current_sub_variant.get("pinyin_marks") or "").strip()
@@ -557,7 +576,7 @@ class PracticeScene(IConversationStep):
                     pinyin_phonetic = " ".join(pinyin_processor.get_phonetic_pinyin(replaced_sentence)).strip()
             except Exception:
                 pass
-        return {
+        rendered: ConversationItemLike = {
             **base_map,
             "sentence": [replaced_sentence],
             "translation": [str(self._current_sub_variant.get("alt_translation") or "").strip()],
@@ -566,6 +585,9 @@ class PracticeScene(IConversationStep):
             "pinyin_phonetic": pinyin_phonetic,
             "pinyin_lexical": pinyin_lexical,
         }
+        self._sub_render_item_cache_key = cache_key
+        self._sub_render_item_cached = rendered
+        return rendered
 
     @staticmethod
     def _resolve_sub_audio_path(variant: dict, key: str) -> str:
@@ -583,18 +605,22 @@ class PracticeScene(IConversationStep):
         self._sub_listen_ko_played = False
         self._sub_listen_cn_played = False
 
-    @staticmethod
-    def _clip_duration_sec(path: str) -> float:
+    def _clip_duration_sec(self, path: str) -> float:
         if not path:
             return 0.0
+        cached = self._clip_duration_cache.get(path)
+        if cached is not None:
+            return cached
         try:
             if pygame.mixer.get_init() is None:
                 from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
                 pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
-            return max(0.0, float(pygame.mixer.Sound(path).get_length() or 0.0))
+            dur = max(0.0, float(pygame.mixer.Sound(path).get_length() or 0.0))
         except Exception:
-            return 0.0
+            dur = 0.0
+        self._clip_duration_cache[path] = dur
+        return dur
 
     def _tick_sub_listen_audio(self, elapsed_sec: float) -> None:
         """playing 단계 경과 시간에 맞춰 ko 선행 → cn 재생(초록 게이지는 cn 구간만)."""

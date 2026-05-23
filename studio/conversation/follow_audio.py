@@ -84,6 +84,9 @@ class PracticeFollowSoundPlayer:
         if not self._sounds:
             return
         if self._playing:
+            # 녹화: 채널 없이 _playing만 켜지므로 매 프레임 InsertSound가 중복되지 않게 한다.
+            if self._recording_mode():
+                return
             ch = self._channel
             if ch is not None and ch.get_busy():
                 return

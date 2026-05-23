@@ -172,18 +172,35 @@ class ConversationStudio:
                 return
 
         _INSERT_VOICE_CHANNEL = 1
+        _sound_length_cache: dict[str, float] = {}
+
+        def _normalize_audio_path(path: str) -> str:
+            p = str(path or "").replace("\\", "/").strip()
+            if not p:
+                return ""
+            if not os.path.isabs(p):
+                p = str(_REPO_ROOT / p.lstrip("/"))
+            return p if os.path.isfile(p) else ""
 
         def _sound_length_sec(path: str) -> float:
-            if not path or not os.path.isfile(path):
+            if not path:
                 return 0.0
+            norm = _normalize_audio_path(path)
+            if not norm:
+                return 0.0
+            cached = _sound_length_cache.get(norm)
+            if cached is not None:
+                return cached
             try:
                 if pygame.mixer.get_init() is None:
                     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
                     pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
-                return max(0.0, float(pygame.mixer.Sound(path).get_length() or 0.0))
+                dur = max(0.0, float(pygame.mixer.Sound(norm).get_length() or 0.0))
             except Exception:
-                return 0.0
+                dur = 0.0
+            _sound_length_cache[norm] = dur
+            return dur
 
         def _wait_channel_idle(channel_index: int, *, timeout_sec: float) -> None:
             import time
@@ -235,6 +252,15 @@ class ConversationStudio:
             _ = item
             if not path:
                 return
+            # 녹화: mixer 재생·채널 idle 대기는 메인 루프를 멈춘 것처럼 만든다.
+            if _is_recording_mode():
+                norm = _normalize_audio_path(path)
+                if not norm:
+                    return
+                dur = _sound_length_sec(norm)
+                if dur > 1e-6:
+                    _record_insert_sound(norm, duration_sec=dur)
+                return
             dur = _play_insert_voice_on_channel(path)
             if dur > 0.0:
                 _record_insert_sound(path, duration_sec=dur)
@@ -255,14 +281,15 @@ class ConversationStudio:
             _ = item
             if not path:
                 return 0.0
-            path = str(path).replace("\\", "/")
-            if not os.path.isabs(path):
-                path = str(_REPO_ROOT / path.lstrip("/"))
-            if not os.path.isfile(path):
+            norm = _normalize_audio_path(path)
+            if not norm:
                 return 0.0
-            dur = _sound_length_sec(path)
+            dur = _sound_length_sec(norm)
             if dur <= 1e-6:
                 return 0.0
+            if _is_recording_mode():
+                _record_insert_sound(norm, duration_sec=dur)
+                return dur
             try:
                 if pygame.mixer.get_init() is None:
                     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
@@ -271,16 +298,16 @@ class ConversationStudio:
             except Exception:
                 return 0.0
             try:
-                snd = pygame.mixer.Sound(path)
+                snd = pygame.mixer.Sound(norm)
                 ch = pygame.mixer.Channel(int(_INSERT_VOICE_CHANNEL))
-                ch.set_volume(max(0.0, min(2.0, _insert_voice_volume(path))))
+                ch.set_volume(max(0.0, min(2.0, _insert_voice_volume(norm))))
                 ch.play(snd)
             except Exception:
                 try:
                     snd.play()
                 except Exception:
                     return 0.0
-            _record_insert_sound(path, duration_sec=dur)
+            _record_insert_sound(norm, duration_sec=dur)
             return dur
 
         def _on_bg_sound_started(path: str, duration_sec: float) -> None:
