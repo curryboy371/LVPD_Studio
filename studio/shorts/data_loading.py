@@ -157,7 +157,7 @@ def _merge_word_into_clip(clip: dict[str, Any], word: Any, repo: Path) -> None:
     clip["word_img_path"] = _resolve_path(repo, (word.img_path or "").strip())
     clip["word_video_path"] = _resolve_path(repo, (getattr(word, "video_path", None) or "").strip())
     clip["word_pos"] = pos
-    clip["word_tip"] = (getattr(word, "tip", None) or "").strip()
+    clip["word_tip"] = (getattr(word, "tip", None) or "").strip().replace("\\n", "\n")
 
     sound = (clip.get("sound_path") or "").strip()
     if not sound:
@@ -377,6 +377,38 @@ def parse_vocab_int_list_field(
     return vals[:word_count]
 
 
+def _parse_bool_token(part: str, *, default: bool) -> bool:
+    s = str(part or "").strip().lower()
+    if not s:
+        return default
+    if s in ("1", "true", "yes", "y", "on", "t"):
+        return True
+    if s in ("0", "false", "no", "n", "off", "f"):
+        return False
+    return default
+
+
+def parse_vocab_bool_list_field(
+    raw: str,
+    word_count: int,
+    *,
+    default: bool = True,
+) -> list[bool]:
+    """`| ` 구분 bool. 1개면 모든 단어 동일. true/1/yes → 뜻 TTS 재생."""
+    if word_count < 1:
+        return []
+    parts = _split_pipe_field(raw)
+    if not parts:
+        return [default] * word_count
+
+    vals: list[bool] = [_parse_bool_token(p, default=default) for p in parts]
+    if len(vals) == 1:
+        return vals * word_count
+    if len(vals) < word_count:
+        vals.extend([vals[-1]] * (word_count - len(vals)))
+    return vals[:word_count]
+
+
 def parse_vocab_float_list_field(
     raw: str,
     word_count: int,
@@ -530,6 +562,11 @@ def build_shorts_vocabulary_clip_list(
             len(word_ids),
             default=0.0,
         )
+        read_meaning_ko_flags = parse_vocab_bool_list_field(
+            row.get("read_meaning_ko") or "",
+            len(word_ids),
+            default=True,
+        )
 
         for wi, word_id in enumerate(word_ids, start=1):
             word_clip_id = _vocab_word_clip_id(topic_row_id, wi)
@@ -564,6 +601,7 @@ def build_shorts_vocabulary_clip_list(
             clip["hook_title"] = hook_titles[wi - 1]
             clip["sound_repeat_count"] = sound_repeat_counts[wi - 1]
             clip["after_sound_delay_sec"] = after_sound_delays[wi - 1]
+            clip["read_meaning_ko"] = read_meaning_ko_flags[wi - 1]
             word = get_word(word_id)
             if word is None:
                 logger.warning(
@@ -656,6 +694,7 @@ def _build_vocab_clips_from_vocabulary_word_rows(
         if not clip["sentence"]:
             continue
         clip["topic_intro"] = {}
+        clip["read_meaning_ko"] = True
         out.append(clip)
     return out
 

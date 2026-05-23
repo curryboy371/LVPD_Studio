@@ -23,6 +23,8 @@ from studio.shorts.constants import (
     shorts_vocab_pos_after_hanzi_gap,
     shorts_vocab_pos_line_height,
     shorts_vocab_tip_font_pt,
+    shorts_vocab_tip_line_gap,
+    parse_vocab_tip_lines,
     HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
     KO_KARAOKE_ACTIVE,
@@ -453,30 +455,43 @@ class ShortsDrawer:
         y: int,
         text: str,
         fade_alpha: int = 255,
+        frame_height: int = 0,
     ) -> None:
-        """숏츠 단어: 뜻 TTS 자막 아래 tip (한글·한자 글자별 폰트, 흰색)."""
-        tip = (text or "").strip()
-        if not tip or fade_alpha <= 0:
+        """숏츠 단어: 뜻 TTS 자막 아래 tip (한글·한자 글자별 폰트, 흰색). `\\n` 줄바꿈."""
+        lines = parse_vocab_tip_lines(text)
+        if not lines or fade_alpha <= 0:
             return
-        from utils.fonts import blit_mixed_kr_cn_centered, load_font_chinese_for_tip, load_font_korean
+        from utils.fonts import load_font_chinese_for_tip, load_font_korean, render_mixed_kr_cn_line
 
+        fh = max(1, int(frame_height) or screen.get_height())
         pt = shorts_vocab_tip_font_pt(ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr))
         color = (255, 255, 255)
         if not hasattr(self, "_tip_font_pt") or self._tip_font_pt != pt:
             self._tip_font_pt = pt
             self._tip_font_kr = load_font_korean(pt, color)
             self._tip_font_cn = load_font_chinese_for_tip(pt, color)
-        blit_mixed_kr_cn_centered(
-            screen,
-            center_x=center_x,
-            y=y,
-            text=tip,
-            size=pt,
-            color=color,
-            fade_alpha=fade_alpha,
-            font_kr=getattr(self, "_tip_font_kr", None),
-            font_cn=getattr(self, "_tip_font_cn", None),
-        )
+        font_kr = getattr(self, "_tip_font_kr", None)
+        font_cn = getattr(self, "_tip_font_cn", None)
+        alpha = max(0, min(255, int(fade_alpha)))
+        line_gap = shorts_vocab_tip_line_gap(fh)
+        y_cur = int(y)
+        for i, line in enumerate(lines):
+            surf = render_mixed_kr_cn_line(
+                line,
+                size=pt,
+                color=color,
+                font_kr=font_kr,
+                font_cn=font_cn,
+            )
+            if surf is None:
+                continue
+            if alpha < 255:
+                surf = surf.copy()
+                surf.set_alpha(alpha)
+            screen.blit(surf, (int(center_x) - surf.get_width() // 2, y_cur))
+            y_cur += surf.get_height()
+            if i < len(lines) - 1:
+                y_cur += line_gap
 
     def draw_ko_subtitle_overlay(
         self,

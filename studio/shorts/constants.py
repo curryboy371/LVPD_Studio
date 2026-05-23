@@ -64,6 +64,8 @@ SHORTS_VOCAB_CN_BELOW_IMAGE_GAP = 12
 SHORTS_VOCAB_CN_ABOVE_MEANING_GAP = 12
 # tip 글자 크기 (ko_subtitle 대비)
 SHORTS_VOCAB_TIP_FONT_RATIO = 0.78
+# tip 줄 간격 (1080×1920 기준, `\n` 줄바꿈)
+SHORTS_VOCAB_TIP_LINE_GAP = 6
 # 훅 타이틀 하단 ↔ 연상 이미지 상단 간격 (1080×1920 기준)
 SHORTS_VOCAB_BELOW_HOOK_GAP = 4
 # 훅 타이틀 제외 — 단어 모드 본문(병음·한자·품사·뜻) y 보정 (1080×1920, 양수=아래)
@@ -208,6 +210,21 @@ def shorts_vocab_tip_line_height(
     sy = h / float(SHORTS_HEIGHT)
     pt = shorts_vocab_tip_font_pt(ko_subtitle_pt=ko_subtitle_pt)
     return max(20, int(int(pt) * 1.15 * sy))
+
+
+def shorts_vocab_tip_line_gap(frame_height: int) -> int:
+    """tip 여러 줄(`\\n`) 사이 간격."""
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(2, int(SHORTS_VOCAB_TIP_LINE_GAP * sy))
+
+
+def parse_vocab_tip_lines(text: str) -> list[str]:
+    """words.csv tip — `\\n` 또는 실제 줄바꿈."""
+    raw = (text or "").replace("\\n", "\n").strip()
+    if not raw:
+        return []
+    return [ln.strip() for ln in raw.split("\n") if ln.strip()]
 
 
 def shorts_vocab_meaning_to_tip_gap(frame_height: int) -> int:

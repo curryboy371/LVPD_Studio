@@ -487,23 +487,51 @@ class ClipScene:
         )
         return slot, inner
 
-    def _draw_word_video_in_slot(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
-        if not self._has_word_video():
-            return
+    def _use_vocab_media_slot_for_video(self) -> bool:
+        """단어 숏츠 topic 인트로 — middle 중앙이 아닌 연상 이미지·단어 비디오 슬롯."""
+        return bool(self._topic_intro_mode and self._is_vocabulary_clip())
+
+    def _draw_video_in_vocab_media_slot(
+        self,
+        screen: pygame.Surface,
+        zones: ShortsLayoutZones,
+        *,
+        player: Any,
+        frozen_frame: Optional[pygame.Surface],
+        alpha: int = 255,
+        track_inner: str = "main",
+    ) -> None:
+        """단어 연상 이미지·word_video와 동일 Y·밴드에 contain 비디오."""
         slot, inner = self._vocab_word_media_slot(zones)
-        self._word_video_inner_size = inner
-        frozen = self._word_video_frozen_frame
-        player = None if frozen is not None else self._word_video_player
-        if frozen is None and not (player and player.has_source()):
-            return
+        if track_inner == "main":
+            self._video_inner_size = inner
+        elif track_inner == "word":
+            self._word_video_inner_size = inner
         self._drawer.draw_center_video(
             screen,
             player,
             slot,
             pad=0,
-            frozen_frame=frozen,
+            frozen_frame=frozen_frame,
+            alpha=alpha,
             frame_inner_size=inner,
         )
+
+    def _draw_word_video_in_slot(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
+        if not self._has_word_video():
+            return
+        frozen = self._word_video_frozen_frame
+        player = None if frozen is not None else self._word_video_player
+        if frozen is None and not (player and player.has_source()):
+            return
+        self._draw_video_in_vocab_media_slot(
+            screen,
+            zones,
+            player=player,
+            frozen_frame=frozen,
+            track_inner="word",
+        )
+        inner = self._word_video_inner_size
         if frozen is not None:
             self._word_video_last_live_frame = frozen
         elif player is not None and player.has_source():
@@ -777,8 +805,25 @@ class ClipScene:
     def _is_vocabulary_clip(self) -> bool:
         return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_VOCABULARY
 
+    def _should_read_meaning_ko(self) -> bool:
+        """shorts_vocabulary_clips.read_meaning_ko — false면 뜻 TTS 없이 중국어 mp3만."""
+        v = self._clip.get("read_meaning_ko")
+        if v is None:
+            return True
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        if s in ("", "1", "true", "yes", "y", "on", "t"):
+            return True
+        if s in ("0", "false", "no", "n", "off", "f"):
+            return False
+        return True
+
     def _ensure_vocab_meaning_plan(self) -> None:
         if not self._is_vocabulary_clip():
+            return
+        if not self._should_read_meaning_ko():
+            self._vocab_meaning_plan = None
             return
         try:
             from audio.vocab_meaning_ko import ensure_vocab_meaning_plan_for_clip
@@ -1358,11 +1403,22 @@ class ClipScene:
             y=overlay.tip_y,
             text=tip,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
+            frame_height=fh,
         )
 
     def _draw_pinned_video(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
         """고정된 마지막 프레임(문장 단계에서도 유지)."""
         if self._frozen_video_frame is None:
+            return
+        if self._use_vocab_media_slot_for_video():
+            self._draw_video_in_vocab_media_slot(
+                screen,
+                zones,
+                player=None,
+                frozen_frame=self._frozen_video_frame,
+                alpha=self._video_display_alpha,
+                track_inner="main",
+            )
             return
         self._drawer.draw_center_video(
             screen,
@@ -1394,20 +1450,31 @@ class ClipScene:
         zones = ShortsLayoutZones.from_surface(screen, ctx)
 
         if self._stage in (ClipStage.VIDEO_PLAY, ClipStage.VIDEO_HOLD, ClipStage.VIDEO_FADE_OUT):
-            inner = zones.middle.inflate(-32, -32)
-            if inner.width > 0 and inner.height > 0:
-                self._video_inner_size = (inner.width, inner.height)
+            if not self._use_vocab_media_slot_for_video():
+                inner = zones.middle.inflate(-32, -32)
+                if inner.width > 0 and inner.height > 0:
+                    self._video_inner_size = (inner.width, inner.height)
             self._draw_hook_layers(screen, zones)
             if self._frozen_video_frame is not None:
                 self._draw_pinned_video(screen, zones)
             elif self._stage == ClipStage.VIDEO_PLAY and self._video_player.has_source():
-                self._drawer.draw_center_video(
-                    screen,
-                    self._video_player,
-                    zones.middle,
-                    alpha=self._video_display_alpha,
-                    frame_inner_size=self._video_frame_inner_size(),
-                )
+                if self._use_vocab_media_slot_for_video():
+                    self._draw_video_in_vocab_media_slot(
+                        screen,
+                        zones,
+                        player=self._video_player,
+                        frozen_frame=None,
+                        alpha=self._video_display_alpha,
+                        track_inner="main",
+                    )
+                else:
+                    self._drawer.draw_center_video(
+                        screen,
+                        self._video_player,
+                        zones.middle,
+                        alpha=self._video_display_alpha,
+                        frame_inner_size=self._video_frame_inner_size(),
+                    )
             elif self._stage in (ClipStage.VIDEO_HOLD, ClipStage.VIDEO_FADE_OUT):
                 self._draw_pinned_video(screen, zones)
             self._draw_ko_subtitle_if_any(screen, zones)

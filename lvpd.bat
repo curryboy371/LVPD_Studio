@@ -8,7 +8,13 @@ REM lvpd.bat [csv|tts|run|f5|6-9|audio|hanzi|help] [args...]
 
 set "CAT=%~1"
 if /I "%CAT%"=="1" set "CAT=csv"
-if /I "%CAT%"=="2" set "CAT=tts"
+if /I "%CAT%"=="2" (
+  if not "%~2"=="" (
+    call :do_tts 2 %~2 %~3 %~4 %~5 %~6 %~7 %~8 %~9
+    exit /b !ERRORLEVEL!
+  )
+  set "CAT=tts"
+)
 if /I "%CAT%"=="3" set "CAT=run"
 if /I "%CAT%"=="record" set "CAT=run"
 if /I "%CAT%"=="4" set "CAT=audio"
@@ -196,6 +202,10 @@ echo   lvpd.bat 7 [topic]     숏츠 회화 F5
 echo   lvpd.bat 8 [topic]     단어장 F5
 echo   lvpd.bat 9 [topic]     회화 F5
 echo   lvpd.bat f5 shorts-vocab bao
+echo   lvpd.bat tts 1 1-3 1001   숏츠단어 - ko 인트로 set 1001
+echo   lvpd.bat tts 1 set 1001   위와 동일
+echo   lvpd.bat tts 1 id 3       clips 행 id -^> 단어 뜻
+echo   lvpd.bat tts 1 topic jingyesi   topic -^> 단어 뜻
 echo   lvpd.bat csv / tts / run / audio / hanzi
 echo.
 if not "%SKIP_PAUSE%"=="1" pause
