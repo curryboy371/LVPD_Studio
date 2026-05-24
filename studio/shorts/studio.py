@@ -23,7 +23,6 @@ from studio.shorts.tools.fonts import (
 )
 from studio.shorts.bg_audio import ShortsBackgroundPlayer
 from studio.conversation.follow_audio import PracticeFollowSoundPlayer
-from studio.shorts.constants import SHORTS_RECORD_END_HOLD_SEC
 from studio.shorts.follow_along_tts import ensure_follow_along_mp3
 from studio.shorts.tools.shorts_drawer import ShortsDrawer
 
@@ -111,7 +110,6 @@ class ShortsStudio(IStudio):
         )
         self._scene.set_on_clip_done(self._on_clip_done)
         self._scene.set_on_topic_intro_done(self._on_topic_intro_done)
-        self._scene.set_record_end_hold(0.0)
 
     def start_playback(self) -> None:
         """debug 모드: 첫 클립(또는 topic 인트로) 재생 시작."""
@@ -189,7 +187,6 @@ class ShortsStudio(IStudio):
             self._recording_done = True
             return
         if self._scene is not None:
-            self._scene.set_record_end_hold(SHORTS_RECORD_END_HOLD_SEC)
             reset = getattr(self._scene, "reset_playback_state", None)
             if callable(reset):
                 try:

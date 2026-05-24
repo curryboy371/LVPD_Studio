@@ -20,7 +20,6 @@ from studio.shorts.constants import (
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
-    SHORTS_RECORD_END_HOLD_SEC,
     SHORTS_VIDEO_FADE_OUT_SEC,
     SHORTS_HEIGHT,
     SHORTS_WIDTH,
@@ -133,14 +132,8 @@ class ClipScene:
         self._vocab_meaning_entered = False
         self._conv_translation_plan: Optional[Any] = None
         self._conv_translation_entered = False
-        self._record_end_hold_sec = 0.0
-        self._end_hold_after_learn = False
         self._last_live_video_frame: Optional[pygame.Surface] = None
         self._vocab_gap_sec = 0.0
-
-    def set_record_end_hold(self, seconds: float) -> None:
-        """녹화 모드 tail hold(초). 0이면 비활성(debug)."""
-        self._record_end_hold_sec = max(0.0, float(seconds))
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -723,10 +716,7 @@ class ClipScene:
                 self._sync_word_video_timeline(dt_sec)
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
-                    if self._should_post_follow_along_hold():
-                        self._enter_post_follow_along_hold()
-                    else:
-                        self._finish_learn_sequence()
+                    self._finish_learn_sequence()
                 return
             if self._is_voice_finished():
                 self._advance_learn_voice_step()
@@ -749,15 +739,6 @@ class ClipScene:
                     self._finish_clip()
                 else:
                     self.begin_transition_out()
-            return
-
-        if self._stage == ClipStage.END_HOLD:
-            if self._timer >= self._record_end_hold_sec:
-                if self._end_hold_after_learn:
-                    self._end_hold_after_learn = False
-                    self._finish_learn_sequence()
-                else:
-                    self._finish_clip()
             return
 
         if self._stage == ClipStage.TRANSITION_OUT:
@@ -995,11 +976,8 @@ class ClipScene:
             except Exception as ex:
                 logger.debug("bg 시작 실패: %s", ex)
         if self._is_conversation_clip() and self._start_follow_sound is not None:
-            follow_dur = float(self._bg_practice_duration)
-            if self._should_post_follow_along_hold():
-                follow_dur += float(self._record_end_hold_sec)
             try:
-                self._start_follow_sound(follow_dur)
+                self._start_follow_sound(float(self._bg_practice_duration))
             except Exception as ex:
                 logger.debug("follow 시작 실패: %s", ex)
 
@@ -1299,7 +1277,7 @@ class ClipScene:
         return None
 
     def _last_hold_sec_for_clip(self) -> float:
-        """shorts_*_clips.last_hold_sec — 비우면 CTA_HOLD_SEC(2.5)."""
+        """shorts_*_clips.last_hold_sec — 비우면 CTA_HOLD_SEC(2.5). 회화·단어 마지막 대기."""
         raw = self._clip.get("last_hold_sec")
         if raw is None:
             return self._default_cta_hold_sec
@@ -1318,18 +1296,6 @@ class ClipScene:
         self._stage = ClipStage.CTA_HOLD
         self._timer = 0.0
         self._cta_hold_sec = self._last_hold_sec_for_clip()
-        self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
-
-    def _should_post_follow_along_hold(self) -> bool:
-        if self._record_end_hold_sec <= 1e-6:
-            return False
-        return self._is_conversation_clip()
-
-    def _enter_post_follow_along_hold(self) -> None:
-        """녹화·회화: 따라해보세요(BG) 직후 tail hold."""
-        self._end_hold_after_learn = True
-        self._stage = ClipStage.END_HOLD
-        self._timer = 0.0
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
 
     def _is_voice_finished(self) -> bool:
@@ -1640,6 +1606,9 @@ class ClipScene:
         return int(zones.middle.centery) + gap
 
     def _draw_last_hold_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
+        """단어 숏츠 CTA — last_hold_text. 회화는 situation_subtitle만 사용."""
+        if self._is_conversation_clip():
+            return
         if self._stage != ClipStage.CTA_HOLD:
             return
         text = self._last_hold_text()

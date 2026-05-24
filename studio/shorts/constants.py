@@ -576,8 +576,7 @@ def shorts_brand_icon_xy(
 # FSM 타이밍(초)
 HOOK_FADE_IN_SEC = 1.0
 CTA_HOLD_SEC = 2.5
-# 녹화·회화: 따라해보세요(BG) 종료 후 추가 대기(초)
-SHORTS_RECORD_END_HOLD_SEC = 5.0
+# 회화·단어 마지막 대기: shorts_*_clips.last_hold_sec (비우면 CTA_HOLD_SEC)
 CLIP_TRANSITION_FADE_SEC = 0.3
 SHORTS_SOUND_PLAY_COUNT = 2
 # 학습 1·2회(원음) 화면 자막
