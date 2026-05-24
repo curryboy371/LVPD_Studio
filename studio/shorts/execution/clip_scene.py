@@ -1000,33 +1000,6 @@ class ClipScene:
         except (TypeError, ValueError):
             return 0.0
 
-    def _word_video_remaining_sec(self) -> float:
-        """단어 mp4 타임라인 잔여(초). 동결·미시작이면 0."""
-        if not self._word_video_started or self._word_video_frozen_frame is not None:
-            return 0.0
-        if not self._word_video_player.has_source():
-            return 0.0
-        end_sec = max(0.0, float(self._word_video_player.get_effective_end_sec()))
-        return max(0.0, end_sec - float(self._word_video_clock))
-
-    def _vocab_cn_follow_cycle_sec(self) -> float:
-        """중국어 N회 1사이클 추정 길이(word_video 여유 반복 판단용)."""
-        cn = max(0.1, float(self._sentence_sound_duration or self._sound_once_duration))
-        target = max(1, int(self._vocab_sound_repeat_target()))
-        return target * cn + 1.0
-
-    def _try_vocab_extra_cn_follow_cycle(self) -> bool:
-        """word_video 잔여 시간이 있으면 뜻 TTS 없이 중국어 mp3만 한 사이클 더."""
-        remain = self._word_video_remaining_sec()
-        need = self._vocab_cn_follow_cycle_sec()
-        if remain < need * 0.85:
-            return False
-        self._learn_round = 0
-        self._learn_elapsed = 0.0
-        self._sound_play_count = 0
-        self._start_sentence_play(play_index=1)
-        return True
-
     def _enter_vocab_gap(self) -> None:
         self._stop_learn_audio()
         self._stage = ClipStage.VOCAB_GAP
@@ -1038,8 +1011,6 @@ class ClipScene:
             target = self._vocab_sound_repeat_target()
             if self._sound_play_count < target:
                 self._start_sentence_play(play_index=self._sound_play_count + 1)
-            elif self._try_vocab_extra_cn_follow_cycle():
-                return
             else:
                 self._finish_learn_sequence()
             return

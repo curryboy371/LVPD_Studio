@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import random
+from pathlib import Path
 from typing import Callable, Optional
 
 import pygame
@@ -33,6 +34,23 @@ def load_conversation_background_sounds() -> list[tuple[str, pygame.mixer.Sound]
     return out
 
 
+def load_background_sound_file(path: str) -> list[tuple[str, pygame.mixer.Sound]]:
+    """지정 경로 오디오 1개를 bg로 로드한다. 실패 시 빈 목록."""
+    p = (path or "").strip()
+    if not p:
+        return []
+    file_path = Path(p)
+    if not file_path.is_file() or file_path.suffix.lower() not in _BG_SOUND_EXTS:
+        return []
+    try:
+        _ensure_mixer()
+        resolved = str(file_path.resolve())
+        return [(resolved, pygame.mixer.Sound(resolved))]
+    except Exception as ex:
+        logger.warning("bg 파일 로드 실패: %s (%s)", p, ex)
+        return []
+
+
 def _ensure_mixer() -> None:
     if pygame.mixer.get_init() is None:
         from core.paths import STUDIO_AUDIO_SAMPLE_RATE
@@ -51,6 +69,7 @@ class ConversationBackgroundPlayer:
         volume: float | None = None,
     ) -> None:
         self._sounds = load_conversation_background_sounds()
+        self._fixed_bg_path: str | None = None
         self._on_bg_started = on_bg_started
         self._is_recording = is_recording
         self._volume = float(volume if volume is not None else STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)
@@ -61,13 +80,27 @@ class ConversationBackgroundPlayer:
         self._paused = False
         self._recording_logged = False
 
+    def set_fixed_bg_path(self, path: str | None) -> None:
+        """세션 bg를 지정 파일로 고정. None/빈 문자열이면 bg 폴더 랜덤."""
+        p = (path or "").strip()
+        self._fixed_bg_path = p or None
+
     @property
     def is_active(self) -> bool:
         return self._session_active
 
     def reload_sounds(self) -> None:
         """display·mixer 준비 후 사운드를 다시 로드한다(debug F5 등)."""
-        self._sounds = load_conversation_background_sounds()
+        if self._fixed_bg_path:
+            self._sounds = load_background_sound_file(self._fixed_bg_path)
+            if not self._sounds:
+                logger.warning(
+                    "지정 bg_path 재생 불가 → bg 폴더 랜덤: %s",
+                    self._fixed_bg_path,
+                )
+                self._fixed_bg_path = None
+        if not self._fixed_bg_path:
+            self._sounds = load_conversation_background_sounds()
 
     def start_session(
         self,

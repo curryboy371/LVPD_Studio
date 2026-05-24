@@ -13,6 +13,7 @@ from studio.conversation.core.types import ColorStyle, LayoutStyle, TextStyle
 from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
 from studio.shorts.data_loading import (
     build_shorts_clip_list,
+    extract_vocab_topic_bg_path,
     extract_vocab_topic_intro,
     topic_intro_configured,
 )
@@ -224,6 +225,11 @@ class ShortsStudio(IStudio):
     ) -> None:
         if self._bg_player is None:
             return
+        if self._shorts_mode == CLIP_TYPE_VOCABULARY:
+            bg_path = extract_vocab_topic_bg_path(self._clips)
+            self._bg_player.set_fixed_bg_path(bg_path or None)
+        else:
+            self._bg_player.set_fixed_bg_path(None)
         self._bg_player.start_session(
             duration_hint_sec=self._bg_duration_hint_sec(config),
             reload=reload,

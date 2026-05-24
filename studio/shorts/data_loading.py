@@ -69,6 +69,17 @@ def _resolve_conversation_video_path(
     return video_path
 
 
+def _resolve_bg_audio_path(repo: Path, row: dict[str, str]) -> str:
+    """shorts_vocabulary_clips.bg_path — 비우거나 파일 없으면 빈 문자열(랜덤 bg)."""
+    path = _resolve_path(repo, row.get("bg_path") or "")
+    if not path:
+        return ""
+    if os.path.isfile(path):
+        return path
+    logger.warning("shorts vocabulary bg_path 파일 없음: %s", path)
+    return ""
+
+
 def _resolve_vocabulary_video_path(
     row: dict[str, str],
     *,
@@ -496,7 +507,18 @@ def _topic_intro_from_row(
         "video_path": _resolve_vocabulary_video_path(
             row, clip_id=max(1, int(clip_id)), topic=topic, repo=repo
         ),
+        "bg_path": _resolve_bg_audio_path(repo, row),
     }
+
+
+def extract_vocab_topic_bg_path(clips: list[dict[str, Any]]) -> str:
+    """단어 숏츠 세션 배경음 경로 (topic_intro.bg_path, 첫 클립 기준)."""
+    if not clips:
+        return ""
+    intro = clips[0].get("topic_intro")
+    if isinstance(intro, dict):
+        return (intro.get("bg_path") or "").strip()
+    return ""
 
 
 def extract_vocab_topic_intro(clips: list[dict[str, Any]]) -> Optional[dict[str, Any]]:

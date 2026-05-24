@@ -28,6 +28,7 @@ FIELDNAMES = [
     "read_meaning_ko",
     "last_hold_text",
     "last_hold_sec",
+    "bg_path",
 ]
 
 
@@ -77,6 +78,7 @@ def shorts_vocabulary_clips_excel_to_csv(
             "read_meaning_ko": _normalize(row.get("read_meaning_ko")),
             "last_hold_text": _normalize(row.get("last_hold_text")),
             "last_hold_sec": _normalize(row.get("last_hold_sec")),
+            "bg_path": _normalize(row.get("bg_path")),
         })
 
     out_path = Path(csv_path)

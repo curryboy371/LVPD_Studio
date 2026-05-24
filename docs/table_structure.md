@@ -104,18 +104,19 @@
 | read_meaning_ko | str | - | 뜻 한국어 TTS 재생 여부. `true`/`false` 또는 `true\|false\|true` (`word_id` 순, 1개면 전체 동일). 기본 `true`. `false`면 뜻 나레이션 생략 후 바로 중국어 `sound_path` mp3 |
 | last_hold_text | str | - | **topic 전체** 마지막 단어 종료 후 CTA_HOLD 문구 — words.csv `tip` 아래. `\\n` 줄바꿈 |
 | last_hold_sec | float | - | CTA_HOLD 대기(초, 소수 가능). 비우면 **2.5** |
+| bg_path | str | - | 따라해보세요 구간 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
 
 단어 숏츠는 `syllable_times_ms` 없음(노래방은 발음 길이로 균등 진행). 회화 숏츠만 `syllable_times_ms` 사용.
 
 로드 시 단어 클립 내부 id는 `{id}001`, `{id}002` … (예: topic id=1 → 1001, 1002). 판다: `panda/vocabulary/{내부id}.png`.
 
-**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어(`sound_repeat_count`회) → 따라해보세요(follow+BG). **word_video/mp3 타임라인에 여유가 있으면** 뜻 TTS 없이 중국어→따라발음만 반복. F5 단어장도 동일(뜻 `ko_word_*` → 중국어→주황 따라발음, 여유 시 TTS 생략 반복).
+**재생**: (1회) topic 비디오 + 인트로 TTS → 단어마다 훅 → (`read_meaning_ko`) 뜻 TTS → 중국어 mp3 **`sound_repeat_count`회만** (word_video 길이와 무관) → 다음 단어. F5 단어장은 별도(타임라인 여유 시 중국어·따라발음 추가 반복 가능).
 
 ### CSV 예 (topic 1행)
 
 ```csv
-id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_sound_delay_sec,read_meaning_ko
-1,fruit_store,20501|20504|20505,사과 외워보세요|망고 외워보세요|수박 외워보세요,2,resource/video/intro.mp4,2|2|1,1.5|1|0.5,true
+id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_sound_delay_sec,read_meaning_ko,bg_path
+1,fruit_store,20501|20504|20505,사과 외워보세요|망고 외워보세요|수박 외워보세요,2,resource/video/intro.mp4,2|2|1,1.5|1|0.5,true,resource/sound/bg/calm.mp3
 ```
 
 `hook_title`이 `과일 단어 외워보세요` 한 줄이면 사과·망고·수박 모두 같은 훅.
