@@ -55,6 +55,9 @@ class ShortsStudio(IStudio):
         self._last_config: Any = None
         self._recording_done = False
         self._topic_intro_done = False
+        self._session_thumbnail_armed = False
+        self._session_thumbnail_captured = False
+        self._session_thumbnail_png: Optional[str] = None
         self._bg_player: Optional[ShortsBackgroundPlayer] = None
         self._follow_player: Optional[PracticeFollowSoundPlayer] = None
         csv_name = (
@@ -111,6 +114,8 @@ class ShortsStudio(IStudio):
             is_recording=self._is_recording_mode,
             recording_timeline_sec=self._recording_timeline_sec,
             record_recording_event=self._record_recording_event,
+            arm_session_thumbnail=self._arm_session_thumbnail,
+            is_session_thumbnail_captured=self._is_session_thumbnail_captured,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
         self._scene.set_on_topic_intro_done(self._on_topic_intro_done)
@@ -187,6 +192,9 @@ class ShortsStudio(IStudio):
         self._last_config = config
         self._recording_done = False
         self._topic_intro_done = False
+        self._session_thumbnail_armed = False
+        self._session_thumbnail_captured = False
+        self._session_thumbnail_png = None
         if not self._clips:
             print(
                 f"[!] {self._empty_message} "
@@ -256,6 +264,33 @@ class ShortsStudio(IStudio):
     def _is_recording_mode(self) -> bool:
         cfg = self._last_config
         return getattr(cfg, "recording_log_event", None) is not None
+
+    def _arm_session_thumbnail(self) -> None:
+        if not self._session_thumbnail_captured:
+            self._session_thumbnail_armed = True
+
+    def _is_session_thumbnail_captured(self) -> bool:
+        return self._session_thumbnail_captured
+
+    def capture_session_thumbnail_if_armed(self, screen: Any) -> None:
+        """녹화 루프: draw 직후 전체 화면(자막·훅·브랜드 포함) PNG 저장."""
+        if not self._session_thumbnail_armed or self._session_thumbnail_captured:
+            return
+        path = getattr(self, "_session_thumbnail_png", None)
+        if not path:
+            return
+        try:
+            import pygame
+
+            pygame.image.save(screen, str(path))
+            self._session_thumbnail_captured = True
+            self._session_thumbnail_armed = False
+            print(f"[rec] 썸네일 캡처: {path}", flush=True)
+        except Exception as ex:
+            logger.warning("썸네일 PNG 저장 실패: %s", ex)
+
+    def set_session_thumbnail_png_path(self, path: str) -> None:
+        self._session_thumbnail_png = path or None
 
     def _recording_timeline_sec(self) -> float:
         cfg = self._last_config

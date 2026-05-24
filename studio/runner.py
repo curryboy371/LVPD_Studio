@@ -460,6 +460,16 @@ def _run_record(
     recorder = SimpleRecordingManager()
     prefix = studio.get_recording_prefix() or "rec"
     recorder.start(prefix, float(config.fps), (config.width, config.height))
+    shorts_thumb_png: Optional[Path] = None
+    if _is_shorts_studio(studio):
+        vp = recorder.get_last_video_path()
+        if vp is not None:
+            from studio.shorts.thumbnail_postprocess import shorts_thumbnail_png_path
+
+            shorts_thumb_png = shorts_thumbnail_png_path(vp)
+            _set_thumb = getattr(studio, "set_session_thumbnail_png_path", None)
+            if callable(_set_thumb):
+                _set_thumb(str(shorts_thumb_png))
 
     # 녹화 타임라인: 0 기준, 매 프레임 현재 시간 전달. 오디오 이벤트 로그 수집.
     recording_events: list = []
@@ -507,6 +517,13 @@ def _run_record(
             config.dt_sec = 1.0 / config.fps
             studio.update(config)
             studio.draw(buffer, config)
+            if _is_shorts_studio(studio):
+                _cap = getattr(studio, "capture_session_thumbnail_if_armed", None)
+                if callable(_cap):
+                    try:
+                        _cap(buffer)
+                    except Exception as ex:
+                        logger.debug("capture_session_thumbnail_if_armed 실패: %s", ex)
             if np is not None:
                 buf = pygame.surfarray.array3d(buffer)
                 frame = np.transpose(buf, (1, 0, 2))
@@ -589,6 +606,10 @@ def _run_record(
         _mux_recorded_audio(video_path, recording_events, config.fps, duration_sec)
     elif video_path is not None and not recording_events:
         print("[!] 녹화 오디오 mux 건너뜀: 오디오 이벤트 없음 (스튜디오에서 이벤트 로그 필요)")
+    if video_path is not None and _is_shorts_studio(studio):
+        from studio.shorts.thumbnail_postprocess import apply_shorts_thumbnail_if_present
+
+        apply_shorts_thumbnail_if_present(video_path)
 
 
 def _mux_recorded_audio(

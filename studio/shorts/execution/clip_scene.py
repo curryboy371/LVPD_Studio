@@ -60,6 +60,7 @@ class ClipStage(Enum):
     LEARN_PLAY = auto()
     KO_NARRATION = auto()
     CTA_HOLD = auto()
+    VOCAB_WAIT_VIDEO = auto()
     VOCAB_GAP = auto()
     END_HOLD = auto()
     DONE = auto()
@@ -83,6 +84,8 @@ class ClipScene:
         is_recording: Optional[Callable[[], bool]] = None,
         recording_timeline_sec: Optional[Callable[[], float]] = None,
         record_recording_event: Optional[Callable[[Any], None]] = None,
+        arm_session_thumbnail: Optional[Callable[[], None]] = None,
+        is_session_thumbnail_captured: Optional[Callable[[], bool]] = None,
         hook_fade_sec: float = HOOK_FADE_IN_SEC,
         cta_hold_sec: float = CTA_HOLD_SEC,
     ) -> None:
@@ -97,6 +100,8 @@ class ClipScene:
         self._is_recording = is_recording
         self._recording_timeline_sec = recording_timeline_sec
         self._record_recording_event = record_recording_event
+        self._arm_session_thumbnail = arm_session_thumbnail
+        self._is_session_thumbnail_captured = is_session_thumbnail_captured
         self._word_video_recording_segment_open = False
         self._hook_fade_sec = max(0.01, float(hook_fade_sec))
         self._default_cta_hold_sec = max(0.0, float(cta_hold_sec))
@@ -144,6 +149,7 @@ class ClipScene:
         self._conv_translation_entered = False
         self._last_live_video_frame: Optional[pygame.Surface] = None
         self._vocab_gap_sec = 0.0
+        self._vocab_after_video_action = ""
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -345,6 +351,7 @@ class ClipScene:
         self._vocab_meaning_entered = False
         self._conv_translation_plan = None
         self._conv_translation_entered = False
+        self._vocab_after_video_action = ""
         self._ensure_ko_plan()
         self._ensure_vocab_meaning_plan()
         self._ensure_conv_translation_plan()
@@ -531,6 +538,7 @@ class ClipScene:
         return self._stage in (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
             ClipStage.END_HOLD,
@@ -778,6 +786,7 @@ class ClipScene:
                     ):
                         self._enter_video_hold()
             if self._stage == ClipStage.VIDEO_PLAY:
+                self._maybe_arm_session_thumbnail_capture()
                 return
             return
 
@@ -785,6 +794,7 @@ class ClipScene:
             self._tick_ko_narration(dt_sec)
             if self._stage != ClipStage.VIDEO_HOLD:
                 return
+            self._maybe_arm_session_thumbnail_capture()
             if self._is_video_ko_narration_pending():
                 self._timer = 0.0
                 return
@@ -811,6 +821,7 @@ class ClipScene:
                     self._finish_topic_intro()
                 else:
                     self._enter_post_video_intro()
+            self._maybe_arm_session_thumbnail_capture()
             return
 
         if self._stage == ClipStage.HOOK_IN:
@@ -845,6 +856,12 @@ class ClipScene:
 
         if self._stage == ClipStage.KO_NARRATION:
             self._tick_ko_narration(dt_sec)
+            return
+
+        if self._stage == ClipStage.VOCAB_WAIT_VIDEO:
+            self._sync_word_video_timeline(dt_sec)
+            if not self._is_word_video_still_playing():
+                self._proceed_vocab_after_sounds()
             return
 
         if self._stage == ClipStage.VOCAB_GAP:
@@ -1127,6 +1144,37 @@ class ClipScene:
         self._timer = 0.0
         self._vocab_gap_sec = self._vocab_after_sound_delay_sec()
 
+    def _is_word_video_still_playing(self) -> bool:
+        """word_video_path 재생 중(마지막 프레임 freeze 전)."""
+        if not self._has_word_video() or not self._word_video_started:
+            return False
+        if self._word_video_frozen_frame is not None:
+            return False
+        if not self._word_video_player.has_source():
+            return False
+        return True
+
+    def _proceed_vocab_after_sounds(self) -> None:
+        action = self._vocab_after_video_action
+        self._vocab_after_video_action = ""
+        if action == "cta":
+            self._enter_cta_hold()
+        elif action == "gap":
+            self._enter_vocab_gap()
+        else:
+            self._finish_clip()
+
+    def _try_enter_vocab_wait_word_video(self, *, next_action: str) -> None:
+        """발음·TTS 종료 후 word 비디오가 남아 있으면 끝까지 재생한 뒤 다음 단계."""
+        if not self._is_word_video_still_playing():
+            self._vocab_after_video_action = next_action
+            self._proceed_vocab_after_sounds()
+            return
+        self._stop_learn_audio()
+        self._vocab_after_video_action = next_action
+        self._stage = ClipStage.VOCAB_WAIT_VIDEO
+        self._timer = 0.0
+
     def _advance_learn_voice_step(self) -> None:
         if self._is_vocabulary_clip():
             target = self._vocab_sound_repeat_target()
@@ -1150,11 +1198,11 @@ class ClipScene:
         self._stop_follow_sound_if_any()
         if self._is_vocabulary_clip():
             if self._is_last_clip:
-                self._enter_cta_hold()
+                self._try_enter_vocab_wait_word_video(next_action="cta")
             elif self._vocab_after_sound_delay_sec() > 1e-6:
-                self._enter_vocab_gap()
+                self._try_enter_vocab_wait_word_video(next_action="gap")
             else:
-                self._finish_clip()
+                self._try_enter_vocab_wait_word_video(next_action="finish")
             return
         if self._ko_plan is not None and not self._ko_finished:
             self._enter_ko_narration()
@@ -1351,6 +1399,45 @@ class ClipScene:
             return ko
         return self._learn_overlay_subtitle()
 
+    def _has_visible_intro_video_frame(self) -> bool:
+        if self._frozen_video_frame is not None or self._last_live_video_frame is not None:
+            return True
+        return self._stage == ClipStage.VIDEO_PLAY and self._video_player.has_source()
+
+    def _should_arm_session_thumbnail_capture(self) -> bool:
+        """인트로 비디오 구간: 자막이 그려진 전체 화면 1장(세션당 1회)."""
+        if self._arm_session_thumbnail is None or self._is_session_thumbnail_captured is None:
+            return False
+        if self._is_session_thumbnail_captured():
+            return False
+        if not self._recording_mode():
+            return False
+        if self._stage not in (
+            ClipStage.VIDEO_PLAY,
+            ClipStage.VIDEO_HOLD,
+            ClipStage.VIDEO_FADE_OUT,
+        ):
+            return False
+        if not self._overlay_subtitle_text().strip():
+            return False
+        if self._has_visible_intro_video_frame():
+            return True
+        if (
+            self._topic_intro_mode
+            and self._stage == ClipStage.VIDEO_PLAY
+            and not self._video_player.has_source()
+        ):
+            return True
+        return False
+
+    def _maybe_arm_session_thumbnail_capture(self) -> None:
+        if not self._should_arm_session_thumbnail_capture():
+            return
+        try:
+            self._arm_session_thumbnail()
+        except Exception as ex:
+            logger.debug("arm_session_thumbnail 실패: %s", ex)
+
     def _ko_subtitle_progress(self) -> Optional[float]:
         text = self._active_ko_subtitle()
         if not text:
@@ -1471,6 +1558,7 @@ class ClipScene:
         stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.KO_NARRATION,
             ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
@@ -1589,6 +1677,7 @@ class ClipScene:
         if self._stage not in (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
             ClipStage.END_HOLD,
@@ -1629,6 +1718,7 @@ class ClipScene:
         if self._stage not in (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
             ClipStage.END_HOLD,
@@ -1821,6 +1911,7 @@ class ClipScene:
         show_bottom_stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.KO_NARRATION,
             ClipStage.VOCAB_GAP,
             ClipStage.CTA_HOLD,
@@ -1874,6 +1965,7 @@ class ClipScene:
             and self._stage
             in (
                 ClipStage.LEARN_PLAY,
+                ClipStage.VOCAB_WAIT_VIDEO,
                 ClipStage.VOCAB_GAP,
                 ClipStage.CTA_HOLD,
                 ClipStage.END_HOLD,
