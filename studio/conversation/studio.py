@@ -75,7 +75,12 @@ class ConversationStudio:
 
         self._video_player = SimpleVideoPlayer()
         # 기존 디버그 오버레이가 깨지지 않게 유지(로직은 최소)
-        self._video_audio = VideoAudioPlayer()
+        self._video_audio = VideoAudioPlayer(
+            is_recording=lambda: getattr(
+                getattr(self, "_last_config", None), "recording_log_event", None
+            )
+            is not None
+        )
 
         # 폰트 핸들은 init()에서 pygame 초기화 이후 로드
         # `_load_fonts`에서 채움. 크기별 용도는 init()의 FontBundle 주석과 동일.
@@ -444,9 +449,14 @@ class ConversationStudio:
     def begin_recording_session(self, config: Any) -> None:
         """record 루프 직전: 녹화 타임라인용 bg InsertSound 기록."""
         self._last_config = config
+        self._recording_video_segment_open = False
+        self._recording_video_segment_closed_for_item = False
+        self._video_audio.stop()
         if self._bg_player is None:
+            self._recording_emit_video_segment_start(config)
             return
         self._bg_player.start_session(duration_hint_sec=self._bg_duration_hint_sec(config))
+        self._recording_emit_video_segment_start(config)
 
     def get_title(self) -> str:
         """창 제목 표시용 문자열."""
@@ -531,32 +541,8 @@ class ConversationStudio:
             if self._video_audio.has_pending():
                 self._video_audio._apply_pending()
                 log = getattr(config, "recording_log_event", None) if config is not None else None
-                if (
-                    log is not None
-                    and self._manager is not None
-                    and not self._recording_video_segment_open
-                    and not self._recording_video_segment_closed_for_item
-                ):
-                    item = self._manager.current_item()
-                    vpath = self._resolve_video_path(str(item.get("video_path") or ""))
-                    if vpath and os.path.exists(vpath):
-                        from studio.recording_events import VideoSegmentStart, recording_log_event
-
-                        mp3_path = str(Path(vpath).with_suffix(".mp3"))
-                        mux_src = mp3_path if os.path.exists(mp3_path) else vpath
-                        tl = float(getattr(config, "recording_time_sec", 0.0) or 0.0)
-                        # 녹화 mux에서도 디버그 재생과 동일하게 현재 비디오 PTS를 소스 시작점으로 사용한다.
-                        # (sidecar mp3도 start/end 구간이 일치하도록 맞춤)
-                        src_pts = float(self._video_player.get_pts())
-                        recording_log_event(
-                            log,
-                            VideoSegmentStart(
-                                timeline_sec=tl,
-                                video_path=mux_src,
-                                video_pts_sec=src_pts,
-                            ),
-                        )
-                        self._recording_video_segment_open = True
+                if log is not None:
+                    self._recording_emit_video_segment_start(config)
                 # 추출이 끝난 직후 짧은 구간이면 이미 비디오만 끝난 상태일 수 있음 → 오디오도 즉시 멈춤
                 self._sync_video_audio_pause_at_segment_end()
         except Exception:
@@ -764,6 +750,41 @@ class ConversationStudio:
         self._video_audio.set_source(path, st)
         self._last_applied_item_index = int(index)
         self._recording_video_segment_closed_for_item = False
+        if log is not None:
+            self._recording_emit_video_segment_start(cfg)
+
+    def _recording_emit_video_segment_start(self, config: Any) -> None:
+        """녹화 mux: 현재 item 비디오·sidecar mp3 구간 시작 이벤트."""
+        log = getattr(config, "recording_log_event", None) if config is not None else None
+        if (
+            not log
+            or self._manager is None
+            or self._recording_video_segment_open
+            or self._recording_video_segment_closed_for_item
+        ):
+            return
+        item = self._manager.current_item()
+        vpath = self._resolve_video_path(str(item.get("video_path") or ""))
+        if not vpath or not os.path.exists(vpath):
+            return
+        try:
+            from studio.recording_events import VideoSegmentStart, recording_log_event
+
+            mp3_path = str(Path(vpath).with_suffix(".mp3"))
+            mux_src = mp3_path if os.path.exists(mp3_path) else vpath
+            tl = float(getattr(config, "recording_time_sec", 0.0) or 0.0)
+            src_pts = float(self._video_player.get_pts())
+            recording_log_event(
+                log,
+                VideoSegmentStart(
+                    timeline_sec=tl,
+                    video_path=mux_src,
+                    video_pts_sec=src_pts,
+                ),
+            )
+            self._recording_video_segment_open = True
+        except Exception:
+            pass
 
     def _resolve_video_path(self, path: str) -> str:
         """상대 경로는 repo 루트 기준으로 해석."""

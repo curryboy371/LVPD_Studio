@@ -6,7 +6,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pygame
 
@@ -391,8 +391,9 @@ class SimpleVideoPlayer:
 class VideoAudioPlayer:
     """비디오와 동일 경로·동일 이름의 추출된 MP3를 재생. 비디오 내장 음원은 사용하지 않음."""
 
-    def __init__(self) -> None:
+    def __init__(self, is_recording: Optional[Callable[[], bool]] = None) -> None:
         """경로·추출 스레드·pending 잠금을 초기화한다."""
+        self._is_recording = is_recording
         self._path: str = ""
         self._start_time: float = 0.0
         self._temp_wav: Optional[str] = None
@@ -403,6 +404,17 @@ class VideoAudioPlayer:
         self._pending_path: Optional[str] = None
         self._extract_thread: Optional[threading.Thread] = None
 
+    def set_is_recording(self, is_recording: Optional[Callable[[], bool]]) -> None:
+        self._is_recording = is_recording
+
+    def _recording_mode(self) -> bool:
+        if self._is_recording is None:
+            return False
+        try:
+            return bool(self._is_recording())
+        except Exception:
+            return False
+
     def set_source(self, path: str, start_time: float = 0.0) -> None:
         """동일 이름 mp3를 ffmpeg로 WAV 추출한 뒤 백그라운드에서 pending으로 둔다."""
         if path == self._path and self._start_time == start_time:
@@ -412,6 +424,8 @@ class VideoAudioPlayer:
         self._start_time = start_time
         audio_path = str(Path(path).with_suffix(".mp3")) if path else ""
         if not audio_path or not os.path.exists(audio_path):
+            return
+        if self._recording_mode():
             return
         try:
             from core.paths import FFMPEG_CMD
@@ -471,6 +485,14 @@ class VideoAudioPlayer:
                 except OSError:
                     pass
             return
+        if self._recording_mode():
+            try:
+                os.remove(wav)
+            except OSError:
+                pass
+            self._temp_wav = None
+            self._paused = False
+            return
         self._temp_wav = wav
         try:
             pygame.mixer.music.load(wav)
@@ -488,6 +510,9 @@ class VideoAudioPlayer:
 
     def seek_to(self, time_sec: float) -> None:
         """mixer.music을 지정 시각부터 다시 재생(일시정지면 재생 후 pause)."""
+        if self._recording_mode():
+            self._play_start_sec = time_sec
+            return
         try:
             self._play_start_sec = time_sec
             if self._paused:
@@ -509,6 +534,8 @@ class VideoAudioPlayer:
     def unpause(self) -> None:
         """배경 음악 재개."""
         self._paused = False
+        if self._recording_mode():
+            return
         try:
             pygame.mixer.music.unpause()
         except Exception:

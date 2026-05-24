@@ -574,9 +574,11 @@ class VocabularyStudio:
 
                 pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
             snd = pygame.mixer.Sound(key)
+            if self._is_recording_mode():
+                self._log_insert_sound_event(key, snd)
+                return
             ch = pygame.mixer.Channel(7)
             ch.play(snd)
-            self._log_insert_sound_event(key, snd)
         except Exception as ex:
             logger.debug("단어장 사운드 재생 실패: %s", ex)
 
