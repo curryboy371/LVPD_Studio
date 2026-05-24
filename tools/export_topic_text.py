@@ -7,8 +7,9 @@
 
 회화 문장은 sub_sentences의 슬롯 치환을 적용한 실제 학습 문장을 함께 출력하며,
 단어 리스트는 vocabulary_word_rows.csv 의 word_id를 words.csv에서 해석해 한자/병음을 만든다.
+words.csv `masking` 성조 마스크는 회화 문장·단어 병음 모두에 반영한다.
 
-슬롯 치환 규칙은 `studio/conversation/data_loading.py`의 동작과 일치하도록 재현한다.
+슬롯 치환·성조 masking 규칙은 `studio/conversation/data_loading.py`와 동일하다.
 (학습 화면이 사용하는 문장과 동일한 텍스트가 나와야 의미가 있다.)
 """
 from __future__ import annotations
@@ -21,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from studio.conversation.data_loading import _build_masked_pinyin_for_sentence
+from utils.pinyin_masking import get_masked_pinyin_marks, normalize_word_masking
 from utils.pinyin_processor import get_pinyin_processor
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -253,8 +256,43 @@ def _make_pinyin(text: str) -> str:
         return ""
 
 
+def _mask_maps_from_index(
+    words_index: dict[int, dict[str, str]],
+) -> tuple[dict[int, str], dict[int, str]]:
+    """words.csv 인덱스 → data_loading과 동일한 (word_id→한자, word_id→masking) 맵."""
+    words_by_id: dict[int, str] = {}
+    maskings_by_id: dict[int, str] = {}
+    for wid, info in words_index.items():
+        w = (info.get("word") or "").strip()
+        if w:
+            words_by_id[wid] = w
+        maskings_by_id[wid] = normalize_word_masking(info.get("masking") or "")
+    return words_by_id, maskings_by_id
+
+
+def _sentence_pinyin(
+    display: str,
+    raw_sentence: str,
+    *,
+    words_by_id: dict[int, str],
+    maskings_by_id: dict[int, str],
+    replacement_mask_pairs: Optional[list[tuple[str, str]]] = None,
+) -> str:
+    """회화 문장 병음. words.csv masking + sub 치환 단어 masking 반영."""
+    marks, _, _ = _build_masked_pinyin_for_sentence(
+        display,
+        raw_sentence,
+        words_by_id=words_by_id,
+        maskings_by_id=maskings_by_id,
+        replacement_mask_pairs=replacement_mask_pairs,
+    )
+    if marks:
+        return marks
+    return _make_pinyin(display)
+
+
 def _load_words_index(words_csv: Path) -> dict[int, dict[str, str]]:
-    """words.csv 를 id -> {word, pinyin, meaning, pos} 로 매핑."""
+    """words.csv 를 id -> {word, pinyin, masking, meaning, pos} 로 매핑."""
     out: dict[int, dict[str, str]] = {}
     for row in _read_csv_rows(words_csv):
         wid = _to_int(row.get("id"), 0)
@@ -263,6 +301,7 @@ def _load_words_index(words_csv: Path) -> dict[int, dict[str, str]]:
         out[wid] = {
             "word": str(row.get("word") or "").strip(),
             "pinyin": str(row.get("pinyin") or "").strip(),
+            "masking": normalize_word_masking(row.get("masking") or ""),
             "meaning": str(row.get("meaning") or "").strip(),
             "pos": str(row.get("pos") or "").strip(),
         }
@@ -273,7 +312,8 @@ def _build_sentence_lines(
     *,
     base_rows: list[dict[str, str]],
     sub_rows: list[dict[str, str]],
-    words_index: dict[int, dict[str, str]],
+    words_by_id: dict[int, str],
+    maskings_by_id: dict[int, str],
 ) -> list[str]:
     """주어진 base 행 목록(이미 topic으로 필터링됨)에 대해 회화 문장 텍스트 라인을 생성한다."""
     sub_by_base_id: dict[int, list[dict[str, Any]]] = {}
@@ -306,7 +346,17 @@ def _build_sentence_lines(
             continue
 
         lines.append(f"[{idx}] id={base_id}")
-        lines.append(_hanzi_pinyin_line(display, _make_pinyin(display)))
+        lines.append(
+            _hanzi_pinyin_line(
+                display,
+                _sentence_pinyin(
+                    display,
+                    raw_sentence,
+                    words_by_id=words_by_id,
+                    maskings_by_id=maskings_by_id,
+                ),
+            )
+        )
         if translation:
             lines.append(f"    → {translation}")
 
@@ -320,17 +370,21 @@ def _build_sentence_lines(
             if not replacement_specs:
                 continue
             resolved: list[tuple[Union[int, str, float], int, Optional[str]]] = []
+            replacement_mask_pairs: list[tuple[str, str]] = []
             spec_ok = True
             for slot_order, alt_word_id in replacement_specs:
                 wid = int(alt_word_id)
                 if wid == 0:
                     resolved.append((slot_order, wid, None))
                     continue
-                w = (words_index.get(wid, {}).get("word") or "").strip()
+                w = (words_by_id.get(wid) or "").strip()
                 if not w:
                     spec_ok = False
                     break
                 resolved.append((slot_order, wid, w))
+                mk = maskings_by_id.get(wid, "")
+                if mk:
+                    replacement_mask_pairs.append((w, mk))
             if not spec_ok or len(resolved) != len(replacement_specs):
                 continue
             resolved.sort(key=lambda x: _sort_key_slot_order(x[0]))
@@ -343,7 +397,9 @@ def _build_sentence_lines(
                 continue
             sub_idx += 1
             prefix = f"  ({idx}-{sub_idx})"
-            lines.append(f"{prefix} {_hanzi_pinyin_line(replaced, _make_pinyin(replaced))}")
+            lines.append(
+                f"{prefix} {_hanzi_pinyin_line(replaced, _sentence_pinyin(replaced, raw_sentence, words_by_id=words_by_id, maskings_by_id=maskings_by_id, replacement_mask_pairs=replacement_mask_pairs or None))}"
+            )
             alt_trans = v.get("alt_translation") or ""
             if alt_trans:
                 lines.append(f"        → {alt_trans}")
@@ -382,7 +438,12 @@ def _build_word_lines(
             lines.append(f"{seq}. (word_id={wid}) — words.csv 에 없음")
             continue
         hanzi = info["word"]
-        pinyin = info["pinyin"] or _make_pinyin(hanzi)
+        try:
+            pinyin = get_masked_pinyin_marks(hanzi, info.get("masking") or "")
+        except Exception:
+            pinyin = ""
+        if not pinyin:
+            pinyin = info["pinyin"] or _make_pinyin(hanzi)
         meaning = info["meaning"]
         pos = info["pos"]
         line = f"{seq}. {_hanzi_pinyin_line(hanzi, pinyin)}"
@@ -423,10 +484,12 @@ def _write_topic_text(
 ) -> tuple[int, int]:
     """단일 topic 텍스트 파일 작성. (회화 문장 수, 단어 수) 반환."""
     base_rows = [r for r in base_rows_all if (r.get("topic") or "").strip() == topic]
+    words_by_id, maskings_by_id = _mask_maps_from_index(words_index)
     sentence_lines = _build_sentence_lines(
         base_rows=base_rows,
         sub_rows=sub_rows,
-        words_index=words_index,
+        words_by_id=words_by_id,
+        maskings_by_id=maskings_by_id,
     )
     word_lines = _build_word_lines(
         topic=topic,
