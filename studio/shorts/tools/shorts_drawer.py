@@ -736,7 +736,14 @@ class ShortsDrawer:
             syllable_times=syllable_times,
             sound_duration_sec=sound_duration_sec,
             style=style,
+            meaning_karaoke=vocab_meaning_karaoke,
         )
+
+    def _conversation_translation_text(self, item: dict[str, Any]) -> str:
+        trans_raw = item.get("translation") or []
+        if isinstance(trans_raw, list):
+            return (trans_raw[0] if trans_raw else "").strip()
+        return str(trans_raw or "").strip()
 
     def draw_middle_karaoke(
         self,
@@ -748,22 +755,47 @@ class ShortsDrawer:
         syllable_times: list[float],
         sound_duration_sec: float,
         style: Any,
+        meaning_karaoke: Optional[tuple[float, float]] = None,
     ) -> None:
-        data = build_sentence_render_data_with_tone_icons(item)
         fh = screen.get_height()
-        self._karaoke.draw(
+        rect = zones.middle
+        item_karaoke = dict(item)
+        meaning_text = ""
+        if meaning_karaoke is not None:
+            meaning_text = self._conversation_translation_text(item)
+            item_karaoke["translation"] = []
+        data = build_sentence_render_data_with_tone_icons(item_karaoke)
+        cn_elapsed = float(elapsed_sec)
+        cn_dur = max(1e-6, float(sound_duration_sec))
+        if meaning_karaoke is not None:
+            cn_elapsed = 0.0
+            cn_dur = 1.0
+        trans_y = self._karaoke.draw(
             screen,
             data=data,
-            rect=zones.middle,
+            rect=rect,
             style=style,
-            elapsed_sec=elapsed_sec,
+            elapsed_sec=cn_elapsed,
             syllable_times=syllable_times,
-            sound_duration_sec=sound_duration_sec,
+            sound_duration_sec=cn_dur,
             y_offset=shorts_middle_y_offset(fh),
             pinyin_y_offset=shorts_pinyin_y_offset(fh),
             pinyin_hanzi_gap=shorts_pinyin_hanzi_gap(fh),
             translation_extra_gap=shorts_translation_extra_gap(fh),
+            return_translation_y=meaning_karaoke is not None and bool(meaning_text),
         )
+        if meaning_karaoke is not None and meaning_text and trans_y is not None:
+            el, dur = meaning_karaoke
+            self._karaoke.draw_translation_karaoke_wipe(
+                screen,
+                text=meaning_text,
+                center_x=rect.centerx,
+                y=int(trans_y),
+                style=style,
+                elapsed_sec=float(el),
+                sound_duration_sec=max(1e-6, float(dur)),
+                rect_bottom=rect.bottom,
+            )
 
     def _draw_vocab_pos_line(
         self,
@@ -912,20 +944,16 @@ class ShortsDrawer:
         )
         if meaning_karaoke is not None:
             el, dur = meaning_karaoke
-            mw = max(120, rect.width - 64)
-            meaning_rect = pygame.Rect(
-                rect.centerx - mw // 2,
-                max(sub_rect.top, int(overlay.meaning_y) - 8),
-                mw,
-                96,
-            )
-            self._karaoke.draw_meaning_karaoke(
+            self._karaoke.draw_translation_karaoke_wipe(
                 screen,
                 text=meaning_text,
-                rect=meaning_rect,
+                center_x=rect.centerx,
+                y=int(overlay.meaning_y),
+                style=style,
                 elapsed_sec=float(el),
                 sound_duration_sec=max(1e-6, float(dur)),
-                vocab_kr_font_pt=int(self._font_sizes.kr),
+                font_pt=int(self._font_sizes.ko_subtitle_kr),
+                rect_bottom=zones.middle.bottom,
             )
         if pos:
             self._draw_vocab_pos_line(

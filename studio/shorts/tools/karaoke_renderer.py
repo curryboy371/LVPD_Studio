@@ -54,7 +54,8 @@ class KaraokeRenderer:
         after_hanzi_pad: int = 0,
         fixed_pinyin_y: Optional[int] = None,
         fixed_hanzi_y: Optional[int] = None,
-    ) -> None:
+        return_translation_y: bool = False,
+    ) -> int | None:
         """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다."""
         del syllable_times  # 음절 단위 하이라이트 미사용
         pinyin = (data.pinyin or "").strip()
@@ -65,6 +66,12 @@ class KaraokeRenderer:
 
         center_x = rect.centerx
         line_gap = style.layout.line_gap_px
+        after_hanzi_y: int | None = None
+        extra_trans = (
+            int(translation_extra_gap)
+            if translation_extra_gap is not None
+            else style.layout.translation_extra_gap_px
+        )
 
         if fixed_hanzi_y is not None:
             hz_y = int(fixed_hanzi_y)
@@ -79,7 +86,7 @@ class KaraokeRenderer:
                     progress=progress,
                 )
             if hanzi:
-                self._draw_hanzi_wipe(
+                after_hanzi_y = self._draw_hanzi_wipe(
                     screen,
                     hanzi=hanzi,
                     center_x=center_x,
@@ -87,7 +94,9 @@ class KaraokeRenderer:
                     style=style,
                     progress=progress,
                 )
-            return
+            if return_translation_y and after_hanzi_y is not None:
+                return min(after_hanzi_y + line_gap + extra_trans, rect.bottom - 8)
+            return None
 
         y = rect.top + 12 + max(0, int(y_offset)) + max(0, int(pinyin_y_offset))
         gap_py_hz = int(pinyin_hanzi_gap) if pinyin_hanzi_gap is not None else line_gap
@@ -113,18 +122,17 @@ class KaraokeRenderer:
                 style=style,
                 progress=progress,
             )
+            after_hanzi_y = y
             pad_after = max(0, int(after_hanzi_pad))
             if pad_after:
                 y += pad_after
             elif not vocab_pos:
                 y += line_gap
 
+        if return_translation_y and after_hanzi_y is not None:
+            return min(after_hanzi_y + line_gap + extra_trans, rect.bottom - 8)
+
         if vocab_pos:
-            extra_trans = (
-                int(translation_extra_gap)
-                if translation_extra_gap is not None
-                else style.layout.translation_extra_gap_px
-            )
             y += extra_trans
             trans_color = style.colors.translation_color
             from utils.fonts import load_font_korean
@@ -144,11 +152,6 @@ class KaraokeRenderer:
                     align="center",
                 )
         elif trans:
-            extra_trans = (
-                int(translation_extra_gap)
-                if translation_extra_gap is not None
-                else style.layout.translation_extra_gap_px
-            )
             y += extra_trans
             surf = self._drawer._get_cached_translation_surf(trans, style.colors.translation_color)
             self._drawer._blit_surface(
@@ -159,6 +162,7 @@ class KaraokeRenderer:
                 min_margin_x=style.layout.min_margin_x,
                 align="center",
             )
+        return None
 
     def _draw_cached_wipe(
         self,
@@ -213,6 +217,49 @@ class KaraokeRenderer:
             active_color=KARAOKE_ACTIVE_PINYIN,
         )
 
+    def draw_translation_karaoke_wipe(
+        self,
+        screen: pygame.Surface,
+        *,
+        text: str,
+        center_x: int,
+        y: int,
+        style: SentenceStyleConfig,
+        elapsed_sec: float,
+        sound_duration_sec: float,
+        font_pt: Optional[int] = None,
+        rect_bottom: Optional[int] = None,
+    ) -> None:
+        """뜻/번역 줄 — 중국어 mp3 구간 정적 번역과 동일 y·폰트, TTS 중 좌→우 노래방."""
+        line = (text or "").strip()
+        if not line:
+            return
+        progress = compute_karaoke_progress(elapsed_sec, sound_duration_sec)
+        inactive = style.colors.translation_color
+        active = KO_KARAOKE_ACTIVE
+        if font_pt is not None:
+            from utils.fonts import load_font_korean
+
+            font = load_font_korean(max(14, int(font_pt)), inactive)
+            if font is None:
+                return
+            surf_in = font.render(line, True, inactive)
+            surf_ac = font.render(line, True, active)
+        else:
+            font_pg = self._drawer._fonts.translation_pg
+            surf_in = font_pg.render(line, True, inactive)
+            surf_ac = font_pg.render(line, True, active)
+        bottom = int(rect_bottom) if rect_bottom is not None else screen.get_height()
+        draw_y = min(int(y), bottom - surf_in.get_height() - 8)
+        blit_horizontal_karaoke_wipe(
+            screen,
+            surf_in,
+            surf_ac,
+            center_x=int(center_x),
+            y=max(0, draw_y),
+            progress=progress,
+        )
+
     def draw_meaning_karaoke(
         self,
         screen: pygame.Surface,
@@ -223,8 +270,10 @@ class KaraokeRenderer:
         sound_duration_sec: float,
         vocab_kr_font_pt: int = 36,
         alpha: int | None = None,
+        y_top: Optional[int] = None,
+        rect_bottom: Optional[int] = None,
     ) -> None:
-        """한국어 뜻만 좌→우 노래방 채움(TTS 구간)."""
+        """한국어 뜻만 좌→우 노래방 채움(TTS 구간). y_top 있으면 상단 정렬(번역 줄과 동일)."""
         line = (text or "").strip()
         if not line:
             return
@@ -237,7 +286,12 @@ class KaraokeRenderer:
             return
         surf_in = font.render(line, True, KO_KARAOKE_INACTIVE)
         surf_ac = font.render(line, True, KO_KARAOKE_ACTIVE)
-        y = rect.centery - surf_in.get_height() // 2
+        if y_top is not None:
+            bottom = int(rect_bottom) if rect_bottom is not None else int(rect.bottom)
+            y = min(int(y_top), bottom - surf_in.get_height() - 8)
+        else:
+            y = rect.centery - surf_in.get_height() // 2
+            y = max(rect.top, y)
         a: int | None = None
         if alpha is not None:
             a = int(max(0, min(255, alpha)))
@@ -254,7 +308,7 @@ class KaraokeRenderer:
                 surf_in,
                 surf_ac,
                 center_x=rect.centerx,
-                y=max(rect.top, y),
+                y=y,
                 progress=progress,
             )
         finally:
