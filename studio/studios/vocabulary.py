@@ -900,6 +900,7 @@ class VocabularyStudio:
             fixed_pinyin_y=pinyin_y,
             fixed_hanzi_y=hanzi_y,
             pinyin_hanzi_gap=12,
+            hanzi_karaoke_only=True,
         )
         meanings = self._parse_meaning_items((word.meaning or "").strip() if word else "")
         meaning_text = " · ".join(meanings)

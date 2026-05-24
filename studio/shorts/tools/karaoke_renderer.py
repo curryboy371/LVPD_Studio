@@ -55,8 +55,12 @@ class KaraokeRenderer:
         fixed_pinyin_y: Optional[int] = None,
         fixed_hanzi_y: Optional[int] = None,
         return_translation_y: bool = False,
+        hanzi_karaoke_only: bool = False,
     ) -> int | None:
-        """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다."""
+        """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다.
+
+        hanzi_karaoke_only=True면 병음은 정적, 한자만 노래방 채움.
+        """
         del syllable_times  # 음절 단위 하이라이트 미사용
         pinyin = (data.pinyin or "").strip()
         hanzi = (data.sentence or "").strip()
@@ -76,15 +80,24 @@ class KaraokeRenderer:
         if fixed_hanzi_y is not None:
             hz_y = int(fixed_hanzi_y)
             if pinyin and fixed_pinyin_y is not None:
-                self._draw_pinyin_wipe(
-                    screen,
-                    pinyin=pinyin,
-                    center_x=center_x,
-                    y=int(fixed_pinyin_y),
-                    rect=rect,
-                    style=style,
-                    progress=progress,
-                )
+                if hanzi_karaoke_only:
+                    self._draw_pinyin_static(
+                        screen,
+                        pinyin=pinyin,
+                        center_x=center_x,
+                        y=int(fixed_pinyin_y),
+                        style=style,
+                    )
+                else:
+                    self._draw_pinyin_wipe(
+                        screen,
+                        pinyin=pinyin,
+                        center_x=center_x,
+                        y=int(fixed_pinyin_y),
+                        rect=rect,
+                        style=style,
+                        progress=progress,
+                    )
             if hanzi:
                 after_hanzi_y = self._draw_hanzi_wipe(
                     screen,
@@ -102,15 +115,24 @@ class KaraokeRenderer:
         gap_py_hz = int(pinyin_hanzi_gap) if pinyin_hanzi_gap is not None else line_gap
 
         if pinyin:
-            y = self._draw_pinyin_wipe(
-                screen,
-                pinyin=pinyin,
-                center_x=center_x,
-                y=y,
-                rect=rect,
-                style=style,
-                progress=progress,
-            )
+            if hanzi_karaoke_only:
+                y = self._draw_pinyin_static(
+                    screen,
+                    pinyin=pinyin,
+                    center_x=center_x,
+                    y=y,
+                    style=style,
+                )
+            else:
+                y = self._draw_pinyin_wipe(
+                    screen,
+                    pinyin=pinyin,
+                    center_x=center_x,
+                    y=y,
+                    rect=rect,
+                    style=style,
+                    progress=progress,
+                )
             y += gap_py_hz
 
         if hanzi:
@@ -190,6 +212,41 @@ class KaraokeRenderer:
             screen, surf_in, surf_ac, center_x=center_x, y=y, progress=progress
         )
         return y + max(surf_in.get_height(), surf_ac.get_height())
+
+    def _draw_pinyin_static(
+        self,
+        screen: pygame.Surface,
+        *,
+        pinyin: str,
+        center_x: int,
+        y: int,
+        style: SentenceStyleConfig,
+    ) -> int:
+        """병음 정적 표시 — 노래방 채움 없음."""
+        if not pinyin:
+            return y
+        fonts = self._drawer._fonts
+        self._drawer._blit_text(
+            screen,
+            cache=self._drawer._cache_pinyin,
+            font_ft=fonts.pinyin_ft,
+            font_pg=fonts.pinyin_pg,
+            text=pinyin,
+            color=KARAOKE_ACTIVE_PINYIN,
+            center_x=center_x,
+            y=y,
+            alpha=255,
+            min_margin_x=style.layout.min_margin_x,
+            align="center",
+        )
+        h = self._drawer._cached_line_height(
+            self._drawer._cache_pinyin,
+            fonts.pinyin_ft,
+            fonts.pinyin_pg,
+            pinyin,
+            KARAOKE_ACTIVE_PINYIN,
+        )
+        return y + h
 
     def _draw_pinyin_wipe(
         self,

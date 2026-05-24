@@ -1515,12 +1515,28 @@ class ClipScene:
             ClipStage.HOOK_IN,
         ):
             return
+        meaning_karaoke: Optional[tuple[float, float]] = None
+        tts_text: Optional[str] = None
+        if (
+            self._stage == ClipStage.VOCAB_MEANING_KO
+            and self._ko_started
+            and not self._ko_finished
+        ):
+            cue = (self._ko_current_text or "").strip()
+            if cue:
+                tts_text = cue
+                meaning_karaoke = (
+                    float(self._ko_cue_elapsed),
+                    max(1e-6, float(self._ko_cue_duration)),
+                )
         self._drawer.draw_vocab_meaning_if_any(
             screen,
             zones=zones,
             item=self._clip,
             hook_title=self._hook_title,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
+            meaning_karaoke=meaning_karaoke,
+            tts_text=tts_text,
         )
 
     def _draw_vocab_tip_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:

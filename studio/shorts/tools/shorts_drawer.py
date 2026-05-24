@@ -471,6 +471,40 @@ class ShortsDrawer:
             surf.set_alpha(alpha)
         screen.blit(surf, (center_x - tw // 2, int(y)))
 
+    def _draw_vocab_meaning_karaoke(
+        self,
+        screen: pygame.Surface,
+        *,
+        center_x: int,
+        y: int,
+        text: str,
+        elapsed_sec: float,
+        sound_duration_sec: float,
+        fade_alpha: int = 255,
+    ) -> None:
+        """단어 뜻 TTS 구간 — 배경 + 좌→우 노래방."""
+        label = (text or "").strip()
+        if not label or fade_alpha <= 0:
+            return
+        from studio.shorts.tools.karaoke_renderer import compute_karaoke_progress
+
+        alpha = max(0, min(255, int(fade_alpha)))
+        progress = compute_karaoke_progress(elapsed_sec, sound_duration_sec)
+        surf_in = self._ko_subtitle_font.render(label, True, KO_KARAOKE_INACTIVE)
+        surf_ac = self._ko_subtitle_font.render(label, True, KO_KARAOKE_ACTIVE)
+        tw, th = surf_in.get_width(), surf_in.get_height()
+        self._draw_ko_subtitle_background(
+            screen, center_x=center_x, y=int(y), text_w=tw, text_h=th, fade_alpha=alpha
+        )
+        if alpha < 255:
+            surf_in = surf_in.copy()
+            surf_ac = surf_ac.copy()
+            surf_in.set_alpha(alpha)
+            surf_ac.set_alpha(alpha)
+        blit_horizontal_karaoke_wipe(
+            screen, surf_in, surf_ac, center_x=center_x, y=int(y), progress=progress
+        )
+
     def draw_vocab_tip(
         self,
         screen: pygame.Surface,
@@ -785,6 +819,7 @@ class ShortsDrawer:
             pinyin_hanzi_gap=shorts_pinyin_hanzi_gap(fh),
             translation_extra_gap=shorts_translation_extra_gap(fh),
             return_translation_y=meaning_karaoke is not None and bool(meaning_text),
+            hanzi_karaoke_only=True,
         )
         if meaning_karaoke is not None and meaning_text and trans_y is not None:
             el, dur = meaning_karaoke
@@ -944,27 +979,8 @@ class ShortsDrawer:
             sound_duration_sec=cn_dur,
             fixed_pinyin_y=pinyin_y,
             fixed_hanzi_y=hanzi_y,
+            hanzi_karaoke_only=True,
         )
-        if meaning_karaoke is not None:
-            el, dur = meaning_karaoke
-            tts_line = (vocab_meaning_tts_text or meaning_text or "").strip()
-            if tts_line:
-                meaning_rect = pygame.Rect(
-                    rect.left,
-                    int(overlay.meaning_y),
-                    rect.width,
-                    max(32, int(zones.middle.bottom) - int(overlay.meaning_y)),
-                )
-                self._karaoke.draw_meaning_karaoke(
-                    screen,
-                    text=tts_line,
-                    rect=meaning_rect,
-                    elapsed_sec=float(el),
-                    sound_duration_sec=max(1e-6, float(dur)),
-                    vocab_kr_font_pt=int(self._font_sizes.ko_subtitle_kr),
-                    y_top=int(overlay.meaning_y),
-                    rect_bottom=int(zones.middle.bottom),
-                )
         if pos:
             self._draw_vocab_pos_line(
                 screen,
@@ -984,10 +1000,17 @@ class ShortsDrawer:
         item: dict[str, Any],
         hook_title: str = "",
         fade_alpha: int = 255,
+        meaning_karaoke: Optional[tuple[float, float]] = None,
+        tts_text: Optional[str] = None,
     ) -> None:
         """단어 뜻(words.csv) — middle set_clip 밖에서 그려 하단 잘림 방지."""
         meaning_text = self._vocab_meaning_text(item)
-        if not meaning_text or fade_alpha <= 0:
+        karaoke_line = (tts_text or "").strip()
+        if meaning_karaoke is not None and karaoke_line:
+            display_text = karaoke_line
+        else:
+            display_text = meaning_text
+        if not display_text or fade_alpha <= 0:
             return
         fh = screen.get_height()
         hook_bottom = self.measure_hook_title_bottom_y(hook_title, frame_height=fh)
@@ -1011,13 +1034,25 @@ class ShortsDrawer:
             kr_font_pt=int(self._font_sizes.kr),
             ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr),
         )
-        self._draw_vocab_meaning_line(
-            screen,
-            center_x=zones.middle.centerx,
-            y=overlay.meaning_y,
-            text=meaning_text,
-            fade_alpha=fade_alpha,
-        )
+        if meaning_karaoke is not None and karaoke_line:
+            el, dur = meaning_karaoke
+            self._draw_vocab_meaning_karaoke(
+                screen,
+                center_x=zones.middle.centerx,
+                y=overlay.meaning_y,
+                text=karaoke_line,
+                elapsed_sec=float(el),
+                sound_duration_sec=max(1e-6, float(dur)),
+                fade_alpha=fade_alpha,
+            )
+        else:
+            self._draw_vocab_meaning_line(
+                screen,
+                center_x=zones.middle.centerx,
+                y=overlay.meaning_y,
+                text=display_text,
+                fade_alpha=fade_alpha,
+            )
 
     def draw_bottom_zone(
         self,
