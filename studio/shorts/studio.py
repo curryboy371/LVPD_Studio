@@ -108,6 +108,9 @@ class ShortsStudio(IStudio):
             start_follow_sound=self._start_follow_sound,
             stop_follow_sound=self._stop_follow_sound,
             follow_along_mp3=self._follow_along_mp3_path,
+            is_recording=self._is_recording_mode,
+            recording_timeline_sec=self._recording_timeline_sec,
+            record_recording_event=self._record_recording_event,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
         self._scene.set_on_topic_intro_done(self._on_topic_intro_done)
@@ -167,6 +170,11 @@ class ShortsStudio(IStudio):
             from studio.shorts.brand_icon import draw_brand_icon
 
             draw_brand_icon(screen)
+
+    def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
+        """record 루프 종료 직전: 열린 word_video 오디오 구간을 VideoSegmentEnd로 닫는다."""
+        if self._scene is not None:
+            self._scene.finalize_recording_audio_segments(timeline_end_sec=timeline_end_sec)
 
     def get_recording_prefix(self) -> Optional[str]:
         return "SHORTS_REC"
@@ -248,6 +256,24 @@ class ShortsStudio(IStudio):
     def _is_recording_mode(self) -> bool:
         cfg = self._last_config
         return getattr(cfg, "recording_log_event", None) is not None
+
+    def _recording_timeline_sec(self) -> float:
+        cfg = self._last_config
+        if cfg is None:
+            return 0.0
+        return float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+
+    def _record_recording_event(self, event: Any) -> None:
+        cfg = self._last_config
+        log = getattr(cfg, "recording_log_event", None) if cfg is not None else None
+        if log is None:
+            return
+        try:
+            from studio.recording_events import recording_log_event
+
+            recording_log_event(log, event)
+        except Exception:
+            pass
 
     def _on_learn_bg_started(self, path: str, duration_sec: float) -> None:
         self._record_insert_sound(path, duration_sec=max(1.0, float(duration_sec)))

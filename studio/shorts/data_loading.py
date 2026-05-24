@@ -610,6 +610,11 @@ def build_shorts_vocabulary_clip_list(
             len(word_ids),
             default=True,
         )
+        use_word_video_audio_flags = parse_vocab_bool_list_field(
+            row.get("use_word_video_audio") or "",
+            len(word_ids),
+            default=False,
+        )
         last_hold_text = _normalize_multiline_field(row.get("last_hold_text") or "")
         last_hold_sec = parse_last_hold_sec_field(row.get("last_hold_sec"))
 
@@ -647,6 +652,7 @@ def build_shorts_vocabulary_clip_list(
             clip["sound_repeat_count"] = sound_repeat_counts[wi - 1]
             clip["after_sound_delay_sec"] = after_sound_delays[wi - 1]
             clip["read_meaning_ko"] = read_meaning_ko_flags[wi - 1]
+            clip["use_word_video_audio"] = use_word_video_audio_flags[wi - 1]
             clip["last_hold_text"] = last_hold_text
             clip["last_hold_sec"] = last_hold_sec
             word = get_word(word_id)

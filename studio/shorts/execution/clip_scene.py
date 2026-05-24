@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from enum import Enum, auto
 from typing import Any, Callable, Optional
 
@@ -47,6 +48,7 @@ except ImportError:
 
 _CHANNEL_HOOK = "shorts_hook"
 _CHANNEL_BOTTOM = "shorts_bottom"
+_WORD_VIDEO_AUDIO_CHANNEL_INDEX = 6
 
 
 class ClipStage(Enum):
@@ -78,6 +80,9 @@ class ClipScene:
         start_follow_sound: Optional[Callable[[float], None]] = None,
         stop_follow_sound: Optional[Callable[[], None]] = None,
         follow_along_mp3: Optional[Callable[[], str]] = None,
+        is_recording: Optional[Callable[[], bool]] = None,
+        recording_timeline_sec: Optional[Callable[[], float]] = None,
+        record_recording_event: Optional[Callable[[Any], None]] = None,
         hook_fade_sec: float = HOOK_FADE_IN_SEC,
         cta_hold_sec: float = CTA_HOLD_SEC,
     ) -> None:
@@ -89,6 +94,10 @@ class ClipScene:
         self._start_follow_sound = start_follow_sound
         self._stop_follow_sound = stop_follow_sound
         self._follow_along_mp3 = follow_along_mp3
+        self._is_recording = is_recording
+        self._recording_timeline_sec = recording_timeline_sec
+        self._record_recording_event = record_recording_event
+        self._word_video_recording_segment_open = False
         self._hook_fade_sec = max(0.01, float(hook_fade_sec))
         self._default_cta_hold_sec = max(0.0, float(cta_hold_sec))
         self._cta_hold_sec = self._default_cta_hold_sec
@@ -102,6 +111,7 @@ class ClipScene:
         self._word_video_inner_size: tuple[int, int] = (0, 0)
         self._word_video_started: bool = False
         self._word_video_clock: float = 0.0
+        self._word_video_audio_channel: Optional[pygame.mixer.Channel] = None
         self._video_inner_size: tuple[int, int] = (0, 0)
         self._video_display_alpha: int = 255
         self._video_fade_from_alpha: int = 255
@@ -364,10 +374,119 @@ class ClipScene:
     def _word_video_path(self) -> str:
         return str(self._clip.get("word_video_path") or "").strip()
 
+    def _word_video_sidecar_mp3_path(self) -> str:
+        path = self._word_video_path()
+        if not path:
+            return ""
+        mp3 = str(Path(path).with_suffix(".mp3"))
+        return mp3 if Path(mp3).is_file() else ""
+
+    def _use_word_video_audio(self) -> bool:
+        v = self._clip.get("use_word_video_audio")
+        if isinstance(v, bool):
+            return v
+        s = str(v or "").strip().lower()
+        if s in ("1", "true", "yes", "y", "on", "t"):
+            return True
+        if s in ("0", "false", "no", "n", "off", "f"):
+            return False
+        return False
+
     def _has_word_video(self) -> bool:
         return bool(self._word_video_path())
 
+    def _recording_mode(self) -> bool:
+        if self._is_recording is None:
+            return False
+        try:
+            return bool(self._is_recording())
+        except Exception:
+            return False
+
+    def _timeline_sec(self) -> float:
+        if self._recording_timeline_sec is None:
+            return 0.0
+        try:
+            return max(0.0, float(self._recording_timeline_sec()))
+        except Exception:
+            return 0.0
+
+    def _emit_recording_event(self, event: Any) -> None:
+        if self._record_recording_event is None:
+            return
+        try:
+            self._record_recording_event(event)
+        except Exception:
+            pass
+
+    def _end_word_video_recording_segment(self, *, timeline_sec: float | None = None) -> None:
+        if not self._word_video_recording_segment_open:
+            return
+        from studio.recording_events import VideoSegmentEnd
+
+        tl = self._timeline_sec() if timeline_sec is None else max(0.0, float(timeline_sec))
+        self._emit_recording_event(VideoSegmentEnd(timeline_sec=tl))
+        self._word_video_recording_segment_open = False
+
+    def finalize_recording_audio_segments(self, *, timeline_end_sec: float) -> None:
+        """record 루프 종료 직전: 열린 word_video sidecar 구간을 닫는다."""
+        self._end_word_video_recording_segment(timeline_sec=float(timeline_end_sec))
+
+    def _stop_word_video_audio(self) -> None:
+        self._end_word_video_recording_segment()
+        ch = self._word_video_audio_channel
+        if ch is None:
+            return
+        try:
+            ch.stop()
+        except Exception:
+            pass
+        self._word_video_audio_channel = None
+
+    def _start_word_video_audio(self) -> None:
+        if not self._use_word_video_audio():
+            return
+        mp3_path = self._word_video_sidecar_mp3_path()
+        if not mp3_path:
+            logger.debug(
+                "단어 비디오 sidecar mp3 없음 word_id=%s path=%s",
+                self._clip.get("word_id"),
+                self._word_video_path(),
+            )
+            return
+        if self._recording_mode():
+            from studio.recording_events import VideoSegmentStart
+
+            if not self._word_video_recording_segment_open:
+                self._emit_recording_event(
+                    VideoSegmentStart(
+                        timeline_sec=self._timeline_sec(),
+                        video_path=mp3_path,
+                        video_pts_sec=0.0,
+                    )
+                )
+                self._word_video_recording_segment_open = True
+            return
+        try:
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            snd = pygame.mixer.Sound(mp3_path)
+            ch = pygame.mixer.Channel(_WORD_VIDEO_AUDIO_CHANNEL_INDEX)
+            ch.play(snd)
+            self._word_video_audio_channel = ch
+        except Exception as ex:
+            logger.warning(
+                "단어 비디오 sidecar mp3 재생 실패 word_id=%s path=%s: %s",
+                self._clip.get("word_id"),
+                mp3_path,
+                ex,
+            )
+            self._word_video_audio_channel = None
+
     def _reset_word_video(self) -> None:
+        self._stop_word_video_audio()
         self._word_video_player.close()
         self._word_video_frozen_frame = None
         self._word_video_last_live_frame = None
@@ -404,6 +523,7 @@ class ClipScene:
             self._reset_word_video()
             return
         self._word_video_started = True
+        self._start_word_video_audio()
 
     def _should_draw_word_video(self) -> bool:
         if not self._has_word_video() or not self._word_video_started:
@@ -432,6 +552,7 @@ class ClipScene:
             frame = self._word_video_last_live_frame
         if frame is not None:
             self._word_video_frozen_frame = frame.copy()
+        self._stop_word_video_audio()
         if self._word_video_player.has_source():
             self._word_video_player.close()
 

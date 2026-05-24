@@ -102,6 +102,7 @@
 | sound_repeat_count | str | - | 중국어 `sound_path` 재생 횟수. `1` 또는 `2\|1\|1` (`word_id` 순, 1개면 전체 동일). 기본 1 |
 | after_sound_delay_sec | str | - | 마지막 mp3 재생 후 다음 단어까지 대기(초). `1.5` 또는 `2\|1\|0.5` 형식. 기본 0 |
 | read_meaning_ko | str | - | 뜻 한국어 TTS 재생 여부. `true`/`false` 또는 `true\|false\|true` (`word_id` 순, 1개면 전체 동일). 기본 `true`. `false`면 뜻 나레이션 생략 후 바로 중국어 `sound_path` mp3 |
+| use_word_video_audio | str | - | 단어 `word_video_path`의 sidecar mp3(동명 `.mp3`)를 비디오 타임라인과 함께 재생할지 여부. `true`/`false` 또는 `true\|false` (`word_id` 순, 1개면 전체 동일). 기본 `false`. debug만 실시간 재생, record는 `VideoSegmentStart`/`End`로 mux에만 반영 |
 | last_hold_text | str | - | **topic 전체** 마지막 단어 종료 후 CTA_HOLD 문구 — words.csv `tip` 아래. `\\n` 줄바꿈 |
 | last_hold_sec | float | - | CTA_HOLD 대기(초, 소수 가능). 비우면 **2.5** |
 | bg_path | str | - | 따라해보세요 구간 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
@@ -115,8 +116,8 @@
 ### CSV 예 (topic 1행)
 
 ```csv
-id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_sound_delay_sec,read_meaning_ko,bg_path
-1,fruit_store,20501|20504|20505,사과 외워보세요|망고 외워보세요|수박 외워보세요,2,resource/video/intro.mp4,2|2|1,1.5|1|0.5,true,resource/sound/bg/calm.mp3
+id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_sound_delay_sec,read_meaning_ko,use_word_video_audio,bg_path
+1,fruit_store,20501|20504|20505,사과 외워보세요|망고 외워보세요|수박 외워보세요,2,resource/video/intro.mp4,2|2|1,1.5|1|0.5,true,false,resource/sound/bg/calm.mp3
 ```
 
 `hook_title`이 `과일 단어 외워보세요` 한 줄이면 사과·망고·수박 모두 같은 훅.
