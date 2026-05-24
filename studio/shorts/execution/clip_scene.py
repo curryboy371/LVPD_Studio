@@ -1636,6 +1636,22 @@ class ClipScene:
             frame_height=fh,
         )
 
+    def _should_draw_pinned_video(self) -> bool:
+        """고정 프레임 표시 여부. 단어 슬롯 비디오 단계는 제외, 회화는 문장 단계에도 유지."""
+        if self._frozen_video_frame is None:
+            return False
+        if self._stage in (
+            ClipStage.VOCAB_MEANING_KO,
+            ClipStage.LEARN_PLAY,
+            ClipStage.HOOK_IN,
+        ):
+            return bool(
+                self._is_conversation_clip()
+                and self._had_video_intro
+                and self._stage in (ClipStage.VOCAB_MEANING_KO, ClipStage.LEARN_PLAY)
+            )
+        return True
+
     def _draw_pinned_video(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
         """고정된 마지막 프레임(문장 단계에서도 유지)."""
         if self._frozen_video_frame is None:
@@ -1732,11 +1748,7 @@ class ClipScene:
         )
         overlay_sub = self._overlay_subtitle_text()
 
-        if (
-            self._frozen_video_frame is not None
-            and self._stage
-            not in (ClipStage.VOCAB_MEANING_KO, ClipStage.LEARN_PLAY, ClipStage.HOOK_IN)
-        ):
+        if self._should_draw_pinned_video():
             self._draw_pinned_video(screen, zones)
 
         meaning_karaoke: Optional[tuple[float, float]] = None
