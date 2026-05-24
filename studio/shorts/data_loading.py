@@ -263,7 +263,7 @@ def _common_clip_fields(
         "topic": topic,
         "hook_title": resolve_hook_title(row),
         "hook_image_path": hook_image,
-        "situation_subtitle": (row.get("situation_subtitle") or "").strip(),
+        "situation_subtitle": _normalize_multiline_field(row.get("situation_subtitle") or ""),
         "ko_narration_id": _parse_ko_narration_id(row),
         "sound_path": sound_path,
         "syllable_times": syllable_times,

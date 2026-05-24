@@ -49,6 +49,12 @@ def _insert_sound_mux_role(path: str) -> str:
     return "voice"
 
 
+def _is_bg_loop_insert_path(path: str) -> bool:
+    """resource/sound/bg 배경음: mux 시 0초부터 동일 곡을 구간 길이만큼 루프."""
+    norm = str(path or "").replace("\\", "/").lower()
+    return "/resource/sound/background/" in norm or "/resource/sound/bg/" in norm
+
+
 def _mux_volume_prefix(role: str) -> str:
     """녹화 mux용 역할별 선형 볼륨 필터 prefix."""
     if role == "embedded":
@@ -297,12 +303,15 @@ def _build_audio_from_events(
         atrim = f"atrim={src_start}:{src_start + dur}"
         gain = _mux_volume_prefix(role)
         fade = ""
+        loop = ""
         if role == "bg_insert":
             fade_sec = min(1.0, max(0.1, dur * 0.45))
             out_start = max(0.0, dur - fade_sec)
             fade = f"afade=t=in:st=0:d={fade_sec},afade=t=out:st={out_start}:d={fade_sec},"
+            if _is_bg_loop_insert_path(path):
+                loop = "aloop=loop=-1:size=2e+09,"
         filter_parts.append(
-            f"[{idx + 1}:a]{atrim},{gain}{fade}adelay={delay_ms}|{delay_ms},"
+            f"[{idx + 1}:a]{loop}{atrim},{gain}{fade}adelay={delay_ms}|{delay_ms},"
             f"apad=whole_len={whole_len}[a{idx}]"
         )
     # [0][a0][a1]...amix → aformat 체인으로 [aout]까지 연결

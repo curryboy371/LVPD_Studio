@@ -32,7 +32,7 @@
         "--mode",
         "debug",
         "--topic",
-        "where",
+        "hair1",
         "--shorts-type",
         "conversation"
       ],
@@ -43,7 +43,7 @@
     },
     {
       "name": "F5 단어장",
-      "type": "debugpy",
+      "type": "debugpy", 
       "request": "launch",
       "program": "${workspaceFolder}/studio/runner.py",
       "args": [
@@ -52,7 +52,7 @@
         "--mode",
         "debug",
         "--topic",
-        "test"
+        "hair"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",

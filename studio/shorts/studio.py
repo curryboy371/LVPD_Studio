@@ -207,12 +207,19 @@ class ShortsStudio(IStudio):
             return max(60.0, float(getattr(config, "record_max_sec", 3600.0) or 3600.0))
         return 3600.0
 
-    def _ensure_bg_session(self, config: Any, *, reload: bool = False) -> None:
+    def _ensure_bg_session(
+        self,
+        config: Any,
+        *,
+        reload: bool = False,
+        restart: bool = True,
+    ) -> None:
         if self._bg_player is None:
             return
         self._bg_player.start_session(
             duration_hint_sec=self._bg_duration_hint_sec(config),
             reload=reload,
+            restart=restart,
         )
 
     def _dt_sec(self, config: Any) -> float:
@@ -234,7 +241,7 @@ class ShortsStudio(IStudio):
     def _start_learn_background(self, duration_hint_sec: float) -> None:
         """학습 구간 — 세션 bg가 없으면 시작(이미 재생 중이면 유지)."""
         _ = duration_hint_sec
-        self._ensure_bg_session(self._last_config)
+        self._ensure_bg_session(self._last_config, restart=False)
 
     def _stop_learn_background(self) -> None:
         """음성만 끊을 때 bg는 세션 끝날 때까지 유지."""

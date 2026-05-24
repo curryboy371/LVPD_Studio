@@ -69,20 +69,43 @@ class ConversationBackgroundPlayer:
         """display·mixer 준비 후 사운드를 다시 로드한다(debug F5 등)."""
         self._sounds = load_conversation_background_sounds()
 
-    def start_session(self, *, duration_hint_sec: float = 3600.0, reload: bool = False) -> None:
-        """스튜디오 시작 시 한 번 호출. 세션이 끝날 때까지 bg를 유지한다."""
+    def start_session(
+        self,
+        *,
+        duration_hint_sec: float = 3600.0,
+        reload: bool = False,
+        restart: bool = True,
+    ) -> None:
+        """스튜디오 시작 시 한 번 호출. 세션이 끝날 때까지 bg를 유지한다.
+
+        restart=False: 이미 재생 중이면 끊지 않고 유지(숏츠 따라해보세요 구간 등).
+        """
         if reload or not self._sounds:
             self.reload_sounds()
         if not self._sounds:
             logger.warning("회화 배경음 없음: %s", get_repo_root() / "resource" / "sound" / "bg")
             return
-        if self._session_active and not self._recording_mode():
+        if reload:
+            self._recording_logged = False
+        dur = max(1.0, float(duration_hint_sec))
+        if self._session_active and not restart:
+            if self._recording_mode():
+                if not self._recording_logged:
+                    idx = self._pick_random_index() if self._last_index is None else self._last_index
+                    self._play_index(idx, duration_hint_sec=dur)
+                return
             ch = self._channel
             if ch is not None and ch.get_busy():
                 return
+        if restart and self._session_active:
+            self._stop_channel_immediate()
+        if reload or self._last_index is None:
+            idx = self._pick_random_index()
+        else:
+            idx = self._last_index
         self._session_active = True
         self._paused = False
-        self._play_random(duration_hint_sec=max(1.0, float(duration_hint_sec)))
+        self._play_index(idx, duration_hint_sec=dur)
 
     def stop_session(self) -> None:
         """스튜디오 종료·단어 단계 전환 시 fade out."""
@@ -121,7 +144,7 @@ class ConversationBackgroundPlayer:
             pass
 
     def tick(self, *, duration_hint_sec: float = 3600.0) -> None:
-        """매 프레임: 재생이 끊기면 즉시 다시 시작해 항상 bg가 이어지게 한다."""
+        """매 프레임: 재생이 끊기면 동일 곡을 처음부터 다시 재생한다."""
         if not self._session_active or self._paused or not self._sounds:
             return
         if self._recording_mode():
@@ -129,15 +152,27 @@ class ConversationBackgroundPlayer:
         ch = self._channel
         if ch is not None and ch.get_busy():
             return
-        self._play_random(duration_hint_sec=max(1.0, float(duration_hint_sec)))
+        idx = self._last_index if self._last_index is not None else 0
+        self._play_index(idx, duration_hint_sec=max(1.0, float(duration_hint_sec)))
 
-    def _play_random(self, *, duration_hint_sec: float) -> None:
+    def _stop_channel_immediate(self) -> None:
+        ch = self._channel
+        if ch is None:
+            return
         try:
-            if len(self._sounds) == 1:
-                idx = 0
-            else:
-                candidates = [i for i in range(len(self._sounds)) if i != self._last_index]
-                idx = random.choice(candidates) if candidates else 0
+            ch.stop()
+        except Exception:
+            pass
+
+    def _pick_random_index(self) -> int:
+        if len(self._sounds) == 1:
+            return 0
+        candidates = [i for i in range(len(self._sounds)) if i != self._last_index]
+        return random.choice(candidates) if candidates else 0
+
+    def _play_index(self, idx: int, *, duration_hint_sec: float) -> None:
+        try:
+            idx = max(0, min(int(idx), len(self._sounds) - 1))
             path, snd = self._sounds[idx]
             self._last_index = idx
             self._active_path = path

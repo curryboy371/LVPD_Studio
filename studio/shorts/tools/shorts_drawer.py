@@ -1069,10 +1069,20 @@ class ShortsDrawer:
         rect = zones.bottom
         pad = 20
         y = rect.top + pad
-        sub = (situation_subtitle or "").strip()
-        if sub:
-            sub_color = (220, 225, 235)
-            surf = self._bottom_font.render(sub, True, sub_color)
-            if alpha < 255:
-                surf.set_alpha(alpha)
+        lines = parse_vocab_tip_lines(situation_subtitle)
+        if not lines:
+            return
+        sub_color = (220, 225, 235)
+        draw_alpha = max(0, min(255, int(alpha)))
+        line_gap = shorts_vocab_tip_line_gap(max(1, int(screen.get_height())))
+        for i, line in enumerate(lines):
+            surf = self._bottom_font.render(line, True, sub_color)
+            if surf is None:
+                continue
+            if draw_alpha < 255:
+                surf = surf.copy()
+                surf.set_alpha(draw_alpha)
             screen.blit(surf, (rect.centerx - surf.get_width() // 2, y))
+            y += surf.get_height()
+            if i < len(lines) - 1:
+                y += line_gap
