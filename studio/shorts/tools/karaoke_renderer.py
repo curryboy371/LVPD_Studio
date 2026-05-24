@@ -249,14 +249,14 @@ class KaraokeRenderer:
             font_pg = self._drawer._fonts.translation_pg
             surf_in = font_pg.render(line, True, inactive)
             surf_ac = font_pg.render(line, True, active)
-        bottom = int(rect_bottom) if rect_bottom is not None else screen.get_height()
-        draw_y = min(int(y), bottom - surf_in.get_height() - 8)
+        # y는 레이아웃(한자·품사 아래 meaning_y) 고정 — 아래 공간 부족해도 위로 당기지 않음
+        draw_y = max(0, int(y))
         blit_horizontal_karaoke_wipe(
             screen,
             surf_in,
             surf_ac,
             center_x=int(center_x),
-            y=max(0, draw_y),
+            y=draw_y,
             progress=progress,
         )
 
@@ -287,8 +287,7 @@ class KaraokeRenderer:
         surf_in = font.render(line, True, KO_KARAOKE_INACTIVE)
         surf_ac = font.render(line, True, KO_KARAOKE_ACTIVE)
         if y_top is not None:
-            bottom = int(rect_bottom) if rect_bottom is not None else int(rect.bottom)
-            y = min(int(y_top), bottom - surf_in.get_height() - 8)
+            y = max(0, int(y_top))
         else:
             y = rect.centery - surf_in.get_height() // 2
             y = max(rect.top, y)

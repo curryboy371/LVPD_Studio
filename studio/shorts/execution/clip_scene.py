@@ -17,10 +17,6 @@ from studio.shorts.constants import (
     SHORTS_BG_PRACTICE_MIN_SEC,
     SHORTS_FOLLOW_ALONG_LABEL,
     SHORTS_NATIVE_LISTEN_LABEL,
-    VOCAB_CN_LISTEN_HINT,
-    VOCAB_CN_LISTEN_HINT_COLOR,
-    VOCAB_CN_SPEAK_HINT,
-    VOCAB_CN_SPEAK_HINT_COLOR,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
@@ -721,8 +717,6 @@ class ClipScene:
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
                     self._stop_learn_background_only()
-                    if self._is_vocabulary_clip() and self._try_vocab_extra_cn_follow_cycle():
-                        return
                     if self._should_post_follow_along_hold():
                         self._enter_post_follow_along_hold()
                     else:
@@ -1017,18 +1011,13 @@ class ClipScene:
         return max(0.0, end_sec - float(self._word_video_clock))
 
     def _vocab_cn_follow_cycle_sec(self) -> float:
-        """중국어 N회 + 따라해보세요 + BG 따라발음 1사이클 추정 길이."""
+        """중국어 N회 1사이클 추정 길이(word_video 여유 반복 판단용)."""
         cn = max(0.1, float(self._sentence_sound_duration or self._sound_once_duration))
         target = max(1, int(self._vocab_sound_repeat_target()))
-        follow = max(2.5, float(self._sound_once_duration) if self._learn_round == 3 else 2.5)
-        bg = max(
-            float(SHORTS_BG_PRACTICE_MIN_SEC),
-            cn + float(SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC),
-        )
-        return target * cn + follow + bg + 1.0
+        return target * cn + 1.0
 
     def _try_vocab_extra_cn_follow_cycle(self) -> bool:
-        """word_video 잔여 시간이 있으면 뜻 TTS 없이 중국어→따라발음만 반복."""
+        """word_video 잔여 시간이 있으면 뜻 TTS 없이 중국어 mp3만 한 사이클 더."""
         remain = self._word_video_remaining_sec()
         need = self._vocab_cn_follow_cycle_sec()
         if remain < need * 0.85:
@@ -1050,10 +1039,8 @@ class ClipScene:
             target = self._vocab_sound_repeat_target()
             if self._sound_play_count < target:
                 self._start_sentence_play(play_index=self._sound_play_count + 1)
-            elif self._learn_round < 3:
-                self._start_follow_along_voice()
-            elif self._learn_round == 3:
-                self._start_bg_practice()
+            elif self._try_vocab_extra_cn_follow_cycle():
+                return
             else:
                 self._finish_learn_sequence()
             return
@@ -1270,17 +1257,7 @@ class ClipScene:
         return ""
 
     def _vocab_cn_mode_hint(self) -> Optional[tuple[str, tuple[int, int, int]]]:
-        """단어 숏츠: 병음 위 듣기·말하기 안내."""
-        if not self._is_vocabulary_clip():
-            return None
-        if self._stage == ClipStage.VOCAB_MEANING_KO:
-            return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
-        if self._stage != ClipStage.LEARN_PLAY:
-            return None
-        if self._learn_round in (1, 2):
-            return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
-        if self._learn_round in (3, 4):
-            return (VOCAB_CN_SPEAK_HINT, VOCAB_CN_SPEAK_HINT_COLOR)
+        """단어 숏츠: 병음 위 듣기·말하기 안내 미표시."""
         return None
 
     def _overlay_subtitle_text(self) -> str:
@@ -1363,6 +1340,21 @@ class ClipScene:
             )
         base = self._sentence_karaoke_duration()
         if self._stage != ClipStage.LEARN_PLAY:
+            if base > 1e-6:
+                return base, base
+            return max(0.0, float(self._learn_elapsed)), 1.0
+
+        # 단어 숏츠: 중국어 mp3 구간만 노래방. BG 따라발음은 음성만, 텍스트 재채움 없음.
+        if self._is_vocabulary_clip():
+            if 1 <= self._learn_round < 4:
+                dur = base if base > 1e-6 else 3.0
+                if not self._is_voice_finished():
+                    return max(0.0, float(self._learn_elapsed)), dur
+                return dur, dur
+            if self._learn_round == 4:
+                if base > 1e-6:
+                    return base, base
+                return 1.0, 1.0
             if base > 1e-6:
                 return base, base
             return max(0.0, float(self._learn_elapsed)), 1.0
@@ -1740,12 +1732,14 @@ class ClipScene:
             self._draw_pinned_video(screen, zones)
 
         meaning_karaoke: Optional[tuple[float, float]] = None
+        vocab_meaning_tts_text: Optional[str] = None
         if show_karaoke:
             k_elapsed, k_dur = self._learn_karaoke_timing()
             if self._stage == ClipStage.VOCAB_MEANING_KO:
                 k_elapsed = float(self._ko_cue_elapsed)
                 k_dur = max(1e-6, float(self._ko_cue_duration))
                 meaning_karaoke = (k_elapsed, k_dur)
+                vocab_meaning_tts_text = (self._ko_current_text or "").strip() or None
             clip_rect = (
                 zones.vocab_middle_draw_clip()
                 if self._is_vocabulary_clip()
@@ -1765,6 +1759,7 @@ class ClipScene:
                     style=self._style,
                     hook_title=self._hook_title,
                     vocab_meaning_karaoke=meaning_karaoke,
+                    vocab_meaning_tts_text=vocab_meaning_tts_text,
                     cn_mode_hint=self._vocab_cn_mode_hint(),
                 )
             finally:

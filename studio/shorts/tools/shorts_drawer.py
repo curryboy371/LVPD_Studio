@@ -700,6 +700,7 @@ class ShortsDrawer:
         style: Any,
         hook_title: str = "",
         vocab_meaning_karaoke: Optional[tuple[float, float]] = None,
+        vocab_meaning_tts_text: Optional[str] = None,
         cn_mode_hint: Optional[tuple[str, tuple[int, int, int]]] = None,
     ) -> None:
         """clip_type에 따라 상황극(노래방) 또는 단어 중앙 UI."""
@@ -725,6 +726,7 @@ class ShortsDrawer:
                 layout_top=layout_top,
                 img_band_h=img_band_h,
                 meaning_karaoke=vocab_meaning_karaoke,
+                vocab_meaning_tts_text=vocab_meaning_tts_text,
                 cn_mode_hint=cn_mode_hint,
             )
             return
@@ -836,6 +838,7 @@ class ShortsDrawer:
         layout_top: Optional[int] = None,
         img_band_h: Optional[int] = None,
         meaning_karaoke: Optional[tuple[float, float]] = None,
+        vocab_meaning_tts_text: Optional[str] = None,
         cn_mode_hint: Optional[tuple[str, tuple[int, int, int]]] = None,
     ) -> None:
         """단어 숏츠: 연상 이미지 + 노래방(한 글자/음절)."""
@@ -944,17 +947,24 @@ class ShortsDrawer:
         )
         if meaning_karaoke is not None:
             el, dur = meaning_karaoke
-            self._karaoke.draw_translation_karaoke_wipe(
-                screen,
-                text=meaning_text,
-                center_x=rect.centerx,
-                y=int(overlay.meaning_y),
-                style=style,
-                elapsed_sec=float(el),
-                sound_duration_sec=max(1e-6, float(dur)),
-                font_pt=int(self._font_sizes.ko_subtitle_kr),
-                rect_bottom=zones.middle.bottom,
-            )
+            tts_line = (vocab_meaning_tts_text or meaning_text or "").strip()
+            if tts_line:
+                meaning_rect = pygame.Rect(
+                    rect.left,
+                    int(overlay.meaning_y),
+                    rect.width,
+                    max(32, int(zones.middle.bottom) - int(overlay.meaning_y)),
+                )
+                self._karaoke.draw_meaning_karaoke(
+                    screen,
+                    text=tts_line,
+                    rect=meaning_rect,
+                    elapsed_sec=float(el),
+                    sound_duration_sec=max(1e-6, float(dur)),
+                    vocab_kr_font_pt=int(self._font_sizes.ko_subtitle_kr),
+                    y_top=int(overlay.meaning_y),
+                    rect_bottom=int(zones.middle.bottom),
+                )
         if pos:
             self._draw_vocab_pos_line(
                 screen,
