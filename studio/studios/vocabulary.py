@@ -64,8 +64,8 @@ _AUTO_SOUND_GAP_SEC = 1.5
 _AUTO_SOUND_REPEAT_COUNT = 2
 _AUTO_WAIT_SOUND_LEN_SCALE = 1.5
 _AUTO_MEANING_GAP_SEC = 0.5
-# 한자 블록 아래 품사·뜻 (숏츠 단어 모드와 동일: 품사 → 뜻)
-_VOCAB_POS_AFTER_HANZI_GAP = 42
+# 한자 글자 하단 ↔ 품사 줄 간격 (block_bottom의 행 간격 24px와 별도)
+_VOCAB_POS_AFTER_HANZI_GAP = 40
 _VOCAB_MEANING_AFTER_POS_GAP = 12
 _VOCAB_MODE_HINT_TOP_PAD = 6
 _VOCAB_MODE_HINT_ABOVE_PINYIN_GAP = 22
@@ -661,6 +661,50 @@ class VocabularyStudio:
             return (VOCAB_CN_SPEAK_HINT, VOCAB_CN_SPEAK_HINT_COLOR)
         return None
 
+    def _vocab_karaoke_hanzi_line_h(self, hanzi: str) -> int:
+        """노래방에 실제로 그려지는 한자 줄 높이(hero_detail 레이아웃과 다름)."""
+        drawer = self._common_drawer
+        style = self._karaoke_style
+        text = (hanzi or "").strip()
+        if not text or drawer is None or style is None:
+            return 0
+        return drawer._cached_line_height(
+            drawer._cache_hanzi,
+            drawer._fonts.hanzi_ft,
+            drawer._fonts.hanzi_pg,
+            text[: style.text.max_hanzi],
+            style.colors.hanzi_color,
+        )
+
+    def _vocab_hanzi_bottom(
+        self,
+        cn_layout: dict[str, int],
+        row: VocabularyWordRow,
+        *,
+        karaoke_active: bool,
+    ) -> int:
+        hanzi_y = int(cn_layout.get("hanzi", 0))
+        if karaoke_active:
+            h = self._vocab_karaoke_hanzi_line_h(self._hanzi_only(row))
+            if h <= 0:
+                h = int(cn_layout.get("hanzi_height", 0))
+        else:
+            h = int(cn_layout.get("hanzi_height", 0))
+        return hanzi_y + h
+
+    def _vocab_meta_stack_height(self, word: Any, pos_items: list[str]) -> int:
+        """품사·뜻 블록 높이(한자↔품사 간격 제외)."""
+        pos_h = 0
+        if pos_items and self._font_kr_pos_detail is not None:
+            pos_h = max(
+                self._font_kr_pos_detail.render(p, True, _POS_DEFAULT_COLOR).get_height()
+                for p in pos_items
+            )
+        meaning_surf = self._render_vocab_meaning_surface(word)
+        meaning_h = meaning_surf.get_height() if meaning_surf is not None else 0
+        pos_gap = _VOCAB_MEANING_AFTER_POS_GAP if pos_h > 0 and meaning_h > 0 else 0
+        return pos_h + pos_gap + meaning_h
+
     def _draw_vocab_cn_detail_block(
         self,
         screen: pygame.Surface,
@@ -671,6 +715,7 @@ class VocabularyStudio:
         row: VocabularyWordRow,
         cn_karaoke_active: bool = False,
         mode_hint: tuple[str, tuple[int, int, int]] | None = None,
+        meta_stack_below: int = 0,
     ) -> dict[str, int]:
         """상단: 병음·한자만. 노래방 구간에서는 정적 blit 생략(이중 흰색 방지)."""
         pinyin = self._pronunciation_subline(row)
@@ -700,16 +745,27 @@ class VocabularyStudio:
         if pinyin_surf is not None:
             layout_rows.append((pinyin_surf, 16, "pinyin", not cn_karaoke_active))
         hanzi_surf = self._font_cn_hero_detail.render(hero_text, True, WHITE)
+        hanzi_layout_h = hanzi_surf.get_height()
+        if cn_karaoke_active:
+            karaoke_h = self._vocab_karaoke_hanzi_line_h(hero_text)
+            if karaoke_h > 0:
+                hanzi_layout_h = karaoke_h
         layout_rows.append((hanzi_surf, 24, "hanzi", not cn_karaoke_active))
 
-        total_h = sum(
-            (surf.get_height() if surf is not None else 0) for surf, g, _, _ in layout_rows
-        ) + sum(g for surf, g, _, _ in layout_rows[:-1])
+        row_heights = []
+        for surf, g, kind, _ in layout_rows:
+            if surf is None:
+                continue
+            h = hanzi_layout_h if kind == "hanzi" else surf.get_height()
+            row_heights.append(h)
+        total_h = sum(row_heights) + sum(g for surf, g, _, _ in layout_rows[:-1])
         cn_zone_bottom = main_top + upper_h - 8
         cn_zone_h = max(1, cn_zone_bottom - cn_zone_top)
-        draw_y = cn_zone_top + max(0, (cn_zone_h - total_h) // 2)
+        reserve = max(0, int(meta_stack_below))
+        cn_avail_h = max(1, cn_zone_h - reserve)
+        draw_y = cn_zone_top + max(0, (cn_avail_h - total_h) // 2)
         y_map.setdefault("block_bottom", draw_y)
-        y_map["hanzi_height"] = hanzi_surf.get_height()
+        y_map["hanzi_height"] = hanzi_layout_h
         for surf, gap_after, kind, do_blit in layout_rows:
             if surf is None:
                 continue
@@ -717,7 +773,8 @@ class VocabularyStudio:
             if do_blit:
                 draw_x = center_x - (surf.get_width() // 2)
                 screen.blit(surf, (draw_x, draw_y))
-            draw_y += surf.get_height() + gap_after
+            line_h = hanzi_layout_h if kind == "hanzi" else surf.get_height()
+            draw_y += line_h + gap_after
         y_map["block_bottom"] = draw_y
         return y_map
 
@@ -751,10 +808,15 @@ class VocabularyStudio:
         lower_top: int,
         word: Any,
         pos_items: list[str],
+        row: VocabularyWordRow,
+        karaoke_active: bool = False,
     ) -> dict[str, int]:
         """한자 아래: 품사 → 뜻 (숏츠 단어 모드와 동일 순서)."""
         y_map: dict[str, int] = {}
-        meta_top = int(cn_layout.get("block_bottom", cn_layout.get("hanzi", 0))) + _VOCAB_POS_AFTER_HANZI_GAP
+        hanzi_bottom = self._vocab_hanzi_bottom(
+            cn_layout, row, karaoke_active=karaoke_active
+        )
+        meta_top = hanzi_bottom + _VOCAB_POS_AFTER_HANZI_GAP
 
         pos_parts: list[pygame.Surface] = []
         if pos_items:
@@ -775,7 +837,7 @@ class VocabularyStudio:
 
         limit_y = lower_top - 10
         if meta_top + total_h > limit_y:
-            meta_top = max(int(cn_layout.get("hanzi", meta_top)), limit_y - total_h)
+            meta_top = max(hanzi_bottom + 12, limit_y - total_h)
 
         draw_y = meta_top
         if pos_parts:
@@ -1206,6 +1268,9 @@ class VocabularyStudio:
             max(80, upper_h - 24),
         )
         karaoke_mode, _, _ = self._vocab_karaoke_timing()
+        meta_stack_below = _VOCAB_POS_AFTER_HANZI_GAP + self._vocab_meta_stack_height(
+            word, pos_items
+        )
         cn_layout = self._draw_vocab_cn_detail_block(
             screen,
             center_x=center_x,
@@ -1214,6 +1279,7 @@ class VocabularyStudio:
             row=cur,
             cn_karaoke_active=bool(karaoke_mode),
             mode_hint=self._vocab_cn_mode_hint(),
+            meta_stack_below=meta_stack_below,
         )
         meta_layout = self._draw_vocab_meaning_pos_block(
             screen,
@@ -1222,6 +1288,8 @@ class VocabularyStudio:
             lower_top=lower_top,
             word=word,
             pos_items=pos_items,
+            row=cur,
+            karaoke_active=bool(karaoke_mode),
         )
         text_layout = {**cn_layout, **meta_layout}
         if karaoke_mode:
