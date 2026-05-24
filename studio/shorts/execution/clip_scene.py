@@ -716,7 +716,6 @@ class ClipScene:
                 self._sync_word_video_timeline(dt_sec)
             if self._learn_round == 4:
                 if self._learn_elapsed >= self._bg_practice_duration:
-                    self._stop_learn_background_only()
                     if self._should_post_follow_along_hold():
                         self._enter_post_follow_along_hold()
                     else:
@@ -1069,16 +1068,9 @@ class ClipScene:
         else:
             self._enter_cta_hold()
 
-    def _stop_learn_background_only(self) -> None:
-        if self._stop_learn_background is not None:
-            try:
-                self._stop_learn_background()
-            except Exception as ex:
-                logger.debug("bg 중지 실패: %s", ex)
-
     def _stop_learn_audio(self) -> None:
+        """음성(TTS·mp3)만 중지 — 숏츠 배경음은 studio 세션에서 유지."""
         self._stop_voice()
-        self._stop_learn_background_only()
 
     def _stop_voice(self) -> None:
         ch = self._voice_channel

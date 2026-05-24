@@ -107,6 +107,7 @@ class ShortsStudio(IStudio):
     def start_playback(self) -> None:
         """debug 모드: 첫 클립(또는 topic 인트로) 재생 시작."""
         if self._clips:
+            self._ensure_bg_session(self._last_config, reload=True)
             self._start_current_clip()
 
     def recording_progress_line(self) -> str:
@@ -130,6 +131,10 @@ class ShortsStudio(IStudio):
 
     def update(self, config: Any = None) -> None:
         self._last_config = config
+        if self._bg_player is not None and self._clips:
+            self._bg_player.tick(
+                duration_hint_sec=self._bg_duration_hint_sec(config)
+            )
         if not self._scene or not self._clips:
             return
         self._scene.update(self._dt_sec(config))
@@ -194,7 +199,21 @@ class ShortsStudio(IStudio):
             )
         else:
             print(f"[rec] 클립 {len(self._clips)}개 녹화 시작", flush=True)
+        self._ensure_bg_session(config, reload=True)
         self._start_current_clip()
+
+    def _bg_duration_hint_sec(self, config: Any) -> float:
+        if config is not None and getattr(config, "recording_log_event", None) is not None:
+            return max(60.0, float(getattr(config, "record_max_sec", 3600.0) or 3600.0))
+        return 3600.0
+
+    def _ensure_bg_session(self, config: Any, *, reload: bool = False) -> None:
+        if self._bg_player is None:
+            return
+        self._bg_player.start_session(
+            duration_hint_sec=self._bg_duration_hint_sec(config),
+            reload=reload,
+        )
 
     def _dt_sec(self, config: Any) -> float:
         dt = 1.0 / 30.0
@@ -213,12 +232,13 @@ class ShortsStudio(IStudio):
         self._record_insert_sound(path, duration_sec=max(1.0, float(duration_sec)))
 
     def _start_learn_background(self, duration_hint_sec: float) -> None:
-        if self._bg_player is not None:
-            self._bg_player.start_loop(duration_hint_sec=float(duration_hint_sec))
+        """학습 구간 — 세션 bg가 없으면 시작(이미 재생 중이면 유지)."""
+        _ = duration_hint_sec
+        self._ensure_bg_session(self._last_config)
 
     def _stop_learn_background(self) -> None:
-        if self._bg_player is not None:
-            self._bg_player.stop()
+        """음성만 끊을 때 bg는 세션 끝날 때까지 유지."""
+        return
 
     def _follow_along_mp3_path(self) -> str:
         return str(ensure_follow_along_mp3())
@@ -306,6 +326,8 @@ class ShortsStudio(IStudio):
     def _on_clip_done(self) -> None:
         if self._clip_index >= len(self._clips) - 1:
             self._recording_done = True
+            if self._bg_player is not None:
+                self._bg_player.stop_session()
             return
         self._clip_index += 1
         self._start_current_clip()
