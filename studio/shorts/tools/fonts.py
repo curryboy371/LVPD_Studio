@@ -15,7 +15,7 @@ class ShortsFontSizes:
     cn: int = 84
     pinyin: int = 48
     kr: int = 36
-    hook_title: int = 72
+    hook_title: int = 84
     bottom_kr: int = 32
     ko_subtitle_kr: int = 46
     cta: int = 28

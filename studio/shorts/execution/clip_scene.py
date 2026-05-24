@@ -76,6 +76,8 @@ class ClipScene:
         play_voice: Callable[[str], float],
         start_learn_background: Optional[Callable[[float], None]] = None,
         stop_learn_background: Optional[Callable[[], None]] = None,
+        start_follow_sound: Optional[Callable[[float], None]] = None,
+        stop_follow_sound: Optional[Callable[[], None]] = None,
         follow_along_mp3: Optional[Callable[[], str]] = None,
         hook_fade_sec: float = HOOK_FADE_IN_SEC,
         cta_hold_sec: float = CTA_HOLD_SEC,
@@ -85,6 +87,8 @@ class ClipScene:
         self._play_voice = play_voice
         self._start_learn_background = start_learn_background
         self._stop_learn_background = stop_learn_background
+        self._start_follow_sound = start_follow_sound
+        self._stop_follow_sound = stop_follow_sound
         self._follow_along_mp3 = follow_along_mp3
         self._hook_fade_sec = max(0.01, float(hook_fade_sec))
         self._default_cta_hold_sec = max(0.0, float(cta_hold_sec))
@@ -140,6 +144,7 @@ class ClipScene:
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
+        self._stop_follow_sound_if_any()
         self._stop_learn_audio()
         self._video_player.close()
         self._reset_word_video()
@@ -316,6 +321,7 @@ class ClipScene:
         self._learn_round = 0
         self._sentence_sound_duration = 0.0
         self._bg_practice_duration = 0.0
+        self._stop_follow_sound_if_any()
         self._stop_learn_audio()
         self._video_player.close()
         self._reset_word_video()
@@ -604,8 +610,9 @@ class ClipScene:
             else:
                 self._enter_post_video_intro()
             return
-        if self._stage == ClipStage.LEARN_PLAY:
+        if self._stage in (ClipStage.LEARN_PLAY, ClipStage.END_HOLD):
             self._stop_learn_audio()
+            self._stop_follow_sound_if_any()
         if (
             self._is_vocabulary_clip()
             and not self._is_last_clip
@@ -987,7 +994,22 @@ class ClipScene:
                 self._start_learn_background(self._bg_practice_duration + 2.0)
             except Exception as ex:
                 logger.debug("bg 시작 실패: %s", ex)
+        if self._is_conversation_clip() and self._start_follow_sound is not None:
+            follow_dur = float(self._bg_practice_duration)
+            if self._should_post_follow_along_hold():
+                follow_dur += float(self._record_end_hold_sec)
+            try:
+                self._start_follow_sound(follow_dur)
+            except Exception as ex:
+                logger.debug("follow 시작 실패: %s", ex)
 
+    def _stop_follow_sound_if_any(self) -> None:
+        if self._stop_follow_sound is None:
+            return
+        try:
+            self._stop_follow_sound()
+        except Exception:
+            pass
     def _vocab_sound_repeat_target(self) -> int:
         try:
             return max(1, int(self._clip.get("sound_repeat_count") or 1))
@@ -1055,6 +1077,7 @@ class ClipScene:
             self._finish_learn_sequence()
 
     def _finish_learn_sequence(self) -> None:
+        self._stop_follow_sound_if_any()
         if self._is_vocabulary_clip():
             if self._is_last_clip:
                 self._enter_cta_hold()

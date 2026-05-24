@@ -22,6 +22,7 @@ from studio.shorts.tools.fonts import (
     resolve_shorts_render_settings,
 )
 from studio.shorts.bg_audio import ShortsBackgroundPlayer
+from studio.conversation.follow_audio import PracticeFollowSoundPlayer
 from studio.shorts.constants import SHORTS_RECORD_END_HOLD_SEC
 from studio.shorts.follow_along_tts import ensure_follow_along_mp3
 from studio.shorts.tools.shorts_drawer import ShortsDrawer
@@ -55,6 +56,7 @@ class ShortsStudio(IStudio):
         self._recording_done = False
         self._topic_intro_done = False
         self._bg_player: Optional[ShortsBackgroundPlayer] = None
+        self._follow_player: Optional[PracticeFollowSoundPlayer] = None
         csv_name = (
             "shorts_vocabulary_clips.csv"
             if self._shorts_mode == CLIP_TYPE_VOCABULARY
@@ -83,6 +85,11 @@ class ShortsStudio(IStudio):
             on_bg_started=self._on_learn_bg_started,
             is_recording=self._is_recording_mode,
         )
+        if self._shorts_mode != CLIP_TYPE_VOCABULARY:
+            self._follow_player = PracticeFollowSoundPlayer(
+                on_follow_started=self._on_follow_sound_started,
+                is_recording=self._is_recording_mode,
+            )
         style = SentenceStyleConfig(
             colors=ColorStyle(
                 hanzi_color=(255, 255, 255),
@@ -98,6 +105,8 @@ class ShortsStudio(IStudio):
             play_voice=self._make_play_voice(),
             start_learn_background=self._start_learn_background,
             stop_learn_background=self._stop_learn_background,
+            start_follow_sound=self._start_follow_sound,
+            stop_follow_sound=self._stop_follow_sound,
             follow_along_mp3=self._follow_along_mp3_path,
         )
         self._scene.set_on_clip_done(self._on_clip_done)
@@ -107,6 +116,7 @@ class ShortsStudio(IStudio):
     def start_playback(self) -> None:
         """debug 모드: 첫 클립(또는 topic 인트로) 재생 시작."""
         if self._clips:
+            self._reload_practice_audio()
             self._ensure_bg_session(self._last_config, reload=True)
             self._start_current_clip()
 
@@ -200,6 +210,7 @@ class ShortsStudio(IStudio):
         else:
             print(f"[rec] 클립 {len(self._clips)}개 녹화 시작", flush=True)
         self._ensure_bg_session(config, reload=True)
+        self._reload_practice_audio()
         self._start_current_clip()
 
     def _bg_duration_hint_sec(self, config: Any) -> float:
@@ -246,6 +257,23 @@ class ShortsStudio(IStudio):
     def _stop_learn_background(self) -> None:
         """음성만 끊을 때 bg는 세션 끝날 때까지 유지."""
         return
+
+    def _start_follow_sound(self, duration_hint_sec: float) -> None:
+        """회화 따라해보세요(BG) 구간 — resource/sound/follow 효과음."""
+        if self._follow_player is None:
+            return
+        self._follow_player.play_random(duration_hint_sec=max(0.0, float(duration_hint_sec)))
+
+    def _stop_follow_sound(self) -> None:
+        if self._follow_player is not None:
+            self._follow_player.stop()
+
+    def _on_follow_sound_started(self, path: str, duration_sec: float) -> None:
+        self._record_insert_sound(path, duration_sec=max(0.0, float(duration_sec)))
+
+    def _reload_practice_audio(self) -> None:
+        if self._follow_player is not None:
+            self._follow_player.reload_sounds()
 
     def _follow_along_mp3_path(self) -> str:
         return str(ensure_follow_along_mp3())
@@ -335,6 +363,7 @@ class ShortsStudio(IStudio):
             self._recording_done = True
             if self._bg_player is not None:
                 self._bg_player.stop_session()
+            self._stop_follow_sound()
             return
         self._clip_index += 1
         self._start_current_clip()
