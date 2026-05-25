@@ -22,16 +22,30 @@ def blit_horizontal_karaoke_wipe(
     y: int,
     progress: float,
     min_margin_x: int = 0,
+    line_h: int | None = None,
 ) -> None:
-    """비활성 색 전체 + 활성 색을 왼쪽부터 progress 비율만큼 덮어 그린다."""
+    """비활성 색 전체 + 활성 색을 왼쪽부터 progress 비율만큼 덮어 그린다.
+
+    비활성·활성은 반드시 같은 y(상단)에 붙인다. 높이가 1px 달라 하단 정렬하면
+    쉼표 문장에서 재생(노란) 글자만 아래로 내려가 보인다.
+    `line_h`는 합성 레이어(이미 line_h 높이)일 때만 쓰며, 그때도 y는 그대로다.
+    """
     progress = max(0.0, min(1.0, float(progress)))
     w = surf_inactive.get_width()
-    h = surf_inactive.get_height()
-    if w <= 0 or h <= 0:
+    h_in = surf_inactive.get_height()
+    h_ac = surf_active.get_height()
+    if w <= 0 or h_in <= 0:
         return
     x = max(int(min_margin_x), center_x - w // 2)
-    screen.blit(surf_inactive, (x, y))
+    yi = int(y)
+    screen.blit(surf_inactive, (x, yi))
     if progress <= 0:
         return
     fill_w = w if progress >= 1.0 else max(1, int(round(w * progress)))
-    screen.blit(surf_active, (x, y), area=pygame.Rect(0, 0, fill_w, h))
+    if h_ac <= 0:
+        return
+    screen.blit(
+        surf_active,
+        (x, yi),
+        area=pygame.Rect(0, 0, fill_w, h_ac),
+    )

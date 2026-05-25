@@ -670,13 +670,7 @@ class VocabularyStudio:
         text = (hanzi or "").strip()
         if not text or drawer is None or style is None:
             return 0
-        return drawer._cached_line_height(
-            drawer._cache_hanzi,
-            drawer._fonts.hanzi_ft,
-            drawer._fonts.hanzi_pg,
-            text[: style.text.max_hanzi],
-            style.colors.hanzi_color,
-        )
+        return drawer._hanzi_layout_line_height(style.colors.hanzi_color)
 
     def _vocab_hanzi_bottom(
         self,

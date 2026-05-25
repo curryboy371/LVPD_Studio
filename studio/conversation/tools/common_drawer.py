@@ -34,6 +34,8 @@ HANZI_KARAOKE_INACTIVE: tuple[int, int, int] = (120, 125, 140)
 # 병음 줄이 있을 때 위쪽 성조 아이콘·변화 설명용으로만 확보하는 고정 돌출(px).
 # 측정값을 쓰면 성조 슬롯 유무·PNG 높이·텍스트 유무에 따라 병음·한자 블록 세로 위치가 달라진다.
 PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104
+# freetype 한 줄 높이: 쉼표·물음표 포함 probe로 고정(문장마다 bbox 높이 흔들림 방지)
+_HANZI_LINE_BOX_PROBE = "\u4e2d\u6587,\u95ee\uff1f"  # 中文,问？
 AlignV = Literal["center", "top", "bottom"]
 
 
@@ -116,6 +118,7 @@ class CommonDrawer:
                 self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, text, color
             )
         )
+        self._hanzi_line_box_heights: dict[tuple[Any, ...], int] = {}
 
     def fade_on(self, channel: str, sec: float = 0.0) -> None:
         """채널 알파를 255로 맞추되 sec>0이면 그 시간에 걸쳐 보간한다."""
@@ -163,9 +166,7 @@ class CommonDrawer:
         h_pinyin = self._cached_line_height(
             self._cache_pinyin, self._fonts.pinyin_ft, self._fonts.pinyin_pg, pinyin, style.colors.pinyin_color
         )
-        h_hanzi = self._cached_line_height(
-            self._cache_hanzi, self._fonts.hanzi_ft, self._fonts.hanzi_pg, hanzi, style.colors.hanzi_color
-        )
+        h_hanzi = self._hanzi_layout_line_height(style.colors.hanzi_color)
         h_trans = 0
         if (trans or "").strip(): 
             surf = self._get_cached_translation_surf(trans, style.colors.translation_color)
@@ -399,11 +400,36 @@ class CommonDrawer:
         text: str,
         color: tuple[int, int, int],
     ) -> int:
-        """한 줄 텍스트의 렌더 높이(캐시된 서피스 기준)."""
+        """한 줄 텍스트의 렌더 높이(캐시된 서피스 tight bbox 기준)."""
         if not (text or "").strip():
             return 0
         surf, _ = self._get_cached_text_pair(cache, font_ft, font_pg, text, color)
         return int(surf.get_height()) if surf is not None else 0
+
+    def _hanzi_layout_line_height(self, color: tuple[int, int, int]) -> int:
+        """한자 줄 레이아웃·노래방용 고정 줄 높이(쉼표·물음표 포함 probe)."""
+        key = (id(self._fonts.hanzi_ft), id(self._fonts.hanzi_pg), color)
+        cached = self._hanzi_line_box_heights.get(key)
+        if cached is not None:
+            return cached
+        h = self._cached_line_height(
+            self._cache_hanzi,
+            self._fonts.hanzi_ft,
+            self._fonts.hanzi_pg,
+            _HANZI_LINE_BOX_PROBE,
+            color,
+        )
+        if h <= 0:
+            h = self._cached_line_height(
+                self._cache_hanzi,
+                self._fonts.hanzi_ft,
+                self._fonts.hanzi_pg,
+                "\u8001\u677f",
+                color,
+            )
+        h = max(1, int(h))
+        self._hanzi_line_box_heights[key] = h
+        return h
 
     def _get_cached_text_pair(
         self,
@@ -575,13 +601,10 @@ class CommonDrawer:
             line,
             inactive_color,
         )
-        surf_ac, _ = self._get_cached_text_pair(
-            self._cache_hanzi,
-            self._fonts.hanzi_ft,
-            self._fonts.hanzi_pg,
-            line,
-            active_color,
-        )
+        if active_color == inactive_color:
+            surf_ac = surf_in
+        else:
+            surf_ac = self._surface_with_recolored_ink(surf_in, active_color)
         a = 255 if alpha is None else int(max(0, min(255, alpha)))
         if a <= 0:
             return
@@ -603,7 +626,8 @@ class CommonDrawer:
         finally:
             if a < 255:
                 self._restore_surface_alpha(surf_in, old_in)
-                self._restore_surface_alpha(surf_ac, old_ac)
+                if surf_ac is not surf_in:
+                    self._restore_surface_alpha(surf_ac, old_ac)
 
     def draw_hanzi_karaoke_wipe_segments(
         self,
@@ -629,13 +653,6 @@ class CommonDrawer:
         for seg_text, seg_color in segments:
             if not seg_text:
                 continue
-            surf_color, _ = self._get_cached_text_pair(
-                self._cache_hanzi,
-                self._fonts.hanzi_ft,
-                self._fonts.hanzi_pg,
-                seg_text,
-                seg_color,
-            )
             surf_gray, _ = self._get_cached_text_pair(
                 self._cache_hanzi,
                 self._fonts.hanzi_ft,
@@ -643,49 +660,43 @@ class CommonDrawer:
                 seg_text,
                 inactive_color,
             )
-            w = int(surf_color.get_width())
-            h = max(int(surf_color.get_height()), int(surf_gray.get_height()))
+            if seg_color == inactive_color:
+                surf_color = surf_gray
+            else:
+                surf_color = self._surface_with_recolored_ink(surf_gray, seg_color)
+            w = int(surf_gray.get_width())
+            h = int(surf_gray.get_height())
             pieces.append((surf_gray, surf_color, w, h))
             total_w += w
             max_h = max(max_h, h)
-        if total_w <= 0 or max_h <= 0 or not pieces:
+        line_h = max(max_h, self._hanzi_layout_line_height(inactive_color))
+        if total_w <= 0 or line_h <= 0 or not pieces:
             return
 
-        gray_layer = pygame.Surface((total_w, max_h), pygame.SRCALPHA)
-        colored = pygame.Surface((total_w, max_h), pygame.SRCALPHA)
+        gray_layer = pygame.Surface((total_w, line_h), pygame.SRCALPHA)
+        colored = pygame.Surface((total_w, line_h), pygame.SRCALPHA)
         cx = 0
-        for surf_gray, surf_color, w, h in pieces:
-            y_off = max(0, (max_h - h) // 2)
-            gray_layer.blit(surf_gray, (cx, y_off))
-            colored.blit(surf_color, (cx, y_off))
+        for surf_gray, surf_color, w, _h in pieces:
+            # 회색(미재생)·색(재생) tight bbox 높이가 다를 수 있음 → 상단 정렬(0)
+            gray_layer.blit(surf_gray, (cx, 0))
+            colored.blit(surf_color, (cx, 0))
             cx += w
 
         a = 255 if alpha is None else int(max(0, min(255, alpha)))
         if a <= 0:
             return
-        x = max(int(min_margin_x), int(center_x) - total_w // 2)
-        yi = int(y)
-
-        def _blit_with_alpha(target: pygame.Surface, alpha_val: int) -> None:
-            if alpha_val >= 255:
-                screen.blit(target, (x, yi))
-                return
-            old = target.get_alpha()
-            target.set_alpha(alpha_val)
-            try:
-                screen.blit(target, (x, yi))
-            finally:
-                self._restore_surface_alpha(target, old)
-
-        _blit_with_alpha(gray_layer, a)
-        if progress <= 0:
-            return
-        fill_w = total_w if progress >= 1.0 else max(1, int(round(total_w * progress)))
-        if a >= 255:
-            screen.blit(colored, (x, yi), area=pygame.Rect(0, 0, fill_w, max_h))
-        else:
-            clip = colored.subsurface(pygame.Rect(0, 0, fill_w, max_h)).copy()
-            _blit_with_alpha(clip, a)
+        if a < 255:
+            gray_layer.set_alpha(a)
+            colored.set_alpha(a)
+        blit_horizontal_karaoke_wipe(
+            screen,
+            gray_layer,
+            colored,
+            center_x=center_x,
+            y=int(y),
+            progress=progress,
+            min_margin_x=int(min_margin_x),
+        )
 
     def draw_sentence(
         self,
@@ -815,6 +826,21 @@ class CommonDrawer:
         """성조 그래프 렌더링 훅(현재 render_only 범위에서는 stub)."""
         _ = (screen, data, rect, style)
         return
+
+    @staticmethod
+    def _surface_with_recolored_ink(
+        surf: pygame.Surface,
+        color: tuple[int, int, int],
+    ) -> pygame.Surface:
+        """동일 알파 마스크에 색만 바꾼 복사본 — 노래방 비활성/활성 픽셀 위치를 맞춘다."""
+        out = surf.copy()
+        r, g, b = int(color[0]), int(color[1]), int(color[2])
+        for x in range(out.get_width()):
+            for y in range(out.get_height()):
+                pr, pg, pb, a = out.get_at((x, y))
+                if a:
+                    out.set_at((x, y), (r, g, b, a))
+        return out
 
     def _render_text(self, font_ft: Any, font_pg: Any, text: str, color: tuple[int, int, int]) -> tuple[Any, Any]:
         """freeType 우선, 실패 시 pygame.font로 한 줄을 렌더한다."""

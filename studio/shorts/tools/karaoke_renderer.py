@@ -199,18 +199,32 @@ class KaraokeRenderer:
         progress: float,
         inactive_color: tuple[int, int, int],
         active_color: tuple[int, int, int],
+        line_h: int | None = None,
     ) -> int:
         if not text:
             return y
         surf_in, _ = self._drawer._get_cached_text_pair(
             cache, font_ft, font_pg, text, inactive_color
         )
-        surf_ac, _ = self._drawer._get_cached_text_pair(
-            cache, font_ft, font_pg, text, active_color
-        )
+        if active_color == inactive_color:
+            surf_ac = surf_in
+        elif cache is self._drawer._cache_hanzi:
+            surf_ac = self._drawer._surface_with_recolored_ink(surf_in, active_color)
+        else:
+            surf_ac, _ = self._drawer._get_cached_text_pair(
+                cache, font_ft, font_pg, text, active_color
+            )
         blit_horizontal_karaoke_wipe(
-            screen, surf_in, surf_ac, center_x=center_x, y=y, progress=progress
+            screen,
+            surf_in,
+            surf_ac,
+            center_x=center_x,
+            y=y,
+            progress=progress,
+            line_h=line_h,
         )
+        if line_h is not None and int(line_h) > 0:
+            return y + int(line_h)
         return y + max(surf_in.get_height(), surf_ac.get_height())
 
     def _draw_pinyin_static(
@@ -401,4 +415,5 @@ class KaraokeRenderer:
             progress=progress,
             inactive_color=KARAOKE_INACTIVE_HANZI,
             active_color=KARAOKE_ACTIVE_HANZI,
+            line_h=self._drawer._hanzi_layout_line_height(KARAOKE_INACTIVE_HANZI),
         )
