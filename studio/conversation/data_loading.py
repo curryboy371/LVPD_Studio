@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Tuple, List, Union
 from utils.pinyin_masking import (
     apply_mask_to_lexical_syllables,
     normalize_word_masking,
+    word_pinyin_to_lexical_syllables,
 )
 from utils.pinyin_processor import get_pinyin_processor
 
@@ -142,15 +143,94 @@ def _collect_word_mask_spans(
     return spans
 
 
+def _collect_word_pinyin_spans(
+    display_sentence: str,
+    raw_sentence: str,
+    *,
+    words_by_id: dict[int, str],
+    pinyins_by_id: dict[int, str],
+    replacement_pinyin_pairs: Optional[list[tuple[str, str]]] = None,
+) -> list[tuple[int, int, list[str]]]:
+    """words.csv `pinyin`이 지정된 한자 구간 → (시작, 길이, lexical 음절 리스트)."""
+    spans: list[tuple[int, int, list[str]]] = []
+    used_starts: set[int] = set()
+    search_pos = 0
+    pp = get_pinyin_processor()
+
+    def _add(hanzi: str, pinyin_text: str, *, from_pos: int) -> int:
+        nonlocal spans, used_starts
+        hz = str(hanzi or "").strip()
+        py = str(pinyin_text or "").strip()
+        if not hz or not py:
+            return from_pos
+        syllables = word_pinyin_to_lexical_syllables(hz, py, processor=pp)
+        if not syllables:
+            return from_pos
+        sp = _find_hanzi_span_in_display(display_sentence, hz, start_pos=from_pos)
+        if sp is None:
+            return from_pos
+        start_i, len_i = sp
+        if start_i in used_starts:
+            return from_pos
+        if len_i != len(syllables):
+            return from_pos
+        spans.append((start_i, len_i, syllables))
+        used_starts.add(start_i)
+        return start_i + len_i
+
+    for hanzi, pinyin_text in replacement_pinyin_pairs or []:
+        search_pos = _add(str(hanzi or "").strip(), str(pinyin_text or ""), from_pos=search_pos)
+
+    hanzi_to_pinyin: dict[str, str] = {}
+    for wid, hz in words_by_id.items():
+        hz = str(hz or "").strip()
+        if not hz:
+            continue
+        py = str(pinyins_by_id.get(int(wid), "") or "").strip()
+        if py:
+            hanzi_to_pinyin[hz] = py
+
+    search_pos = 0
+    for slot_word in _raw_sentence_to_words(raw_sentence):
+        py = hanzi_to_pinyin.get(slot_word.strip())
+        if py:
+            search_pos = _add(slot_word.strip(), py, from_pos=search_pos)
+
+    return spans
+
+
+def _apply_pinyin_spans_to_syllable_lists(
+    lexical_list: list[str],
+    phonetic_list: list[str],
+    spans: list[tuple[int, int, list[str]]],
+) -> tuple[list[str], list[str]]:
+    """음절 리스트에 words.csv `pinyin` 고정값을 덮어쓴다."""
+    if not spans or not lexical_list:
+        return lexical_list, phonetic_list
+    fixed_lex = list(lexical_list)
+    fixed_ph = list(phonetic_list) if phonetic_list else list(fixed_lex)
+    for start_i, len_i, syllables in sorted(spans, key=lambda x: x[0]):
+        end_i = min(len(fixed_lex), int(start_i) + int(len_i))
+        si = int(start_i)
+        if si >= len(fixed_lex) or end_i <= si or len(syllables) != end_i - si:
+            continue
+        fixed_lex[si:end_i] = list(syllables)
+        if end_i <= len(fixed_ph):
+            fixed_ph[si:end_i] = list(syllables)
+    return fixed_lex, fixed_ph
+
+
 def _build_masked_pinyin_for_sentence(
     display_sentence: str,
     raw_sentence: str,
     *,
     words_by_id: dict[int, str],
     maskings_by_id: dict[int, str],
+    pinyins_by_id: Optional[dict[int, str]] = None,
     replacement_mask_pairs: Optional[list[tuple[str, str]]] = None,
+    replacement_pinyin_pairs: Optional[list[tuple[str, str]]] = None,
 ) -> tuple[str, str, str]:
-    """문장 병음(표기·발음·성조기호)에 words.csv masking 반영."""
+    """문장 병음(표기·발음·성조기호)에 words.csv masking·pinyin 반영."""
     text = (display_sentence or "").strip()
     if not text:
         return "", "", ""
@@ -173,6 +253,17 @@ def _build_masked_pinyin_for_sentence(
             lexical_list, phonetic_list = _apply_mask_spans_to_syllable_lists(
                 lexical_list, phonetic_list, spans, processor=pp
             )
+        pinyin_spans = _collect_word_pinyin_spans(
+            text,
+            raw_sentence,
+            words_by_id=words_by_id,
+            pinyins_by_id=pinyins_by_id or {},
+            replacement_pinyin_pairs=replacement_pinyin_pairs,
+        )
+        if pinyin_spans:
+            lexical_list, phonetic_list = _apply_pinyin_spans_to_syllable_lists(
+                lexical_list, phonetic_list, pinyin_spans
+            )
         marks = " ".join(pp.tone3_to_mark(s) for s in lexical_list).strip()
         return marks, " ".join(lexical_list).strip(), " ".join(phonetic_list).strip()
     except Exception:
@@ -184,8 +275,9 @@ def _apply_word_maskings_to_base_rows(
     *,
     words_by_id: dict[int, str],
     maskings_by_id: dict[int, str],
+    pinyins_by_id: Optional[dict[int, str]] = None,
 ) -> None:
-    """base 문장 pinyin에 슬롯 한자(words.csv) masking 적용."""
+    """base 문장 pinyin에 슬롯 한자(words.csv) masking·pinyin 적용."""
     if not base_rows or not words_by_id:
         return
     for row in base_rows:
@@ -204,6 +296,7 @@ def _apply_word_maskings_to_base_rows(
             raw,
             words_by_id=words_by_id,
             maskings_by_id=maskings_by_id,
+            pinyins_by_id=pinyins_by_id,
         )
         if not marks:
             continue
@@ -543,14 +636,15 @@ def _load_words_csv(csv_path: str) -> dict[int, str]:
 
 def _load_words_and_meanings_csv(
     csv_path: str,
-) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str]]:
-    """words.csv를 읽어 (word_id->word, word_id->meaning, word_id->masking) 매핑을 만든다."""
+) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, str]]:
+    """words.csv를 읽어 (word, meaning, masking, pinyin) id 매핑을 만든다."""
     path = Path(csv_path)
     if not path.exists():
-        return {}, {}, {}
+        return {}, {}, {}, {}
     words_by_id: Dict[int, str] = {}
     meanings_by_id: Dict[int, str] = {}
     maskings_by_id: Dict[int, str] = {}
+    pinyins_by_id: Dict[int, str] = {}
     with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -567,7 +661,10 @@ def _load_words_and_meanings_csv(
             if m:
                 meanings_by_id[wid] = m
             maskings_by_id[wid] = normalize_word_masking(row.get("masking") or "")
-    return words_by_id, meanings_by_id, maskings_by_id
+            py = str(row.get("pinyin") or "").strip()
+            if py:
+                pinyins_by_id[wid] = py
+    return words_by_id, meanings_by_id, maskings_by_id, pinyins_by_id
 
 
 def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
@@ -922,6 +1019,7 @@ def _attach_sub_variants_to_base_rows(
     words_by_id: dict[int, str],
     meanings_by_id: Optional[Dict[int, str]] = None,
     maskings_by_id: Optional[Dict[int, str]] = None,
+    pinyins_by_id: Optional[Dict[int, str]] = None,
     sub_rows_by_base_id: dict[int, list[dict]],
 ) -> list[dict]:
     """base row에 학습 활용용 sub 변형 리스트(`sub_variants`)를 채운다."""
@@ -1103,12 +1201,23 @@ def _attach_sub_variants_to_base_rows(
                 for _slot, _wid, w, _mean, m in resolved_replacements
                 if str(w or "").strip()
             ]
+            replacement_pinyin_pairs = []
+            if pinyins_by_id:
+                for _slot, wid, w, _mean, _m in resolved_replacements:
+                    hz = str(w or "").strip()
+                    if not hz:
+                        continue
+                    py = str(pinyins_by_id.get(int(wid), "") or "").strip()
+                    if py:
+                        replacement_pinyin_pairs.append((hz, py))
             marks, lex, ph = _build_masked_pinyin_for_sentence(
                 replaced_sentence,
                 raw_sentence,
                 words_by_id=words_by_id,
                 maskings_by_id=maskings_by_id or {},
+                pinyins_by_id=pinyins_by_id,
                 replacement_mask_pairs=replacement_pairs,
+                replacement_pinyin_pairs=replacement_pinyin_pairs or None,
             )
             if marks:
                 variant_dict["pinyin_marks"] = marks
@@ -1174,6 +1283,7 @@ def build_data_list(
         words_by_id: dict[int, str] = {}
         meanings_by_id: dict[int, str] = {}
         maskings_by_id: dict[int, str] = {}
+        pinyins_by_id: dict[int, str] = {}
         sub_rows_by_base_id: dict[int, list[dict]] = {}
         try:
             from core.paths import (
@@ -1182,7 +1292,7 @@ def build_data_list(
                 DEFAULT_SUB_SENTENCES_CSV,
             )
 
-            words_by_id, meanings_by_id, maskings_by_id = _load_words_and_meanings_csv(
+            words_by_id, meanings_by_id, maskings_by_id, pinyins_by_id = _load_words_and_meanings_csv(
                 str(DEFAULT_WORDS_TABLE_CSV)
             )
             sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
@@ -1225,12 +1335,14 @@ def build_data_list(
                     words_by_id=words_by_id,
                     meanings_by_id=meanings_by_id,
                     maskings_by_id=maskings_by_id,
+                    pinyins_by_id=pinyins_by_id,
                     sub_rows_by_base_id=sub_rows_by_base_id,
                 )
                 _apply_word_maskings_to_base_rows(
                     rows,
                     words_by_id=words_by_id,
                     maskings_by_id=maskings_by_id,
+                    pinyins_by_id=pinyins_by_id,
                 )
         except Exception:
             pass
@@ -1246,7 +1358,7 @@ def build_data_list(
         )
 
         base_rows = _load_base_sentences_csv(str(DEFAULT_BASE_SENTENCES_CSV))
-        words_by_id, meanings_by_id, maskings_by_id = _load_words_and_meanings_csv(
+        words_by_id, meanings_by_id, maskings_by_id, pinyins_by_id = _load_words_and_meanings_csv(
             str(DEFAULT_WORDS_TABLE_CSV)
         )
         sub_rows_by_base_id = _load_sub_sentences_csv(str(DEFAULT_SUB_SENTENCES_CSV))
@@ -1256,12 +1368,14 @@ def build_data_list(
             words_by_id=words_by_id,
             meanings_by_id=meanings_by_id,
             maskings_by_id=maskings_by_id,
+            pinyins_by_id=pinyins_by_id,
             sub_rows_by_base_id=sub_rows_by_base_id,
         )
         _apply_word_maskings_to_base_rows(
             base_rows,
             words_by_id=words_by_id,
             maskings_by_id=maskings_by_id,
+            pinyins_by_id=pinyins_by_id,
         )
         base_rows = _normalize_table_rows_one_per_base(base_rows)
         out = _sort_data_list_for_playback(_data_list_from_csv_rows(base_rows, repo=repo))

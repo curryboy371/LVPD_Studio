@@ -43,7 +43,7 @@ from studio.shorts.constants import (
 from studio.shorts.tools.fonts import ShortsFontSizes, build_font_bundle
 from studio.shorts.tools.karaoke_renderer import KaraokeRenderer
 from studio.studios.components.hanzi_animator import HanziAnimator
-from utils.pinyin_masking import get_masked_pinyin_marks
+from utils.pinyin_masking import get_masked_pinyin_marks, word_pinyin_to_marks
 from utils.fonts import attach_font_fgcolor, load_font_chinese, load_font_chinese_freetype, load_font_korean
 
 logger = logging.getLogger(__name__)
@@ -467,6 +467,15 @@ class VocabularyStudio:
         if w is None:
             return ""
         hanzi = (w.word or "").strip()
+        explicit = (w.pinyin or "").strip()
+        if explicit:
+            try:
+                from_pinyin = word_pinyin_to_marks(hanzi, explicit)
+                if from_pinyin:
+                    return from_pinyin
+            except Exception:
+                pass
+            return explicit
         if hanzi:
             try:
                 generated = get_masked_pinyin_marks(hanzi, (w.masking or "").strip())
@@ -474,8 +483,6 @@ class VocabularyStudio:
                     return generated
             except Exception:
                 pass
-        if (w.pinyin or "").strip():
-            return (w.pinyin or "").strip()
         return ""
 
     def _parse_pos_items(self, pos_raw: str) -> list[str]:
