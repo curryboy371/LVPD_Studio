@@ -1,6 +1,8 @@
 """
 기본 경로: env 없이 통일된 기본 경로 사용.
 """
+from __future__ import annotations
+
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -113,3 +115,35 @@ def conversation_sub_ko_mp3_path(base_id: int, sub_sentence_id: int) -> Path:
 def conversation_sub_ko_mp3_path_legacy(sub_sentence_id: int) -> Path:
     """구 산출물 ko_sub_{id}.mp3 — id만 쓰면 base_id 간 충돌 가능."""
     return CONVERSATION_SUB_KO_SOUND_DIR / f"ko_sub_{int(sub_sentence_id)}.mp3"
+
+
+_CONVERSATION_SUB_CN_AUDIO_EXTS = (".mp3", ".wav", ".ogg", ".flac", ".m4a")
+
+
+def resolve_conversation_sub_cn_sound_path(raw: str) -> Path | None:
+    """sub_sentences.alt_sound_path → 실제 음성 파일.
+
+    - ``resource/sound/sentense/…`` 등 repo 상대 전체 경로
+    - 절대 경로
+    - 확장자 없는 파일명(또는 stem) → ``resource/sound/sentense/{name}.mp3`` 등 순서대로 탐색
+    """
+    value = (raw or "").strip()
+    if not value:
+        return None
+    normalized = value.replace("\\", "/")
+    p = Path(normalized)
+    if p.is_absolute():
+        resolved = p.resolve()
+        return resolved if resolved.is_file() else None
+    if "/" in normalized:
+        resolved = (_REPO_ROOT / normalized).resolve()
+        return resolved if resolved.is_file() else None
+    base_dir = CONVERSATION_SUB_KO_SOUND_DIR
+    if p.suffix:
+        candidate = (base_dir / p.name).resolve()
+        return candidate if candidate.is_file() else None
+    for ext in _CONVERSATION_SUB_CN_AUDIO_EXTS:
+        candidate = (base_dir / f"{value}{ext}").resolve()
+        if candidate.is_file():
+            return candidate
+    return None

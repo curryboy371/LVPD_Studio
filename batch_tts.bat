@@ -67,6 +67,8 @@ echo ========================================
 echo   1  회화 모드 - F5 conversation
 echo      topic -^> sub_sentences.alt_translation
 echo      산출: resource/sound/sentense/ko_sub_baseId_subId.mp3
+echo      기본: 해당 topic mp3 삭제 후 전부 재생성 ^(스킵 없음^)
+echo      기존 유지: batch_tts.bat 1 ^<topic^> --skip-existing
 echo      검증: python -m tools.tts_gen.verify_conversation_sub_ko --topic ^<topic^>
 echo.
 echo   2  단어장 모드 - F5 vocabulary

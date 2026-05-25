@@ -111,7 +111,9 @@ def main() -> int:
         if base_id not in selected_base_ids:
             continue
         raw = row.get("alt_sound_path") or ""
-        resolved = _resolve_resource_path(raw, repo, sound_index)
+        from core.paths import resolve_conversation_sub_cn_sound_path
+
+        resolved = resolve_conversation_sub_cn_sound_path(raw)
         if resolved is None:
             continue
         if not resolved.exists():

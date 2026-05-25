@@ -982,9 +982,11 @@ def _attach_sub_variants_to_base_rows(
 
             resolved_replacements = _sort_resolved_replacements(resolved_replacements)
 
-            alt_sound_path = str(v.get("alt_sound_path") or "").strip()
-            if alt_sound_path and not os.path.isabs(alt_sound_path):
-                alt_sound_path = str(_REPO_ROOT / alt_sound_path.replace("\\", "/"))
+            from core.paths import resolve_conversation_sub_cn_sound_path
+
+            alt_sound_raw = str(v.get("alt_sound_path") or "").strip()
+            resolved_cn = resolve_conversation_sub_cn_sound_path(alt_sound_raw)
+            alt_sound_path = str(resolved_cn) if resolved_cn else ""
 
             alt_ko_sound_path = ""
             try:

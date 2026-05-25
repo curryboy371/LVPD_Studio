@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from core.paths import (
+    CONVERSATION_SUB_KO_SOUND_DIR,
     DEFAULT_BASE_SENTENCES_CSV,
     DEFAULT_SUB_SENTENCES_CSV,
     conversation_sub_ko_mp3_path,
@@ -74,6 +75,52 @@ def collect_sub_translation_jobs_for_topic(
     return jobs
 
 
+def base_ids_for_topic(
+    topic: str,
+    *,
+    base_csv: str | Path | None = None,
+) -> set[int]:
+    """base_sentences.topic 이 일치하는 base_id 집합."""
+    topic_k = _topic_key(topic)
+    if not topic_k:
+        return set()
+    load_base_sentences_from_csv(base_csv or DEFAULT_BASE_SENTENCES_CSV)
+    from data.table_manager import get_base_sentences
+
+    out: set[int] = set()
+    for row in get_base_sentences() or []:
+        if _topic_key(row.topic) == topic_k:
+            out.add(int(row.id))
+    return out
+
+
+def purge_conversation_sub_ko_for_topic(
+    topic: str,
+    *,
+    base_csv: str | Path | None = None,
+) -> int:
+    """topic 소속 base_id 의 ko_sub_{base_id}_*.mp3 만 삭제 (다른 topic 파일은 유지)."""
+    base_ids = base_ids_for_topic(topic, base_csv=base_csv)
+    if not base_ids:
+        logger.warning("topic=%s: 삭제할 base_sentences 없음", topic)
+        return 0
+
+    deleted = 0
+    for base_id in sorted(base_ids):
+        pattern = f"ko_sub_{int(base_id)}_*.mp3"
+        for path in CONVERSATION_SUB_KO_SOUND_DIR.glob(pattern):
+            try:
+                path.unlink()
+                deleted += 1
+                logger.info(
+                    "삭제 %s",
+                    path.relative_to(get_repo_root()),
+                )
+            except OSError as ex:
+                logger.warning("삭제 실패 %s: %s", path, ex)
+    return deleted
+
+
 def list_conversation_topics_in_base_sentences() -> list[str]:
     load_base_sentences_from_csv(DEFAULT_BASE_SENTENCES_CSV)
     from data.table_manager import get_base_sentences
@@ -92,11 +139,22 @@ def batch_build_conversation_sub_ko_for_topic(
     tts: str = "edge",
     tts_voice: str = "ko-KR-SunHiNeural",
     force_tts: bool = False,
+    rebuild: bool = True,
     base_csv: str | Path | None = None,
     sub_csv: str | Path | None = None,
 ) -> tuple[int, int, int]:
-    """topic에 속한 sub_sentences.alt_translation TTS 배치. Returns (ok, skip, fail)."""
+    """topic에 속한 sub_sentences.alt_translation TTS 배치. Returns (ok, skip, fail).
+
+    기본(rebuild=True): 해당 topic base_id 의 ko_sub_{base_id}_*.mp3 삭제 후 전부 재생성.
+    rebuild=False, force_tts=False: 기존 mp3 있으면 스킵.
+    force_tts=True, rebuild=False: 삭제 없이 덮어쓰기만.
+    """
     from audio.ko_narration import cached_cue_audio_usable, resolve_tts_provider
+
+    if rebuild:
+        n = purge_conversation_sub_ko_for_topic(topic, base_csv=base_csv)
+        logger.info("topic=%s: 기존 mp3 %d개 삭제 후 재생성", topic, n)
+        force_tts = True
 
     jobs = collect_sub_translation_jobs_for_topic(
         topic, base_csv=base_csv, sub_csv=sub_csv

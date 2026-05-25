@@ -594,6 +594,11 @@ class PracticeScene(IConversationStep):
         raw = str(variant.get(key) or "").strip()
         if not raw:
             return ""
+        if key == "alt_sound_path":
+            from core.paths import resolve_conversation_sub_cn_sound_path
+
+            resolved = resolve_conversation_sub_cn_sound_path(raw)
+            return str(resolved) if resolved else ""
         sp = Path(raw.replace("\\", "/"))
         if not sp.is_absolute():
             sp = get_repo_root() / sp
