@@ -1170,24 +1170,16 @@ class PracticeScene(IConversationStep):
         if getattr(fonts, "hanzi_pg", None) is None:
             return
 
-        full_w = sum(
-            int(
-                self.drawer._get_cached_text_pair(
-                    self.drawer._cache_hanzi,
-                    self.drawer._fonts.hanzi_ft,
-                    self.drawer._fonts.hanzi_pg,
-                    seg_text,
-                    seg_color,
-                )[0].get_width()
-            )
-            for seg_text, seg_color in segments
+        full_w, placed = self.drawer.layout_hanzi_colored_segments(
+            hanzi_text,
+            segments,
+            width_color=white_style.colors.hanzi_color,
         )
         x_line = max(white_style.layout.min_margin_x, center_x - full_w // 2)
 
         if alpha <= 0:
             return
-        cur_x = x_line
-        for seg_text, seg_color in segments:
+        for seg_text, seg_color, x_off in placed:
             surf, _ = self.drawer._get_cached_text_pair(
                 self.drawer._cache_hanzi,
                 self.drawer._fonts.hanzi_ft,
@@ -1195,6 +1187,7 @@ class PracticeScene(IConversationStep):
                 seg_text,
                 seg_color,
             )
+            cur_x = x_line + int(x_off)
             if alpha >= 255:
                 screen.blit(surf, (cur_x, y_hanzi))
             else:
@@ -1207,7 +1200,6 @@ class PracticeScene(IConversationStep):
                         surf.set_alpha(None)
                     else:
                         surf.set_alpha(old_alpha)
-            cur_x += int(surf.get_width())
 
         if ko_karaoke_active and trans_line and "translation" in line_ys:
             alpha = int(max(0, min(255, self.drawer.fade_alpha(self._sentence_channel))))

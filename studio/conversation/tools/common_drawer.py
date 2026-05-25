@@ -36,6 +36,8 @@ HANZI_KARAOKE_INACTIVE: tuple[int, int, int] = (120, 125, 140)
 PINYIN_TONE_DECORATION_FIXED_ABOVE_PX = 104
 # freetype 한 줄 높이: 쉼표·물음표 포함 probe로 고정(문장마다 bbox 높이 흔들림 방지)
 _HANZI_LINE_BOX_PROBE = "\u4e2d\u6587,\u95ee\uff1f"  # 中文,问？
+# PRACTICE 슬롯(색 구간) 경계 — 흰↔강조 전환 시 추가 가로 여백(px)
+HANZI_COLORED_SEGMENT_BOUNDARY_GAP_PX = 12
 AlignV = Literal["center", "top", "bottom"]
 
 
@@ -447,6 +449,52 @@ class CommonDrawer:
             cache.put(key, cached)
         return cached
 
+    def _hanzi_cached_width(self, text: str, color: tuple[int, int, int]) -> int:
+        """한자 한 줄 렌더 너비(색 구간 합산 대신 전체 문장 기준 자간 유지용)."""
+        if not text:
+            return 0
+        surf, _ = self._get_cached_text_pair(
+            self._cache_hanzi,
+            self._fonts.hanzi_ft,
+            self._fonts.hanzi_pg,
+            text,
+            color,
+        )
+        return int(surf.get_width()) if surf is not None else 0
+
+    def layout_hanzi_colored_segments(
+        self,
+        full_text: str,
+        segments: list[tuple[str, tuple[int, int, int]]],
+        *,
+        width_color: tuple[int, int, int],
+        boundary_gap_px: int = HANZI_COLORED_SEGMENT_BOUNDARY_GAP_PX,
+    ) -> tuple[int, list[tuple[str, tuple[int, int, int], int]]]:
+        """색 구간별 x 오프셋. prefix 너비 + 색 전환 경계 여백."""
+        if not segments:
+            return 0, []
+        joined = "".join(seg for seg, _ in segments)
+        ref = full_text or joined
+        gap = max(0, int(boundary_gap_px))
+        placed: list[tuple[str, tuple[int, int, int], int]] = []
+        pos = 0
+        extra_x = 0
+        transition_count = 0
+        prev_color: tuple[int, int, int] | None = None
+        for seg_text, seg_color in segments:
+            if not seg_text:
+                continue
+            if prev_color is not None and seg_color != prev_color:
+                extra_x += gap
+                transition_count += 1
+            x_off = self._hanzi_cached_width(ref[:pos], width_color) + extra_x
+            placed.append((seg_text, seg_color, x_off))
+            pos += len(seg_text)
+            prev_color = seg_color
+        base_w = self._hanzi_cached_width(ref, width_color)
+        total_w = base_w + transition_count * gap
+        return total_w, placed
+
     def _get_cached_translation_surf(self, text: str, color: tuple[int, int, int]) -> Any:
         """번역용 폰트로 렌더한 서피스를 전용 캐시에서 반환한다."""
         font_pg = self._fonts.translation_pg
@@ -647,12 +695,15 @@ class CommonDrawer:
             return
         progress = compute_karaoke_progress(elapsed_sec, duration_sec)
 
+        full_text = "".join(seg for seg, _ in segments)
+        total_w, placed = self.layout_hanzi_colored_segments(
+            full_text,
+            segments,
+            width_color=inactive_color,
+        )
         pieces: list[tuple[pygame.Surface, pygame.Surface, int, int]] = []
-        total_w = 0
         max_h = 0
-        for seg_text, seg_color in segments:
-            if not seg_text:
-                continue
+        for seg_text, seg_color, _x_off in placed:
             surf_gray, _ = self._get_cached_text_pair(
                 self._cache_hanzi,
                 self._fonts.hanzi_ft,
@@ -664,10 +715,8 @@ class CommonDrawer:
                 surf_color = surf_gray
             else:
                 surf_color = self._surface_with_recolored_ink(surf_gray, seg_color)
-            w = int(surf_gray.get_width())
             h = int(surf_gray.get_height())
-            pieces.append((surf_gray, surf_color, w, h))
-            total_w += w
+            pieces.append((surf_gray, surf_color, _x_off, h))
             max_h = max(max_h, h)
         line_h = max(max_h, self._hanzi_layout_line_height(inactive_color))
         if total_w <= 0 or line_h <= 0 or not pieces:
@@ -675,12 +724,10 @@ class CommonDrawer:
 
         gray_layer = pygame.Surface((total_w, line_h), pygame.SRCALPHA)
         colored = pygame.Surface((total_w, line_h), pygame.SRCALPHA)
-        cx = 0
-        for surf_gray, surf_color, w, _h in pieces:
+        for surf_gray, surf_color, cx, _h in pieces:
             # 회색(미재생)·색(재생) tight bbox 높이가 다를 수 있음 → 상단 정렬(0)
             gray_layer.blit(surf_gray, (cx, 0))
             colored.blit(surf_color, (cx, 0))
-            cx += w
 
         a = 255 if alpha is None else int(max(0, min(255, alpha)))
         if a <= 0:
