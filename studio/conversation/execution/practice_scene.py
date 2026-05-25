@@ -100,6 +100,7 @@ class PracticeScene(IConversationStep):
         start_listen_clip: Callable[..., float] | None = None,
         on_follow_sound_started: Callable[[str, float], None] | None = None,
         is_recording: Callable[[], bool] | None = None,
+        recording_timeline_sec: Callable[[], float] | None = None,
         title_text: str = "듣고 따라해보기",
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
@@ -121,6 +122,7 @@ class PracticeScene(IConversationStep):
         self.start_listen_clip = start_listen_clip
         self.on_follow_sound_started = on_follow_sound_started
         self.is_recording = is_recording
+        self._recording_timeline_sec = recording_timeline_sec
         self.scene_transition_mode: SceneTransitionMode = SceneTransitionMode.CUT
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
@@ -190,6 +192,7 @@ class PracticeScene(IConversationStep):
         self._sub_intro_wait_remaining_sec = 0.0
         self._sub_slide_in_elapsed = 0.0
         self._sub_play_started_mono_sec: float = 0.0
+        self._sub_play_timeline_anchor_sec: float | None = None
         self._sub_all_variants_finished: bool = False
         self._sub_render_item_cache_key: tuple | None = None
         self._sub_render_item_cached: ConversationItemLike | None = None
@@ -228,6 +231,7 @@ class PracticeScene(IConversationStep):
             self._sub_intro_wait_remaining_sec = 0.0
             self._sub_slide_in_elapsed = 0.0
             self._sub_play_started_mono_sec = 0.0
+            self._sub_play_timeline_anchor_sec = None
             self._sub_all_variants_finished = False
             self._practice_stage_log_last = None
             self._invalidate_sub_render_cache()
@@ -236,11 +240,48 @@ class PracticeScene(IConversationStep):
         self._sub_render_item_cache_key = None
         self._sub_render_item_cached = None
 
+    def _is_recording_active(self) -> bool:
+        if self.is_recording is None:
+            return False
+        try:
+            return bool(self.is_recording())
+        except Exception:
+            return False
+
     def _sub_playing_elapsed_sec(self) -> float:
-        """playing 단계 경과(초). 프레임 dt 누적 대신 monotonic 기준(녹화·0 dt에서도 진행)."""
+        """playing 단계 경과(초).
+
+        녹화: runner의 `recording_time_sec`(프레임 인덱스/fps) — mux·게이지·노래방 동기.
+        디버그: monotonic — 실시간 재생과 맞춤.
+        """
+        if (
+            self._is_recording_active()
+            and self._recording_timeline_sec is not None
+            and self._sub_play_timeline_anchor_sec is not None
+        ):
+            try:
+                return max(
+                    0.0,
+                    float(self._recording_timeline_sec())
+                    - float(self._sub_play_timeline_anchor_sec),
+                )
+            except Exception:
+                pass
         if self._sub_play_started_mono_sec <= 0.0:
             return 0.0
         return max(0.0, time.monotonic() - self._sub_play_started_mono_sec)
+
+    def _arm_sub_play_clock(self) -> None:
+        """playing 구간 타이머 기준을 잡는다(녹화 타임라인 vs monotonic)."""
+        self._sub_play_timeline_anchor_sec = None
+        self._sub_play_started_mono_sec = 0.0
+        if self._is_recording_active() and self._recording_timeline_sec is not None:
+            try:
+                self._sub_play_timeline_anchor_sec = float(self._recording_timeline_sec())
+            except Exception:
+                self._sub_play_timeline_anchor_sec = None
+        if self._sub_play_timeline_anchor_sec is None:
+            self._sub_play_started_mono_sec = time.monotonic()
 
     def update(self, ctx: FrameContext, *, item: ConversationItemLike) -> None:
         """항목만 바뀌고 슬롯 리셋이 빠진 경우에도 이전 base의 sub가 남지 않게 한다."""
@@ -437,7 +478,7 @@ class PracticeScene(IConversationStep):
                     )
                     self._sub_content_wait_total_sec = wt
                     self._sub_content_wait_remaining_sec = wt
-                    self._sub_play_started_mono_sec = time.monotonic()
+                    self._arm_sub_play_clock()
                     self._log_sub_variant_wait(wt)
                 return
             if self._sub_play_phase != "playing":
@@ -459,6 +500,7 @@ class PracticeScene(IConversationStep):
                 )
                 self._sub_content_wait_remaining_sec = 0.0
             if self._sub_content_wait_remaining_sec <= 0.0:
+                self._sub_play_timeline_anchor_sec = None
                 self._sub_play_started_mono_sec = 0.0
                 if self._sub_all_variants_finished:
                     return
@@ -541,6 +583,7 @@ class PracticeScene(IConversationStep):
         self.drawer.show_now(self._sentence_channel)
         self._sub_play_phase = "intro_hold"
         self._sub_play_started_mono_sec = 0.0
+        self._sub_play_timeline_anchor_sec = None
         hold = max(
             float(self._sentence_intro_hold_sec),
             self._compute_sub_tip_hold_sec(),

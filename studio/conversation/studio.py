@@ -331,6 +331,10 @@ class ConversationStudio:
             cfg = self._last_config
             return getattr(cfg, "recording_log_event", None) is not None
 
+        def _recording_timeline_sec() -> float:
+            cfg = self._last_config
+            return float(getattr(cfg, "recording_time_sec", 0.0) or 0.0)
+
         _adv = str(getattr(settings, "learning_voice_advance", "immediate") or "immediate").lower()
         _wait_for_sound_end = _adv in ("after_sound", "sound_length", "wait_sound")
 
@@ -379,6 +383,7 @@ class ConversationStudio:
             start_listen_clip=_start_listen_clip,
             on_follow_sound_started=_on_follow_sound_started,
             is_recording=_is_recording_mode,
+            recording_timeline_sec=_recording_timeline_sec,
             title_text=str(
                 getattr(settings, "practice_title_text", "듣고 따라해보기") or "듣고 따라해보기"
             ),
