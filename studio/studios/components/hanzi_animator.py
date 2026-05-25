@@ -169,8 +169,13 @@ class HanziAnimator:
         while self._clip_index < len(self._clips):
             clip = self._clips[self._clip_index]
             duration = self._clip_duration(clip)
-            if duration <= 1e-9 or self._clip_elapsed < duration:
+            if duration <= 1e-9:
+                self._clip_index += 1
+                self._clip_elapsed = 0.0
+                continue
+            if self._clip_elapsed < duration:
                 break
+            # 다음 글자로 넘길 때 남은 시간을 이어서 써 다글자 순차 재생이 끊기지 않게 한다.
             self._clip_elapsed -= duration
             self._clip_index += 1
         if self._clip_index >= len(self._clips):

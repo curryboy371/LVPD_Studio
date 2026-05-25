@@ -72,7 +72,12 @@ _VOCAB_MODE_HINT_ABOVE_PINYIN_GAP = 22
 # words.sound_path 없음·파일 없음·길이 0일 때 자동 시퀀스 타이밍(초)
 _FALLBACK_SOUND_LEN_SEC = 1.0
 _AUTO_REPLAY_SIMILARITY_THRESHOLD = 0.70
-_STROKE_FIXED_PLAY_SPEED = 1.0
+# 단어장 획순: words.stroke_play_speed × 이 배율 (CSV 1.0 → 실효 1.5 등)
+_STROKE_PLAY_SPEED_SCALE = 1.5
+# 사운드 페이즈 종료 후 한자·재생 2회차까지 기다린 뒤 다음 단어로 넘기기 전 짧은 여유
+_AUTO_WORD_TRANSITION_GAP_SEC = 0.35
+# 한자 대기 페이즈 안전 상한(초) — 프레임 미생성 등으로 is_playing이 안 끝날 때
+_AUTO_HANZI_STROKE_MAX_WAIT_SEC = 45.0
 _IMAGE_CORNER_RADIUS = 16
 _TITLE_INTRO_FADE_SEC = 1.4
 
@@ -654,7 +659,7 @@ class VocabularyStudio:
             return ("hanzi", sl, sl)
         if ph == "wait_sound_len":
             return ("hanzi", float(self._auto_phase_elapsed), float(self._auto_phase_duration))
-        if ph in ("wait_after_len", "wait_sync_hold"):
+        if ph in ("wait_after_len", "wait_hanzi_stroke", "wait_word_transition"):
             sl = max(0.0, float(self._auto_sound_len))
             return ("hanzi", sl, sl)
         return ("", 0.0, 0.0)
@@ -666,7 +671,7 @@ class VocabularyStudio:
         ph = self._auto_phase
         if ph in ("play_meaning_ko", "wait_after_meaning_ko", "play_sound", "wait_after_play"):
             return (VOCAB_CN_LISTEN_HINT, VOCAB_CN_LISTEN_HINT_COLOR)
-        if ph in ("wait_sound_len", "wait_after_len", "wait_sync_hold"):
+        if ph in ("wait_sound_len", "wait_after_len", "wait_hanzi_stroke", "wait_word_transition"):
             return (VOCAB_CN_SPEAK_HINT, VOCAB_CN_SPEAK_HINT_COLOR)
         return None
 
@@ -962,6 +967,27 @@ class VocabularyStudio:
         elif phase == "play_sound" and self._auto_sound_path:
             self._play_sound_now(self._auto_sound_path)
 
+    def _stroke_play_speed_for_word(self, w: Any) -> float:
+        """words.stroke_play_speed(0.1~5)에 단어장 기본 가속을 곱한다."""
+        base = float(getattr(w, "stroke_play_speed", 1.0) or 1.0) if w is not None else 1.0
+        return max(0.1, min(5.0, base * _STROKE_PLAY_SPEED_SCALE))
+
+    def _hanzi_stroke_settled(self) -> bool:
+        """다글자 순차 재생·유사 길이 2회차 재생까지 끝났는지."""
+        if not self._hanzi_animator.has_data():
+            return True
+        if self._hanzi_animator.is_playing():
+            return False
+        if self._auto_hanzi_replay_enabled and not self._auto_hanzi_replayed:
+            return False
+        return True
+
+    def _begin_word_transition_gap_or_advance(self, rows_count: int) -> None:
+        if _AUTO_WORD_TRANSITION_GAP_SEC > 1e-6:
+            self._begin_phase("wait_word_transition", _AUTO_WORD_TRANSITION_GAP_SEC)
+            return
+        self._advance_to_next_word_or_done(rows_count)
+
     def _sync_hanzi_anim_for_selected_word(self) -> None:
         ordered = self._ordered_rows()
         if not ordered:
@@ -973,10 +999,11 @@ class VocabularyStudio:
         cur = ordered[self._selected_index]
         w = get_word(cur.word_id)
         hanzi = (w.word or "").strip() if w else ""
-        key = (cur.word_id, hanzi)
+        play_speed = self._stroke_play_speed_for_word(w)
+        key = (cur.word_id, hanzi, round(play_speed, 3))
         if self._hanzi_anim_key != key:
             self._hanzi_anim_key = key
-            self._hanzi_animator.set_text(hanzi, play_speed=_STROKE_FIXED_PLAY_SPEED)
+            self._hanzi_animator.set_text(hanzi, play_speed=play_speed)
 
     def _setup_current_word_cycle(self) -> None:
         ordered = self._ordered_rows()
@@ -1110,14 +1137,27 @@ class VocabularyStudio:
                 return
             if self._try_begin_extra_cn_follow_cycle():
                 return
-            remain = max(0.0, self._auto_word_target_duration - self._auto_word_elapsed)
-            if remain > 1e-6:
-                self._begin_phase("wait_sync_hold", remain)
+            if not self._hanzi_stroke_settled():
+                self._begin_phase("wait_hanzi_stroke", _AUTO_HANZI_STROKE_MAX_WAIT_SEC)
                 return
-            self._advance_to_next_word_or_done(n)
+            self._begin_word_transition_gap_or_advance(n)
             return
 
-        if self._auto_phase == "wait_sync_hold":
+        if self._auto_phase == "wait_hanzi_stroke":
+            self._auto_phase_elapsed += dt
+            if self._auto_phase_elapsed >= self._auto_phase_duration:
+                logger.warning(
+                    "단어장: 한자 획순 대기 상한(%ss) — 다음 단어로 진행",
+                    _AUTO_HANZI_STROKE_MAX_WAIT_SEC,
+                )
+                self._begin_word_transition_gap_or_advance(n)
+                return
+            if not self._hanzi_stroke_settled():
+                return
+            self._begin_word_transition_gap_or_advance(n)
+            return
+
+        if self._auto_phase == "wait_word_transition":
             self._auto_phase_elapsed += dt
             if self._auto_phase_elapsed < self._auto_phase_duration:
                 return
