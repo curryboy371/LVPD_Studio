@@ -23,12 +23,14 @@ from studio.shorts.constants import (
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
     SHORTS_VIDEO_FADE_OUT_SEC,
+    SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC,
     SHORTS_HEIGHT,
     SHORTS_WIDTH,
     ZONE_MIDDLE_RATIO,
 )
 from studio.conversation.video_players import SimpleVideoPlayer
 from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION, CLIP_TYPE_VOCABULARY
+from data.ko_narration_loader import ko_cue_index_for_line
 from studio.shorts.data_loading import resolve_hook_title
 from studio.shorts.layout import ShortsLayoutZones
 from studio.shorts.tools.karaoke_renderer import compute_karaoke_progress
@@ -63,6 +65,7 @@ class ClipStage(Enum):
     CTA_HOLD = auto()
     VOCAB_WAIT_VIDEO = auto()
     VOCAB_GAP = auto()
+    CONV_SCRIPT = auto()
     END_HOLD = auto()
     DONE = auto()
     TRANSITION_OUT = auto()
@@ -153,6 +156,9 @@ class ClipScene:
         self._vocab_after_video_action = ""
         self._vocab_learn_subphase = ""
         self._vocab_cn_play_count = 0
+        self._script_steps: list[dict[str, Any]] = []
+        self._script_index = 0
+        self._script_phase = ""
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -180,6 +186,9 @@ class ClipScene:
         self._vocab_meaning_entered = False
         self._conv_translation_plan = None
         self._conv_translation_entered = False
+        self._script_steps = []
+        self._script_index = 0
+        self._script_phase = ""
 
     @property
     def stage(self) -> ClipStage:
@@ -362,7 +371,11 @@ class ClipScene:
         self._ensure_conv_translation_plan()
 
         video_path = str(self._clip.get("video_path") or "").strip()
-        if video_path and self._clip_has_video_intro():
+        if (
+            video_path
+            and self._clip_has_video_intro()
+            and not self._has_conv_script()
+        ):
             self._video_player.set_source(video_path, 0.0, -1.0)
             if self._video_player.has_source():
                 self._had_video_intro = True
@@ -378,6 +391,214 @@ class ClipScene:
 
     def _is_conversation_clip(self) -> bool:
         return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_CONVERSATION
+
+    def _has_conv_script(self) -> bool:
+        return bool(
+            self._is_conversation_clip()
+            and self._clip.get("conv_script_mode")
+            and self._clip.get("playback_steps")
+        )
+
+    def _restore_base_cn_fields(self) -> None:
+        snap = self._clip.get("_base_cn_snapshot")
+        if not isinstance(snap, dict):
+            return
+        self._clip["sentence"] = list(snap.get("sentence") or [])
+        self._clip["translation"] = list(snap.get("translation") or [])
+        self._clip["pinyin"] = str(snap.get("pinyin") or "")
+        self._clip["sound_path"] = str(snap.get("sound_path") or "")
+
+    def _conv_script_base_video_path(self) -> str:
+        return str(self._clip.get("video_path") or "").strip()
+
+    def _hide_conv_script_cn_text(self) -> None:
+        """TTS 구간에는 중국어 자막·노래방 숨김(비디오만)."""
+        self._clip["sentence"] = []
+        self._clip["translation"] = []
+        self._clip["pinyin"] = ""
+
+    def _conv_script_step_kind_at(self, index: int) -> str:
+        steps = getattr(self, "_script_steps", None) or []
+        if index < 0 or index >= len(steps):
+            return ""
+        return str(steps[index].get("kind") or "").strip()
+
+    def _conv_script_next_step_is_ko(self) -> bool:
+        return self._conv_script_step_kind_at(self._script_index + 1) == "ko"
+
+    def _prepare_conv_script_video_for_ko(self, *, reset_video: bool = True) -> None:
+        """한국어 TTS 구간: base_id 비디오 전면 재생."""
+        path = self._conv_script_base_video_path()
+        self._hide_conv_script_cn_text()
+        if not path:
+            return
+        self._had_video_intro = True
+        self._video_display_alpha = 255
+        if reset_video:
+            self._frozen_video_frame = None
+            if not self._video_player.has_source():
+                self._video_player.set_source(path, 0.0, -1.0)
+            else:
+                try:
+                    self._video_player.seek_to(0.0)
+                except Exception:
+                    pass
+        elif not self._video_player.has_source():
+            self._video_player.set_source(path, 0.0, -1.0)
+
+    def _prepare_conv_script_video_for_cn(self) -> None:
+        """TTS 종료 후 sub 구간: 마지막 프레임 고정·알파 낮춤."""
+        if not self._conv_script_base_video_path():
+            return
+        if self._video_player.has_source() or self._last_live_video_frame is not None:
+            self._freeze_video_frame()
+        self._video_display_alpha = max(0, min(255, int(SHORTS_VIDEO_AFTER_ALPHA)))
+
+    def _tick_conv_script_video(self, dt_sec: float) -> None:
+        if self._script_phase != "ko" or not self._video_player.has_source():
+            return
+        iw, ih = self._video_inner_size
+        if iw <= 0 or ih <= 0:
+            iw, ih = self._default_video_inner_size()
+        self._video_player.tick(max(0.0, float(dt_sec)))
+        if self._video_player.has_source():
+            live = self._video_player.get_frame(iw, ih, contain=True)
+            if live is not None:
+                self._last_live_video_frame = live.copy()
+
+    def _draw_conv_script_video(
+        self, screen: pygame.Surface, zones: ShortsLayoutZones
+    ) -> None:
+        if self._stage != ClipStage.CONV_SCRIPT:
+            return
+        inner = zones.middle.inflate(-32, -32)
+        if inner.width > 0 and inner.height > 0:
+            self._video_inner_size = (inner.width, inner.height)
+        if self._script_phase == "ko" and self._video_player.has_source():
+            self._drawer.draw_center_video(
+                screen,
+                self._video_player,
+                zones.middle,
+                alpha=self._video_display_alpha,
+                frame_inner_size=self._video_frame_inner_size(),
+            )
+        elif (
+            self._script_phase == "cn"
+            and self._frozen_video_frame is not None
+        ):
+            self._draw_pinned_video(screen, zones)
+
+    def _start_conv_script(self) -> None:
+        self._script_steps = list(self._clip.get("playback_steps") or [])
+        self._script_index = 0
+        self._script_phase = ""
+        self._ensure_ko_plan()
+        self._conv_translation_entered = True
+        self._stage = ClipStage.CONV_SCRIPT
+        self._timer = 0.0
+        self._learn_elapsed = 0.0
+        self._video_display_alpha = 255
+        self._frozen_video_frame = None
+        self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.25)
+        self._run_conv_script_step()
+
+    def _advance_conv_script_step(self) -> None:
+        self._stop_voice()
+        self._script_index += 1
+        self._script_phase = ""
+        self._run_conv_script_step()
+
+    def _run_conv_script_step(self) -> None:
+        if self._script_index >= len(self._script_steps):
+            # CTA(situation_subtitle): 마지막 sub 중국어 화면 유지 (base 스냅샷으로 되돌리지 않음)
+            self._enter_cta_hold()
+            return
+        step = self._script_steps[self._script_index]
+        kind = str(step.get("kind") or "").strip()
+        if kind == "ko":
+            self._script_phase = "ko"
+            prev_kind = self._conv_script_step_kind_at(self._script_index - 1)
+            self._prepare_conv_script_video_for_ko(reset_video=(prev_kind != "ko"))
+            cue_index = int(step.get("cue_index", -1))
+            if cue_index < 0:
+                set_id = int(self._clip.get("ko_narration_id") or 0)
+                cue_index = ko_cue_index_for_line(
+                    set_id,
+                    ment_id=int(step.get("ment_id") or 0),
+                    seq=int(step.get("seq") or 1),
+                )
+            self._play_conv_script_ko(cue_index)
+            return
+        if kind == "base":
+            self._script_phase = "cn"
+            self._ko_finished = True
+            self._prepare_conv_script_video_for_cn()
+            self._restore_base_cn_fields()
+            self._play_conv_script_cn(str(self._clip.get("sound_path") or ""))
+            return
+        if kind == "sub":
+            self._script_phase = "cn"
+            self._ko_finished = True
+            self._prepare_conv_script_video_for_cn()
+            self._clip["sentence"] = list(step.get("sentence") or [])
+            self._clip["translation"] = list(step.get("translation") or [])
+            self._clip["pinyin"] = str(step.get("pinyin") or "")
+            path = str(step.get("sound_path") or "").strip()
+            self._play_conv_script_cn(path)
+            return
+        logger.warning("알 수 없는 script 단계: %s", step)
+        self._advance_conv_script_step()
+
+    def _play_conv_script_ko(self, cue_index: int) -> None:
+        step: dict[str, Any] = {}
+        if 0 <= self._script_index < len(self._script_steps):
+            raw = self._script_steps[self._script_index]
+            if isinstance(raw, dict):
+                step = raw
+        fallback_text = str(step.get("line_text") or "").strip()
+        plan = self._ko_plan
+        cues = list(getattr(plan, "cues", None) or []) if plan is not None else []
+        idx = int(cue_index)
+        if idx < 0 or idx >= len(cues):
+            logger.warning(
+                "ko cue_index=%s 범위 밖 (cues=%d) set_id=%s — 캐시 mp3 직접 시도",
+                cue_index,
+                len(cues),
+                self._clip.get("ko_narration_id"),
+            )
+            set_id = int(self._clip.get("ko_narration_id") or 0)
+            audio_path = ""
+            if set_id > 0 and idx >= 0:
+                from audio.ko_narration import KO_SOUND_DIR
+
+                cand = KO_SOUND_DIR / f"ko_set_{set_id}_{idx}.mp3"
+                if cand.is_file():
+                    audio_path = str(cand.resolve())
+            if fallback_text or audio_path:
+                self._ko_started = True
+                self._ko_finished = False
+                self._ko_current_text = fallback_text
+                self._ko_cue_elapsed = 0.0
+                self._ko_cue_duration = (
+                    self._play_voice(audio_path) if audio_path else 0.0
+                )
+                if self._ko_cue_duration <= 0:
+                    self._ko_cue_duration = 2.0 if fallback_text else 0.5
+                return
+            self._advance_conv_script_step()
+            return
+        self._ko_started = True
+        self._ko_finished = False
+        self._play_ko_cue_at(idx)
+
+    def _play_conv_script_cn(self, path: str) -> None:
+        self._learn_elapsed = 0.0
+        dur = self._play_voice(path) if path else 0.0
+        if dur <= 0 and path:
+            dur = 3.0
+        self._sound_once_duration = dur
+        self._sentence_sound_duration = dur
+        self._sound_duration = dur
 
     def _clip_has_video_intro(self) -> bool:
         """단어 숏츠는 topic 인트로에서만 비디오. 회화만 클립별 비디오."""
@@ -730,6 +951,16 @@ class ClipScene:
     def begin_transition_out(self) -> None:
         if self._stage in (ClipStage.DONE, ClipStage.TRANSITION_OUT):
             return
+        if self._stage == ClipStage.CONV_SCRIPT:
+            self._stop_learn_audio()
+            self._restore_base_cn_fields()
+            self._video_player.close()
+            self._frozen_video_frame = None
+            self._stage = ClipStage.TRANSITION_OUT
+            self._timer = 0.0
+            self._drawer.fade.fade_off(_CHANNEL_HOOK, CLIP_TRANSITION_FADE_SEC)
+            self._drawer.fade.fade_off(_CHANNEL_BOTTOM, CLIP_TRANSITION_FADE_SEC)
+            return
         if self._stage in (ClipStage.VIDEO_PLAY, ClipStage.VIDEO_HOLD, ClipStage.VIDEO_FADE_OUT):
             self._video_player.close()
             if self._topic_intro_mode:
@@ -737,7 +968,7 @@ class ClipScene:
             else:
                 self._enter_post_video_intro()
             return
-        if self._stage in (ClipStage.LEARN_PLAY, ClipStage.END_HOLD):
+        if self._stage in (ClipStage.LEARN_PLAY, ClipStage.CONV_SCRIPT, ClipStage.END_HOLD):
             self._stop_learn_audio()
             self._stop_follow_sound_if_any()
         if (
@@ -833,12 +1064,24 @@ class ClipScene:
             if self._is_vocabulary_clip():
                 return
             if self._timer >= self._hook_fade_sec:
-                if self._vocab_meaning_plan is not None:
+                if self._has_conv_script():
+                    self._start_conv_script()
+                elif self._vocab_meaning_plan is not None:
                     self._enter_vocab_meaning_ko()
                 elif self._is_conversation_clip():
                     self._enter_conv_translation_ko()
                 else:
                     self._enter_learn_play()
+            return
+
+        if self._stage == ClipStage.CONV_SCRIPT:
+            if self._script_phase == "ko":
+                self._tick_ko_narration(dt_sec)
+                self._tick_conv_script_video(dt_sec)
+            elif self._script_phase == "cn":
+                self._learn_elapsed += max(0.0, float(dt_sec))
+                if self._is_voice_finished():
+                    self._advance_conv_script_step()
             return
 
         if self._stage == ClipStage.VOCAB_MEANING_KO:
@@ -1284,7 +1527,9 @@ class ClipScene:
         plan = self._active_ko_plan()
         if plan is None:
             self._ko_finished = True
-            if self._stage == ClipStage.VOCAB_MEANING_KO:
+            if self._stage == ClipStage.CONV_SCRIPT:
+                self._advance_conv_script_step()
+            elif self._stage == ClipStage.VOCAB_MEANING_KO:
                 self._enter_learn_play()
             elif self._stage == ClipStage.KO_NARRATION:
                 self._enter_cta_hold()
@@ -1292,6 +1537,9 @@ class ClipScene:
         cues = list(getattr(plan, "cues", None) or [])
         if index >= len(cues):
             self._ko_finished = True
+            if self._stage == ClipStage.CONV_SCRIPT:
+                self._advance_conv_script_step()
+                return
             if self._stage == ClipStage.VOCAB_MEANING_KO and self._is_vocabulary_clip():
                 hold = (self._ko_current_text or "").strip()
                 if hold:
@@ -1353,6 +1601,9 @@ class ClipScene:
             self._ko_cue_duration = 2.0
 
     def _advance_ko_cue(self) -> None:
+        if self._stage == ClipStage.CONV_SCRIPT:
+            self._advance_conv_script_step()
+            return
         self._play_ko_cue_at(self._ko_cue_index + 1)
 
     def _is_ko_cue_voice_finished(self) -> bool:
@@ -1364,6 +1615,9 @@ class ClipScene:
         dur = max(0.0, float(self._ko_cue_duration))
         if dur <= 1e-6:
             return self._ko_cue_elapsed >= 0.5
+        if self._stage == ClipStage.CONV_SCRIPT and self._conv_script_next_step_is_ko():
+            # 연속 seq: 재생 끝나면 거의 바로 다음 cue (비디오는 이어 재생)
+            return self._ko_cue_elapsed >= float(SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC)
         return self._ko_cue_elapsed >= dur + 0.1
 
     def _active_ko_subtitle(self) -> str:
@@ -1388,6 +1642,7 @@ class ClipScene:
                     ClipStage.VIDEO_FADE_OUT,
                     ClipStage.VOCAB_MEANING_KO,
                     ClipStage.KO_NARRATION,
+                    ClipStage.CONV_SCRIPT,
                 ):
                     return text
                 return ""
@@ -1520,6 +1775,14 @@ class ClipScene:
                 1e-6, float(self._ko_cue_duration)
             )
         base = self._sentence_karaoke_duration()
+        if self._stage == ClipStage.CONV_SCRIPT and self._script_phase == "cn":
+            dur = max(0.0, float(self._sentence_sound_duration or self._sound_once_duration))
+            if dur <= 1e-6:
+                dur = 3.0
+            if not self._is_voice_finished():
+                return max(0.0, float(self._learn_elapsed)), dur
+            return dur, dur
+
         if self._stage != ClipStage.LEARN_PLAY:
             if base > 1e-6:
                 return base, base
@@ -1567,7 +1830,11 @@ class ClipScene:
         """하단 situation 문구 — 학습(1~4단계) 중에는 숨기고, 학습 끝난 뒤에만."""
         if self._is_vocabulary_clip():
             return ""
-        if self._stage in (ClipStage.LEARN_PLAY, ClipStage.VOCAB_MEANING_KO):
+        if self._stage in (
+            ClipStage.LEARN_PLAY,
+            ClipStage.VOCAB_MEANING_KO,
+            ClipStage.CONV_SCRIPT,
+        ):
             return ""
         if self._stage in (
             ClipStage.VIDEO_PLAY,
@@ -1582,6 +1849,7 @@ class ClipScene:
         stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.CONV_SCRIPT,
             ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.KO_NARRATION,
             ClipStage.VOCAB_GAP,
@@ -1617,23 +1885,45 @@ class ClipScene:
             1,
         )
 
+    def _conv_script_ko_subtitle_on_video(self) -> bool:
+        if self._stage != ClipStage.CONV_SCRIPT or self._script_phase != "ko":
+            return False
+        if not self._conv_script_base_video_path():
+            return False
+        return self._video_player.has_source() or self._frozen_video_frame is not None
+
     def _ko_subtitle_anchor_rect(
         self, zones: ShortsLayoutZones, *, frame_height: int = 0
     ) -> pygame.Rect:
         if self._is_vocabulary_clip():
             return self._vocab_ko_subtitle_anchor_rect(zones, frame_height=frame_height)
         inner = self._video_frame_inner_size()
-        player = self._video_player if self._stage == ClipStage.VIDEO_PLAY else None
+        player = None
+        frozen = self._frozen_video_frame
+        if self._stage == ClipStage.VIDEO_PLAY:
+            player = self._video_player
+        elif self._stage == ClipStage.CONV_SCRIPT:
+            if self._script_phase == "ko" and self._video_player.has_source():
+                player = self._video_player
+            elif self._script_phase == "cn":
+                frozen = self._frozen_video_frame
         frame_rect = self._drawer.compute_center_video_frame_rect(
             zones.middle,
             player=player,
-            frozen_frame=self._frozen_video_frame,
+            frozen_frame=frozen,
             frame_inner_size=inner,
         )
         if frame_rect is not None:
             return frame_rect
         fallback = zones.middle.inflate(-32, -32)
         return fallback if fallback.width > 0 and fallback.height > 0 else zones.middle
+
+    def _should_skip_conv_script_middle_karaoke(self) -> bool:
+        """TTS+비디오 구간: 중앙 병음·한자(노래방) 숨김."""
+        return (
+            self._stage == ClipStage.CONV_SCRIPT
+            and self._script_phase == "ko"
+        )
 
     def _draw_ko_subtitle_if_any(self, screen: pygame.Surface, zones: ShortsLayoutZones) -> None:
         sub = self._overlay_subtitle_text()
@@ -1645,13 +1935,20 @@ class ClipScene:
             from studio.shorts.constants import shorts_vocab_meaning_subtitle_gap
 
             gap_fn = shorts_vocab_meaning_subtitle_gap
+        on_video = self._conv_script_ko_subtitle_on_video()
+        sub_fade = (
+            255
+            if on_video
+            else self._drawer.fade_alpha(_CHANNEL_BOTTOM)
+        )
         self._drawer.draw_ko_subtitle_overlay(
             screen,
             anchor_rect=self._ko_subtitle_anchor_rect(zones, frame_height=fh),
             text=sub,
-            fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
+            fade_alpha=sub_fade,
             subtitle_progress=self._overlay_subtitle_progress(),
             below_gap_fn=gap_fn,
+            on_video=on_video,
         )
 
     def _vocab_overlay_layout(
@@ -1935,6 +2232,7 @@ class ClipScene:
         show_bottom_stages = (
             ClipStage.VOCAB_MEANING_KO,
             ClipStage.LEARN_PLAY,
+            ClipStage.CONV_SCRIPT,
             ClipStage.VOCAB_WAIT_VIDEO,
             ClipStage.KO_NARRATION,
             ClipStage.VOCAB_GAP,
@@ -1949,10 +2247,11 @@ class ClipScene:
 
         if self._should_draw_pinned_video():
             self._draw_pinned_video(screen, zones)
+        self._draw_conv_script_video(screen, zones)
 
         meaning_karaoke: Optional[tuple[float, float]] = None
         vocab_meaning_tts_text: Optional[str] = None
-        if show_karaoke:
+        if show_karaoke and not self._should_skip_conv_script_middle_karaoke():
             k_elapsed, k_dur = self._learn_karaoke_timing()
             if self._stage == ClipStage.VOCAB_MEANING_KO:
                 k_elapsed = float(self._ko_cue_elapsed)

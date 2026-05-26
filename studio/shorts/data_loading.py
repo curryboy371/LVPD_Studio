@@ -16,6 +16,7 @@ from core.paths import (
 )
 from data.table_manager import get_base_sentences, get_word
 from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION, CLIP_TYPE_VOCABULARY, normalize_clip_type
+from studio.shorts.conv_script import build_conv_playback_steps
 from studio.shorts.constants import SHORTS_PANDA_DIR
 from utils.pinyin_processor import get_pinyin_processor
 from utils.syllable_timing import parse_syllable_times_ms
@@ -133,6 +134,26 @@ def _base_by_id() -> dict[int, Any]:
     if not base:
         return {}
     return {int(b.id): b for b in base if int(b.id) > 0}
+
+
+def _apply_conv_sub_display_from_steps(
+    clip: dict[str, Any], steps: list[dict[str, Any]]
+) -> bool:
+    """회화 conv: base 없을 때 첫 sub 문장으로 클립 표시 필드 채움."""
+    for step in steps:
+        if str(step.get("kind") or "").strip() != "sub":
+            continue
+        sentence = step.get("sentence") or []
+        if not sentence:
+            continue
+        clip["sentence"] = list(sentence)
+        clip["translation"] = list(step.get("translation") or [])
+        clip["pinyin"] = str(step.get("pinyin") or "")
+        sound = str(step.get("sound_path") or "").strip()
+        if sound:
+            clip["sound_path"] = sound
+        return True
+    return False
 
 
 def _merge_base_into_clip(clip: dict[str, Any], base: Any, repo: Path) -> None:
@@ -340,18 +361,46 @@ def build_shorts_conversation_clip_list(
         clip["base_id"] = base_id
         base = bases.get(base_id)
         if base is None:
-            logger.warning("shorts conversation clip id=%s: base_id=%s 없음", clip_id, base_id)
-            continue
-        _merge_base_into_clip(clip, base, repo)
+            logger.warning(
+                "shorts conversation clip id=%s: base_id=%s 없음 — sub만으로 진행",
+                clip_id,
+                base_id,
+            )
+        else:
+            _merge_base_into_clip(clip, base, repo)
         clip["last_hold_text"] = ""
         sound_override = (row.get("sound_path") or "").strip()
         if sound_override:
             clip["sound_path"] = _resolve_path(repo, sound_override)
         clip["video_path"] = _resolve_conversation_video_path(
-            row, clip_id=clip_id, topic=topic, base=base, repo=repo
+            row,
+            clip_id=clip_id,
+            topic=topic,
+            base=base,
+            repo=repo,
         )
+        steps = build_conv_playback_steps(
+            row,
+            base_id=base_id,
+            ko_narration_id=int(clip.get("ko_narration_id") or 0),
+            repo=repo,
+        )
+        if not steps:
+            logger.warning("shorts conversation clip id=%s: script 단계 없음", clip_id)
+            continue
+        clip["playback_steps"] = steps
+        clip["conv_script_mode"] = True
+        clip["_base_cn_snapshot"] = {
+            "sentence": list(clip.get("sentence") or []),
+            "translation": list(clip.get("translation") or []),
+            "pinyin": str(clip.get("pinyin") or ""),
+            "sound_path": str(clip.get("sound_path") or ""),
+        }
         clip["bg_path"] = _resolve_bg_audio_path(repo, row)
         if not clip["sentence"]:
+            _apply_conv_sub_display_from_steps(clip, steps)
+        if not clip["sentence"]:
+            logger.warning("shorts conversation clip id=%s: 표시 문장 없음", clip_id)
             continue
         out.append(clip)
 

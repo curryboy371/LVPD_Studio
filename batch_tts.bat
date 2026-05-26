@@ -77,7 +77,8 @@ echo      topic -^> vocabulary_word_rows 전체 word_id
 echo      선택: word-id 로 ID 직접 지정 가능
 echo.
 echo   3  숏츠 회화 (기존)
-echo      ko_narration set_id 예 1001
+echo      set_id: lvpd.bat tts 3 15
+echo      topic:  lvpd.bat tts 3 topic shangchai
 echo      산출: resource/sound/shorts/ko_set_숫자.mp3
 echo.
 echo   4  숏츠 단어 (기존)
@@ -165,28 +166,72 @@ set "_ERR=!ERRORLEVEL!"
 goto done
 
 :mode_shorts_conv
-set "KO_SET_ID=%ARG2%"
-if "!KO_SET_ID!"=="" (
-  echo.
-  echo [3] 숏츠 회화 — ko_narration set_id
-  echo   예: 1000 1001  ^(shorts_*_clips.ko_narration_id^)
-  echo.
-  set /p KO_SET_ID=set_id: 
+set "SHC_TOPIC="
+set "KO_SET_ID="
+
+REM lvpd.bat tts 3 topic shangchai
+if /I "%ARG2%"=="topic" (
+  set "SHC_TOPIC=%ARG3%"
+  if not "%ARG2%"=="" shift
+  if not "%ARG2%"=="" shift
+  goto shorts_conv_parse_extra
 )
-if "!KO_SET_ID!"=="" goto fail
-if not "%ARG2%"=="" shift
+
+if not "%ARG2%"=="" (
+  echo %ARG2%| findstr /r "^[0-9][0-9]*$" >nul
+  if not errorlevel 1 (
+    set "KO_SET_ID=%ARG2%"
+    shift
+    goto shorts_conv_parse_extra
+  )
+  set "SHC_TOPIC=%ARG2%"
+  shift
+  goto shorts_conv_parse_extra
+)
+
+echo.
+echo [3] 숏츠 회화
+echo   set_id ^(숫자^): shorts 클립의 ko_narration_id
+echo   topic ^(문자^): shorts_conversation_clips.topic
+echo   예: 15  또는  shangchai
+echo.
+set /p SHC_INPUT=set_id 또는 topic: 
+if "!SHC_INPUT!"=="" goto fail
+echo !SHC_INPUT!| findstr /r "^[0-9][0-9]*$" >nul
+if not errorlevel 1 (
+  set "KO_SET_ID=!SHC_INPUT!"
+) else (
+  set "SHC_TOPIC=!SHC_INPUT!"
+)
+goto shorts_conv_parse_extra
+
+:shorts_conv_parse_extra
 set "EXTRA_ARGS="
 :parse_extra_shc
-if "%~1"=="" goto shorts_conv_run
+if "%~1"=="" (
+  if not "!KO_SET_ID!"=="" goto shorts_conv_run_by_id
+  if not "!SHC_TOPIC!"=="" goto shorts_conv_run_by_topic
+  goto fail
+)
 set "EXTRA_ARGS=!EXTRA_ARGS! %1"
 shift
 goto parse_extra_shc
-:shorts_conv_run
+
+:shorts_conv_run_by_id
 echo.
 echo ^> [3] 숏츠 회화 / set_id=!KO_SET_ID!
 call :setup_py
 %_PY% -m pip install -q pysrt gtts mutagen edge-tts 2>nul
 %_PY% -m tools.tts_gen.build_shorts_ko_narration --set-id !KO_SET_ID! !EXTRA_ARGS!
+set "_ERR=!ERRORLEVEL!"
+goto done
+
+:shorts_conv_run_by_topic
+echo.
+echo ^> [3] 숏츠 회화 / topic=!SHC_TOPIC!
+call :setup_py
+%_PY% -m pip install -q pysrt gtts mutagen edge-tts 2>nul
+%_PY% -m tools.tts_gen.build_shorts_ko_narration --topic "!SHC_TOPIC!" !EXTRA_ARGS!
 set "_ERR=!ERRORLEVEL!"
 goto done
 

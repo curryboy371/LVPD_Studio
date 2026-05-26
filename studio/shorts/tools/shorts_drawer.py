@@ -33,12 +33,14 @@ from studio.shorts.constants import (
     KO_SUBTITLE_BG_PAD_X,
     KO_SUBTITLE_BG_PAD_Y,
     KO_SUBTITLE_BG_RGBA,
+    KO_SUBTITLE_ON_VIDEO_BG_RGBA,
     KARAOKE_INACTIVE_HANZI,
     KARAOKE_INACTIVE_PINYIN,
     SHORTS_VOCAB_OVERLAY_BG_PAD_X,
     SHORTS_VOCAB_OVERLAY_BG_PAD_Y,
     SHORTS_VOCAB_OVERLAY_BG_RGBA,
     shorts_ko_subtitle_below_video_gap,
+    shorts_ko_subtitle_on_video_bottom_gap,
     shorts_hook_title_line_gap,
     shorts_hook_title_y,
     shorts_middle_y_offset,
@@ -606,27 +608,47 @@ class ShortsDrawer:
         fade_alpha: int = 255,
         subtitle_progress: Optional[float] = None,
         below_gap_fn: Optional[Callable[[int], int]] = None,
+        on_video: bool = False,
     ) -> None:
-        """TTS 자막을 앵커 rect 바로 아래에 그린다."""
+        """TTS 자막. ``on_video=True``면 비디오 프레임 하단 안(검정 배경)."""
         sub = (text or "").strip()
         if not sub or fade_alpha <= 0:
             return
         alpha = max(0, min(255, int(fade_alpha)))
         cx = anchor_rect.centerx
         fh = max(1, int(screen.get_height()))
-        if below_gap_fn is not None:
+        if on_video:
+            gap = shorts_ko_subtitle_on_video_bottom_gap(fh)
+        elif below_gap_fn is not None:
             gap = int(below_gap_fn(fh))
         else:
             gap = shorts_ko_subtitle_below_video_gap(fh)
+
+        bg_rgba = KO_SUBTITLE_ON_VIDEO_BG_RGBA if on_video else KO_SUBTITLE_BG_RGBA
+
+        def _draw_bg(y: int, tw: int, th: int) -> None:
+            self._draw_alpha_panel_background(
+                screen,
+                center_x=cx,
+                top=y,
+                width=tw,
+                height=th,
+                fade_alpha=alpha,
+                bg_rgba=bg_rgba,
+                pad_x=KO_SUBTITLE_BG_PAD_X,
+                pad_y=KO_SUBTITLE_BG_PAD_Y,
+            )
 
         if subtitle_progress is not None:
             surf_in = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_INACTIVE)
             surf_ac = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
             tw, th = surf_in.get_width(), surf_in.get_height()
-            y = anchor_rect.bottom + gap
-            self._draw_ko_subtitle_background(
-                screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
+            y = (
+                anchor_rect.bottom - gap - th
+                if on_video
+                else anchor_rect.bottom + gap
             )
+            _draw_bg(y, tw, th)
             if alpha < 255:
                 surf_in = surf_in.copy()
                 surf_ac = surf_ac.copy()
@@ -639,10 +661,12 @@ class ShortsDrawer:
 
         surf = self._ko_subtitle_font.render(sub, True, KO_KARAOKE_ACTIVE)
         tw, th = surf.get_width(), surf.get_height()
-        y = anchor_rect.bottom + gap
-        self._draw_ko_subtitle_background(
-            screen, center_x=cx, y=y, text_w=tw, text_h=th, fade_alpha=alpha
+        y = (
+            anchor_rect.bottom - gap - th
+            if on_video
+            else anchor_rect.bottom + gap
         )
+        _draw_bg(y, tw, th)
         if alpha < 255:
             surf = surf.copy()
             surf.set_alpha(alpha)

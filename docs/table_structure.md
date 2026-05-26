@@ -77,16 +77,22 @@
 |------|------|------|------|
 | id | int | O | 숏츠 클립 ID |
 | topic | str | - | 주제 (`--topic` 필터) |
-| base_id | int | O | `base_sentences.id` |
+| base_id | int | O | `base_sentences.id` — 주제·`sub_sentences` 슬롯 조합용 (base 문장 직접 재생 안 함) |
 | hook_title | str | O | 상단 후킹 타이틀 |
 | situation_subtitle | str | - | 하단 상황 설명·**CTA_HOLD** 마무리 문구(비우면 base `translation`). `\\n` 줄바꿈 |
-| ko_narration_id | int | - | `ko_narration_sets.id` 참조. 비우면 한국어 내레이션 없음 |
+| ko_narration_id | int | O | `ko_narration_sets.id` (= `ko_narration_lines.set_id`). |
+| ko_narration_line_id | str | - | `ko_narration_lines.id` 목록: `1\|2\|3`. 비우면 **1,2,3…** (sub 순서대로 i번째 멘트) |
+| sub_sentence_id | str | O* | 재생할 `sub_sentences.id`: `1\|2\|3` (`base_id`와 같은 base). **필수** — 중국어는 sub 만 재생 |
 | last_hold_sec | float | - | CTA_HOLD 대기 시간(초, 소수 가능). 비우면 **2.5** |
 | bg_path | str | - | 클립 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
 
-**미디어**: `sound_path`·`video_path` 컬럼은 두지 않는다. `base_id` → `base_sentences.sound_lv_path`·`video_path` 를 로드 시 조인한다. (레거시 CSV에만 `sound_path`/`video_path`가 있으면 그 행만 오버라이드)
+**재생 순서** (sub마다): i번째 멘트 한국어 TTS(seq 전부) → i번째 `sub_sentence_id` 중국어 mp3.  
+- `ko_narration_line_id` 비우면 멘트 id `1..N` (N=sub 개수). sub id 숫자와 멘트 id 는 같을 필요 없음.  
+한국어 멘트 문구·`seq` 분할은 **`ko_narration_lines`만** 편집.
 
-**노래방**: 음절별 `syllable_times_ms` 없음 — 발음 mp3 길이로 균등 진행.
+**미디어**: `base_id` → `base_sentences` **비디오**(TTS 중 재생, sub 구간에서 알파 낮춤). `sub_sentence_id` → `sub_sentences` 중국어·mp3.
+
+**노래방**: 발음 mp3 길이로 균등 진행.
 
 ## 5) shorts_vocabulary_clips (숏츠·단어)
 
@@ -139,10 +145,10 @@ id,topic,word_id,hook_title,ko_narration_id,video_path,sound_repeat_count,after_
 
 | 컬럼 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| id | int | O | 문장 행 ID |
+| id | int | O | **멘트 번호**(같은 `set_id` 안 1·2·3…). `shorts_conversation_clips.script`·`ko:N` 과 대응 |
 | set_id | int | O | `ko_narration_sets.id` |
-| seq | int | O | 재생 순서(오름차순) |
-| text | str | O | 한국어 문장 1줄 (TTS·자막 1큐) |
+| seq | int | O | **같은 멘트(`id`)** 를 여러 TTS 큐로 나눌 때 순서(1부터). 멘트가 한 줄이면 `1` |
+| text | str | O | 한국어 1큐 (TTS·자막 1행) |
 
 **배치 TTS**: `python main.py batch-shorts-ko --topic where`  
 → `resource/sound/ko_set_{set_id}_{n}.mp3`, `resource/sound/ko_set_{set_id}_timeline.json`

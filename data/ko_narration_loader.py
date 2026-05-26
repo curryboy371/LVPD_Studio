@@ -30,7 +30,12 @@ class KoNarrationSet:
 
 @dataclass(frozen=True)
 class KoNarrationLine:
-    """세트에 속한 한국어 문장 1줄."""
+    """세트에 속한 한국어 TTS 1큐.
+
+    - ``set_id``: ``ko_narration_sets.id``
+    - ``id``: 같은 세트 안 **멘트 번호**(1·2·3…). script ``ko:1`` 과 대응.
+    - ``seq``: **같은 멘트(id)** 를 여러 큐로 나눌 때 순서(1부터).
+    """
 
     id: int
     set_id: int
@@ -98,7 +103,7 @@ def load_ko_narration_tables(
         )
 
     for sid in lines_map:
-        lines_map[sid].sort(key=lambda ln: (ln.seq, ln.id))
+        lines_map[sid].sort(key=lambda ln: (ln.id, ln.seq))
 
     _sets_by_id = sets
     _lines_by_set_id = lines_map
@@ -120,15 +125,70 @@ def get_ko_narration_set(set_id: int) -> Optional[KoNarrationSet]:
     return _sets_by_id.get(int(set_id))
 
 
-def get_cue_texts_for_set(set_id: int) -> list[str]:
-    """세트 ID → ko_narration_lines 문장 목록(seq 순)."""
+def get_ko_narration_lines_for_set(set_id: int) -> list[KoNarrationLine]:
+    """세트 ID → 전체 행 (멘트 id, seq 순)."""
     _ensure_loaded()
     assert _lines_by_set_id is not None
     sid = int(set_id)
     if sid < 1:
         return []
-    lines = _lines_by_set_id.get(sid) or []
-    return [ln.text for ln in lines if ln.text.strip()]
+    return list(_lines_by_set_id.get(sid) or [])
+
+
+def get_ko_narration_ments_for_set(set_id: int) -> list[list[KoNarrationLine]]:
+    """세트 ID → 멘트별 큐 묶음. 각 멘트는 id 동일·seq 오름차순."""
+    lines = get_ko_narration_lines_for_set(set_id)
+    if not lines:
+        return []
+    ments: list[list[KoNarrationLine]] = []
+    current_id: Optional[int] = None
+    bucket: list[KoNarrationLine] = []
+    for line in lines:
+        if current_id is None:
+            current_id = int(line.id)
+            bucket = [line]
+            continue
+        if int(line.id) != current_id:
+            ments.append(bucket)
+            current_id = int(line.id)
+            bucket = [line]
+        else:
+            bucket.append(line)
+    if bucket:
+        ments.append(bucket)
+    return ments
+
+
+def get_ko_narration_lines_for_ment(set_id: int, ment_id: int) -> list[KoNarrationLine]:
+    """세트·멘트 id → 해당 멘트의 모든 seq 행."""
+    return [
+        ln
+        for ln in get_ko_narration_lines_for_set(set_id)
+        if int(ln.id) == int(ment_id)
+    ]
+
+
+def ko_cue_index_for_line(set_id: int, *, ment_id: int, seq: int) -> int:
+    """TTS plan cues 배열 인덱스 (정렬: id, seq). 없으면 -1."""
+    for i, ln in enumerate(get_ko_narration_lines_for_set(set_id)):
+        if int(ln.id) == int(ment_id) and int(ln.seq) == int(seq):
+            return i
+    return -1
+
+
+def get_ko_narration_line_by_seq(set_id: int, seq: int) -> Optional[KoNarrationLine]:
+    """(호환) 세트 내 seq 단독 검색 — 멘트가 여러 개면 모호. ``get_ko_narration_lines_for_ment`` 권장."""
+    matches = [
+        ln for ln in get_ko_narration_lines_for_set(set_id) if int(ln.seq) == int(seq)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def get_cue_texts_for_set(set_id: int) -> list[str]:
+    """세트 ID → TTS 큐 텍스트 (멘트 id·seq 순)."""
+    return [ln.text for ln in get_ko_narration_lines_for_set(set_id) if ln.text.strip()]
 
 
 def get_adjusted_srt_path_for_set(set_id: int) -> Path:

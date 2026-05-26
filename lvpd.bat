@@ -204,7 +204,8 @@ echo   lvpd.bat 9 [topic]     회화 F5
 echo   lvpd.bat f5 shorts-vocab bao
 echo   lvpd.bat tts 1 fruit_store     회화 topic -^> ko_sub_*.mp3
 echo   lvpd.bat tts 2 hair            단어장 topic -^> ko_word_*
-echo   lvpd.bat tts 3 1001            숏츠 회화 ko set
+echo   lvpd.bat tts 3 15              숏츠 회화 ko set_id
+echo   lvpd.bat tts 3 topic shangchai 숏츠 회화 topic
 echo   lvpd.bat tts 4 topic jingyesi  숏츠 단어 topic
 echo   lvpd.bat tts 4 set 1001        숏츠 단어 인트로 set
 echo   lvpd.bat csv / tts / run / audio / hanzi

@@ -727,7 +727,10 @@ def batch_build_shorts_ko_narration(
     """
     from data.ko_narration_loader import load_ko_narration_tables
 
+    from studio.shorts.clip_types import normalize_clip_type
+
     load_ko_narration_tables()
+    shorts_clip_type = normalize_clip_type(shorts_mode)
     if int(set_id) > 0:
         clear_ko_set_sound_output(int(set_id))
     else:
@@ -757,6 +760,7 @@ def batch_build_shorts_ko_narration(
             tts_voice=tts_voice,
             force_tts=force_tts,
             with_composite=with_composite,
+            clip_type=shorts_clip_type,
         )
         if plan is None or not plan_cue_audios_ready(plan):
             fail += 1
@@ -773,6 +777,16 @@ def batch_build_shorts_ko_narration(
             srt_out,
         )
     return ok, skip, fail
+
+
+def ko_tts_rate_multiplier_for_shorts_clip_type(clip_type: str) -> float | None:
+    """숏츠 회화만 TTS 합성 속도 배율 적용. 그 외는 기본(1.0)."""
+    from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION, normalize_clip_type
+    from studio.shorts.constants import SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER
+
+    if normalize_clip_type(clip_type) == CLIP_TYPE_CONVERSATION:
+        return SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER
+    return None
 
 
 def build_ko_narration_plan(
@@ -803,8 +817,19 @@ def build_ko_narration_plan(
     clip_id = int(clip.get("clip_id") or 0)
 
     engine, voice = resolve_tts_config_for_set(set_id, tts_cli=tts, tts_voice_cli=tts_voice)
-    provider = resolve_tts_provider(engine, voice=voice)
-    logger.info("TTS set_id=%s 음성=%s", set_id, format_tts_log_label(engine, voice))
+    rate_mult = ko_tts_rate_multiplier_for_shorts_clip_type(clip_type)
+    provider = resolve_tts_provider(engine, voice=voice, rate_multiplier=rate_mult)
+    rate_note = (
+        f" 속도×{normalize_tts_rate_multiplier(rate_mult):.2f}"
+        if rate_mult is not None
+        else ""
+    )
+    logger.info(
+        "TTS set_id=%s 음성=%s%s",
+        set_id,
+        format_tts_log_label(engine, voice),
+        rate_note,
+    )
     audio_paths = synthesize_cue_audios(
         texts,
         set_id=set_id,

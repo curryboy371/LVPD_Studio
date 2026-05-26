@@ -600,6 +600,11 @@ SHORTS_VIDEO_FADE_OUT_SEC = 0.8
 # 페이드 후에도 비디오가 남도록 최소 알파(0=완전 숨김, 255=그대로)
 SHORTS_VIDEO_AFTER_ALPHA = 30
 
+# 숏츠 회화 모드 ko_narration TTS 합성 속도 (1.0=기본, edge-tts rate / gtts 근사)
+SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER = 1.2
+# 회화 conv: 같은 멘트 내 연속 seq(ko→ko) 끝난 뒤 다음 cue까지 대기(초)
+SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC = 0.02
+
 # 노래방 색상 (좌→우 진행 채움: inactive=미재생, active=재생됨)
 KARAOKE_ACTIVE_HANZI = (255, 230, 120)
 KARAOKE_INACTIVE_HANZI = (120, 125, 140)
@@ -609,11 +614,19 @@ KARAOKE_INACTIVE_PINYIN = (120, 125, 140)
 KO_KARAOKE_ACTIVE = (255, 240, 180)
 KO_KARAOKE_INACTIVE = (120, 125, 140)
 KO_SUBTITLE_BG_RGBA = (0, 0, 0, 160)
+KO_SUBTITLE_ON_VIDEO_BG_RGBA = (0, 0, 0, 210)
 KO_SUBTITLE_BG_PAD_X = 20
 KO_SUBTITLE_BG_PAD_Y = 10
 # TTS 자막: 비디오 프레임 하단과 자막 상단 사이 간격 (1080×1920 기준 px)
 SHORTS_KO_SUBTITLE_BELOW_VIDEO_GAP = 8
+SHORTS_KO_SUBTITLE_ON_VIDEO_BOTTOM_GAP = 20
 SHORTS_KO_SUBTITLE_FONT_SIZE = 46
+
+
+def shorts_ko_subtitle_on_video_bottom_gap(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(8, int(SHORTS_KO_SUBTITLE_ON_VIDEO_BOTTOM_GAP * sy))
 
 
 def shorts_ko_subtitle_below_video_gap(frame_height: int) -> int:
