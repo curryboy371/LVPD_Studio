@@ -588,6 +588,10 @@ VOCAB_CN_LISTEN_HINT = "잘 들어보세요"
 VOCAB_CN_SPEAK_HINT = "따라 말해보세요"
 VOCAB_CN_LISTEN_HINT_COLOR = (46, 204, 113)
 VOCAB_CN_SPEAK_HINT_COLOR = (255, 159, 67)
+# 단어 모드: 연속 중국어 재생 사이 대기(초)
+SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC = 0.8
+# 단어 모드: 중국어 발음 최소 재생 횟수(sound_repeat_count 와 큰 값 사용)
+SHORTS_VOCAB_CN_MIN_PLAY_COUNT = 2
 # 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
 SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC = 1.5
 SHORTS_BG_PRACTICE_MIN_SEC = 4.0

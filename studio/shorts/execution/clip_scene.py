@@ -18,6 +18,8 @@ from studio.shorts.constants import (
     SHORTS_BG_PRACTICE_MIN_SEC,
     SHORTS_FOLLOW_ALONG_LABEL,
     SHORTS_NATIVE_LISTEN_LABEL,
+    SHORTS_VOCAB_CN_MIN_PLAY_COUNT,
+    SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
@@ -150,6 +152,8 @@ class ClipScene:
         self._last_live_video_frame: Optional[pygame.Surface] = None
         self._vocab_gap_sec = 0.0
         self._vocab_after_video_action = ""
+        self._vocab_learn_subphase = ""
+        self._vocab_cn_play_count = 0
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -328,6 +332,8 @@ class ClipScene:
         self._sound_once_duration = 0.0
         self._sound_play_count = 0
         self._learn_round = 0
+        self._vocab_learn_subphase = ""
+        self._vocab_cn_play_count = 0
         self._sentence_sound_duration = 0.0
         self._bg_practice_duration = 0.0
         self._stop_follow_sound_if_any()
@@ -926,6 +932,8 @@ class ClipScene:
         self._learn_elapsed = 0.0
         self._sound_play_count = 0
         self._learn_round = 0
+        self._vocab_learn_subphase = ""
+        self._vocab_cn_play_count = 0
         self._sound_once_duration = 0.0
         self._sound_duration = 0.0
         self._sentence_sound_duration = 0.0
@@ -1127,10 +1135,20 @@ class ClipScene:
         except Exception:
             pass
     def _vocab_sound_repeat_target(self) -> int:
+        """CSV sound_repeat_count 와 최소 재생 횟수 중 큰 값."""
         try:
-            return max(1, int(self._clip.get("sound_repeat_count") or 1))
+            csv_n = max(1, int(self._clip.get("sound_repeat_count") or 1))
         except (TypeError, ValueError):
-            return 1
+            csv_n = 1
+        return max(int(SHORTS_VOCAB_CN_MIN_PLAY_COUNT), csv_n)
+
+    def _vocab_needs_more_cn_sound(self) -> bool:
+        """최소 재생 횟수 미달 또는 word 비디오가 아직 재생 중이면 True."""
+        if self._vocab_cn_play_count < self._vocab_sound_repeat_target():
+            return True
+        if self._has_word_video() and self._is_word_video_still_playing():
+            return True
+        return False
 
     def _vocab_after_sound_delay_sec(self) -> float:
         try:
@@ -1177,11 +1195,18 @@ class ClipScene:
 
     def _advance_learn_voice_step(self) -> None:
         if self._is_vocabulary_clip():
-            target = self._vocab_sound_repeat_target()
-            if self._sound_play_count < target:
-                self._start_sentence_play(play_index=self._sound_play_count + 1)
-            else:
-                self._finish_learn_sequence()
+            if self._vocab_learn_subphase == "replay_pause":
+                self._vocab_learn_subphase = ""
+                self._start_sentence_play(play_index=1)
+                return
+            self._vocab_cn_play_count += 1
+            if self._vocab_needs_more_cn_sound():
+                self._vocab_learn_subphase = "replay_pause"
+                self._learn_elapsed = 0.0
+                self._sound_once_duration = float(SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC)
+                return
+            self._vocab_learn_subphase = ""
+            self._finish_learn_sequence()
             return
         if self._learn_round == 1 and self._sound_play_count < max(
             1, int(SHORTS_SOUND_PLAY_COUNT)
@@ -1478,6 +1503,12 @@ class ClipScene:
         self._drawer.fade.fade_on(_CHANNEL_BOTTOM, 0.35)
 
     def _is_voice_finished(self) -> bool:
+        if (
+            self._is_vocabulary_clip()
+            and self._stage == ClipStage.LEARN_PLAY
+            and self._vocab_learn_subphase == "replay_pause"
+        ):
+            return self._learn_elapsed >= float(SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC)
         ch = self._voice_channel
         if ch is not None and ch.get_busy():
             return False
@@ -1506,6 +1537,9 @@ class ClipScene:
 
         # 단어 숏츠: 중국어 mp3 구간만 노래방. BG 따라발음은 음성만, 텍스트 재채움 없음.
         if self._is_vocabulary_clip():
+            if self._vocab_learn_subphase == "replay_pause":
+                dur = base if base > 1e-6 else 3.0
+                return dur, dur
             if 1 <= self._learn_round < 4:
                 dur = base if base > 1e-6 else 3.0
                 if not self._is_voice_finished():
