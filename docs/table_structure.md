@@ -79,13 +79,14 @@
 | topic | str | - | 주제 (`--topic` 필터) |
 | base_id | int | O | `base_sentences.id` |
 | hook_title | str | O | 상단 후킹 타이틀 |
-| hook_image_path | str | - | 판다 이미지. 비우면 `resource/image/shorts/panda/conversation/{id}.png` 등 |
-| situation_subtitle | str | - | 하단 상황 설명(비우면 base 번역) |
+| situation_subtitle | str | - | 하단 상황 설명·**CTA_HOLD** 마무리 문구(비우면 base `translation`). `\\n` 줄바꿈 |
 | ko_narration_id | int | - | `ko_narration_sets.id` 참조. 비우면 한국어 내레이션 없음 |
-| syllable_times_ms | str | - | 노래방 타이밍(ms, 쉼표). 비우면 균등 분할 |
-| sound_path | str | - | 비우면 base `sound_lv_path` |
-| last_hold_text | str | - | 클립 종료 **CTA_HOLD** 구간 문구. tip 없으면 TTS·비디오 자막 앵커 아래. `\\n` 줄바꿈 |
 | last_hold_sec | float | - | CTA_HOLD 대기 시간(초, 소수 가능). 비우면 **2.5** |
+| bg_path | str | - | 클립 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
+
+**미디어**: `sound_path`·`video_path` 컬럼은 두지 않는다. `base_id` → `base_sentences.sound_lv_path`·`video_path` 를 로드 시 조인한다. (레거시 CSV에만 `sound_path`/`video_path`가 있으면 그 행만 오버라이드)
+
+**노래방**: 음절별 `syllable_times_ms` 없음 — 발음 mp3 길이로 균등 진행.
 
 ## 5) shorts_vocabulary_clips (숏츠·단어)
 
@@ -106,8 +107,6 @@
 | last_hold_text | str | - | **topic 전체** 마지막 단어 종료 후 CTA_HOLD 문구 — words.csv `tip` 아래. `\\n` 줄바꿈 |
 | last_hold_sec | float | - | CTA_HOLD 대기(초, 소수 가능). 비우면 **2.5** |
 | bg_path | str | - | 따라해보세요 구간 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
-
-단어 숏츠는 `syllable_times_ms` 없음(노래방은 발음 길이로 균등 진행). 회화 숏츠만 `syllable_times_ms` 사용.
 
 로드 시 단어 클립 내부 id는 `{id}001`, `{id}002` … (예: topic id=1 → 1001, 1002). 판다: `panda/vocabulary/{내부id}.png`.
 

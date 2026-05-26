@@ -16,7 +16,6 @@ from studio.shorts.constants import (
     HOOK_FADE_IN_SEC,
     SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC,
     SHORTS_BG_PRACTICE_MIN_SEC,
-    SHORTS_FOLLOW_ALONG_LABEL,
     SHORTS_NATIVE_LISTEN_LABEL,
     SHORTS_VOCAB_CN_MIN_PLAY_COUNT,
     SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC,
@@ -945,10 +944,7 @@ class ClipScene:
         if path:
             self._start_sentence_play(play_index=1)
         else:
-            if self._is_vocabulary_clip():
-                self._finish_learn_sequence()
-            else:
-                self._start_follow_along_voice()
+            self._finish_learn_sequence()
 
     def _is_vocabulary_clip(self) -> bool:
         return str(self._clip.get("clip_type") or "").strip() == CLIP_TYPE_VOCABULARY
@@ -1212,10 +1208,6 @@ class ClipScene:
             1, int(SHORTS_SOUND_PLAY_COUNT)
         ):
             self._start_sentence_play(play_index=2)
-        elif self._learn_round == 2:
-            self._start_follow_along_voice()
-        elif self._learn_round == 3:
-            self._start_bg_practice()
         else:
             self._finish_learn_sequence()
 
@@ -1410,8 +1402,6 @@ class ClipScene:
             return ""
         if self._learn_round in (1, 2):
             return SHORTS_NATIVE_LISTEN_LABEL
-        if self._learn_round in (3, 4):
-            return SHORTS_FOLLOW_ALONG_LABEL
         return ""
 
     def _vocab_cn_mode_hint(self) -> Optional[tuple[str, tuple[int, int, int]]]:

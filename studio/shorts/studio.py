@@ -243,9 +243,10 @@ class ShortsStudio(IStudio):
             return
         if self._shorts_mode == CLIP_TYPE_VOCABULARY:
             bg_path = extract_vocab_topic_bg_path(self._clips)
-            self._bg_player.set_fixed_bg_path(bg_path or None)
         else:
-            self._bg_player.set_fixed_bg_path(None)
+            idx = min(self._clip_index, len(self._clips) - 1)
+            bg_path = (self._clips[idx].get("bg_path") or "").strip()
+        self._bg_player.set_fixed_bg_path(bg_path or None)
         self._bg_player.start_session(
             duration_hint_sec=self._bg_duration_hint_sec(config),
             reload=reload,
@@ -404,6 +405,8 @@ class ShortsStudio(IStudio):
     def _start_current_clip(self) -> None:
         if not self._scene or not self._clips:
             return
+        if self._shorts_mode != CLIP_TYPE_VOCABULARY:
+            self._ensure_bg_session(self._last_config, reload=True, restart=True)
         if self._should_play_vocab_topic_intro():
             self._topic_intro_done = True
             intro = extract_vocab_topic_intro(self._clips)

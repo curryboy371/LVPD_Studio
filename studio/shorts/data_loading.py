@@ -49,24 +49,23 @@ def _resolve_conversation_video_path(
     base: Any,
     repo: Path,
 ) -> str:
-    """회화 클립 비디오 경로. CSV → topic/id.mp4 → base.media 순."""
-    video_path = _resolve_path(repo, row.get("video_path") or "")
-    if not video_path or not os.path.exists(video_path):
-        if topic:
-            cand = repo / "resource" / "video" / topic / f"{clip_id}.mp4"
-            if cand.is_file():
-                video_path = str(cand)
-            else:
-                video_path = ""
-        else:
-            video_path = ""
-    if not video_path and base is not None:
+    """회화 클립 비디오 경로. CSV 오버라이드(있을 때만) → base_sentences → topic/id.mp4."""
+    override = _resolve_path(repo, row.get("video_path") or "")
+    if override and os.path.exists(override):
+        return override
+
+    if base is not None:
         vp = (getattr(getattr(base, "media", None), "video_path", None) or "").strip()
         if vp:
             video_path = _resolve_path(repo, vp)
-    if video_path and not os.path.exists(video_path):
-        return ""
-    return video_path
+            if video_path and os.path.exists(video_path):
+                return video_path
+
+    if topic:
+        cand = repo / "resource" / "video" / topic / f"{clip_id}.mp4"
+        if cand.is_file():
+            return str(cand)
+    return ""
 
 
 def _resolve_bg_audio_path(repo: Path, row: dict[str, str]) -> str:
@@ -327,22 +326,16 @@ def build_shorts_conversation_clip_list(
             logger.warning("shorts conversation clip id=%s: base_id 없음", clip_id)
             continue
 
-        hook_image = _resolve_path(repo, row.get("hook_image_path") or "")
-        if not hook_image or not os.path.exists(hook_image):
-            hook_image = _default_hook_image(clip_id, subdir="conversation")
-            if not os.path.exists(hook_image):
-                hook_image = _default_hook_image(clip_id)
-            if not os.path.exists(hook_image):
-                hook_image = ""
-
         clip = _common_clip_fields(
             row,
             clip_id=clip_id,
             topic=topic,
-            hook_image=hook_image,
+            hook_image="",
             repo=repo,
             index=i,
             clip_type=CLIP_TYPE_CONVERSATION,
+            sound_from_row=False,
+            use_syllable_times_ms=False,
         )
         clip["base_id"] = base_id
         base = bases.get(base_id)
@@ -350,9 +343,14 @@ def build_shorts_conversation_clip_list(
             logger.warning("shorts conversation clip id=%s: base_id=%s 없음", clip_id, base_id)
             continue
         _merge_base_into_clip(clip, base, repo)
+        clip["last_hold_text"] = ""
+        sound_override = (row.get("sound_path") or "").strip()
+        if sound_override:
+            clip["sound_path"] = _resolve_path(repo, sound_override)
         clip["video_path"] = _resolve_conversation_video_path(
             row, clip_id=clip_id, topic=topic, base=base, repo=repo
         )
+        clip["bg_path"] = _resolve_bg_audio_path(repo, row)
         if not clip["sentence"]:
             continue
         out.append(clip)

@@ -19,14 +19,10 @@ FIELDNAMES = [
     "topic",
     "base_id",
     "hook_title",
-    "hook_image_path",
     "situation_subtitle",
     "ko_narration_id",
-    "syllable_times_ms",
-    "sound_path",
-    "video_path",
-    "last_hold_text",
     "last_hold_sec",
+    "bg_path",
 ]
 
 
@@ -69,14 +65,10 @@ def shorts_conversation_clips_excel_to_csv(
             "topic": _normalize(row.get("topic")),
             "base_id": base_id,
             "hook_title": hook_title,
-            "hook_image_path": _normalize(row.get("hook_image_path")),
             "situation_subtitle": _normalize(row.get("situation_subtitle")),
             "ko_narration_id": _to_int(row.get("ko_narration_id"), 0),
-            "syllable_times_ms": _normalize(row.get("syllable_times_ms")),
-            "sound_path": _normalize(row.get("sound_path")),
-            "video_path": _normalize(row.get("video_path")),
-            "last_hold_text": _normalize(row.get("last_hold_text")),
             "last_hold_sec": _normalize(row.get("last_hold_sec")),
+            "bg_path": _normalize(row.get("bg_path")),
         })
 
     out_path = Path(csv_path)
