@@ -346,7 +346,7 @@ class ConversationStudio:
             play_voice=_play_insert_voice,
             start_listen_clip=_start_listen_clip,
             title_text=str(
-                getattr(settings, "learning_title_text", "문장 이해하기") or "문장 이해하기"
+                getattr(settings, "learning_title_text", "기본 문장 버전") or "기본 문장 버전"
             ),
             title_fade_in_sec=float(getattr(settings, "learning_title_fade_in_sec", 1.0) or 1.0),
             tip_box_intro_fade_in_sec=float(
@@ -385,7 +385,7 @@ class ConversationStudio:
             is_recording=_is_recording_mode,
             recording_timeline_sec=_recording_timeline_sec,
             title_text=str(
-                getattr(settings, "practice_title_text", "듣고 따라해보기") or "듣고 따라해보기"
+                getattr(settings, "practice_title_text", "문장 응용 버전") or "문장 응용 버전"
             ),
             # LearningScene과 동일하게 제목 페이드 인 시간을 설정 가능하게 한다.
             title_fade_in_sec=float(getattr(settings, "practice_title_fade_in_sec", 1.0) or 1.0),

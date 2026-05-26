@@ -29,6 +29,11 @@ from ..tools.playback_bar import (
     CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX,
     PlaybackBarRenderer,
 )
+from ..tools.scene_title import (
+    SCENE_TITLE_COLOR_PRACTICE,
+    draw_conversation_scene_title,
+    resolve_scene_title_color,
+)
 from utils.pinyin_processor import get_pinyin_processor
 
 logger = logging.getLogger(__name__)
@@ -103,7 +108,8 @@ class PracticeScene(IConversationStep):
         on_follow_sound_started: Callable[[str, float], None] | None = None,
         is_recording: Callable[[], bool] | None = None,
         recording_timeline_sec: Callable[[], float] | None = None,
-        title_text: str = "듣고 따라해보기",
+        title_text: str = "문장 응용 버전",
+        title_color: tuple[int, int, int] = SCENE_TITLE_COLOR_PRACTICE,
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
         sentence_intro_fade_in_sec: float = 0.55,
@@ -128,7 +134,8 @@ class PracticeScene(IConversationStep):
         self.scene_transition_duration_sec: float = 0.4
         self.scene_transition_overlay_peak_alpha: int = 220
         self._style = style
-        self.title_text = str(title_text or "듣고 따라해보기")
+        self.title_text = str(title_text or "문장 응용 버전")
+        self.title_color = title_color
         self.title_fade_in_sec = float(title_fade_in_sec)
         self._tip_intro_fade_in_sec = max(1e-6, float(tip_box_intro_fade_in_sec))
         self._sentence_intro_fade_in_sec = max(1e-6, float(sentence_intro_fade_in_sec))
@@ -174,11 +181,6 @@ class PracticeScene(IConversationStep):
         self._tip_font_cn = load_font_chinese(42, (0, 0, 0), weight="bold")
         self._tip_font_kr = load_font_korean(42, (0, 0, 0), weight="bold")
         self._tip_font_fallback = pygame.font.Font(None, 42)
-        self._title_image_surface = self._load_title_image_surface("문장_연습하기.png")
-        if self._title_image_surface is None:
-            raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_연습하기.png")
-        # 문장 이해하기 타이틀의 실제 렌더 크기를 기준으로 연습 타이틀 크기를 맞추기 위해 보관한다.
-        self._title_reference_surface = self._load_title_image_surface("문장_이해하기.png")
         self._listen_icon_surface = self._load_mode_icon_surface("listen.png")
         # LearningScene과 동일하게 디버그에서 읽을 수 있도록 stage 필드를 유지한다.
         self.stage: "PracticeScene.Stage" = self.Stage.TITLE
@@ -1219,25 +1221,6 @@ class PracticeScene(IConversationStep):
         root = Path(__file__).resolve().parents[3]
         return load_mode_icon(root, filename)
 
-    def _load_title_image_surface(self, filename: str) -> pygame.Surface | None:
-        root = Path(__file__).resolve().parents[3]
-        candidates = (
-            root / "resource" / "image" / "title" / filename,
-            root / "resource" / "images" / "title" / filename,
-            root / "resource" / "image" / "icon" / filename,
-            root / "resource" / "images" / "icon" / filename,
-            root / "resource" / "image" / filename,
-            root / "resource" / "images" / filename,
-        )
-        for path in candidates:
-            if not path.exists():
-                continue
-            try:
-                return pygame.image.load(str(path))
-            except Exception:
-                continue
-        return None
-
     def _load_tip_box_surface(self) -> pygame.Surface | None:
         root = Path(__file__).resolve().parents[3]
         candidates = (
@@ -1255,56 +1238,16 @@ class PracticeScene(IConversationStep):
         return None
 
     def _draw_title(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
-        surf = self._title_image_surface
-        if surf is None:
-            return
         alpha = int(max(0, min(255, self.drawer.fade_alpha(self._title_channel))))
-        if alpha <= 0:
-            return
-        # 단어 모드 타이틀("단어_공부하기")과 같은 위치/스케일 기준을 사용한다.
-        margin_left = 44
-        margin_top = 18
-        max_w = int(ctx.width * 0.54)
-        max_h = 114
-        sw, sh = int(surf.get_width()), int(surf.get_height())
-        if sw <= 0 or sh <= 0:
-            return
-        tw, th = self._resolve_learning_title_target_size(
-            max_w=max_w,
-            max_h=max_h,
-            fallback_w=sw,
-            fallback_h=sh,
+        draw_conversation_scene_title(
+            screen,
+            text=self.title_text,
+            alpha=alpha,
+            frame_width=int(ctx.width),
+            frame_height=int(ctx.height),
+            min_margin_x=int(self._style.layout.min_margin_x),
+            color=resolve_scene_title_color(self.title_text, fallback=self.title_color),
         )
-        # 요청: 연습 타이틀은 기준 대비 세로 높이만 소폭 키운다.
-        th = max(1, int(round(th * 1.08)))
-        draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
-        if alpha < 255:
-            draw.set_alpha(alpha)
-        x = max(self._style.layout.min_margin_x, margin_left)
-        y = max(0, margin_top)
-        screen.blit(draw, (x, y))
-
-    def _resolve_learning_title_target_size(
-        self,
-        *,
-        max_w: int,
-        max_h: int,
-        fallback_w: int,
-        fallback_h: int,
-    ) -> tuple[int, int]:
-        """문장 이해하기 기준 렌더 크기를 계산한다. 실패 시 현재 타이틀 크기로 폴백한다."""
-        ref = self._title_reference_surface
-        if ref is None:
-            scale = min(float(max_w) / float(fallback_w), float(max_h) / float(fallback_h), 1.0)
-            return max(1, int(round(fallback_w * scale))), max(1, int(round(fallback_h * scale)))
-        rw, rh = int(ref.get_width()), int(ref.get_height())
-        if rw <= 0 or rh <= 0:
-            scale = min(float(max_w) / float(fallback_w), float(max_h) / float(fallback_h), 1.0)
-            return max(1, int(round(fallback_w * scale))), max(1, int(round(fallback_h * scale)))
-        ref_scale = min(float(max_w) / float(rw), float(max_h) / float(rh), 1.0)
-        target_w = max(1, int(round(rw * ref_scale)))
-        target_h = max(1, int(round(rh * ref_scale)))
-        return target_w, target_h
 
     def _tip_box_pixel_alpha(self, *, alpha_channel: str | None) -> int:
         base = 178

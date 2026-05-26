@@ -19,6 +19,11 @@ from ..tools.playback_bar import (
     CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX,
     PlaybackBarRenderer,
 )
+from ..tools.scene_title import (
+    SCENE_TITLE_COLOR_LEARNING,
+    draw_conversation_scene_title,
+    resolve_scene_title_color,
+)
 
 LISTEN_BAR_COLOR = (46, 204, 113)
 
@@ -31,8 +36,6 @@ class LearningScene(FSMConversationStep):
         INTRO_TIP_IN = auto()
         PLAY_L1 = auto()
         WAIT_AFTER_L1 = auto()
-        PLAY_L2 = auto()
-        WAIT_AFTER_L2 = auto()
         DONE = auto()
 
     # ------------------------
@@ -60,7 +63,8 @@ class LearningScene(FSMConversationStep):
         hold_sec: float = 1.0,
         play_voice: Callable[..., None] | None = None,
         start_listen_clip: Callable[..., float] | None = None,
-        title_text: str = "문장 이해하기",
+        title_text: str = "기본 문장 버전",
+        title_color: tuple[int, int, int] = SCENE_TITLE_COLOR_LEARNING,
         title_fade_in_sec: float = 1.0,
         tip_box_intro_fade_in_sec: float = 0.5,
         sentence_intro_fade_in_sec: float = 0.55,
@@ -84,6 +88,7 @@ class LearningScene(FSMConversationStep):
         self.style = style
         self.hold_sec = float(hold_sec)
         self.title_text = title_text
+        self.title_color = title_color
         self.title_fade_in_sec = float(title_fade_in_sec)
         self.tip_box_intro_fade_in_sec = max(1e-6, float(tip_box_intro_fade_in_sec))
         self.sentence_intro_fade_in_sec = max(1e-6, float(sentence_intro_fade_in_sec))
@@ -96,9 +101,6 @@ class LearningScene(FSMConversationStep):
         self._tip_font_cn = load_font_chinese(42, (0, 0, 0), weight="bold")
         self._tip_font_kr = load_font_korean(42, (0, 0, 0), weight="bold")
         self._tip_font_fallback = pygame.font.Font(None, 42)
-        self._title_image_surface = self._load_title_image_surface("문장_이해하기.png")
-        if self._title_image_surface is None:
-            raise RuntimeError("타이틀 이미지 파일을 찾을 수 없습니다: 문장_이해하기.png")
         self._current_play_total_sec = 0.0
 
         # SceneKind 간 전환 연출(내부 Stage FSM 전환과 무관)
@@ -112,10 +114,9 @@ class LearningScene(FSMConversationStep):
         self.sentence_channel = ch["sentence"]
         self.tip_intro_channel = ch["tip_intro"]
 
-        # 오디오
+        # 오디오 (sound_lv 1회만 재생)
         self.stage_audio_keys = {
             self.Stage.PLAY_L1: "sound_lv",
-            self.Stage.PLAY_L2: "sound_lv",
             **(stage_audio_keys or {}),
         }
 
@@ -142,14 +143,6 @@ class LearningScene(FSMConversationStep):
                 next_stage=S.WAIT_AFTER_L1,
             ),
             S.WAIT_AFTER_L1: StageConfig(
-                on_enter=self._enter_wait,
-                next_stage=S.PLAY_L2,
-            ),
-            S.PLAY_L2: StageConfig(
-                on_enter=lambda s=S.PLAY_L2: self._enter_play(s),
-                next_stage=S.WAIT_AFTER_L2,
-            ),
-            S.WAIT_AFTER_L2: StageConfig(
                 on_enter=self._enter_wait,
                 next_stage=S.DONE,
             ),
@@ -185,7 +178,7 @@ class LearningScene(FSMConversationStep):
     # ------------------------
     def _audio_done_condition(self) -> bool:
         """오디오 종료 조건."""
-        # PLAY_L1/PLAY_L2는 설정과 무관하게 오디오 길이(timer)만큼 항상 대기한다.
+        # PLAY_L1은 설정과 무관하게 오디오 길이(timer)만큼 항상 대기한다.
         return self.timer <= 0
 
     # ------------------------
@@ -296,8 +289,8 @@ class LearningScene(FSMConversationStep):
     # Render
     # ------------------------
     def _hanzi_karaoke_timing(self) -> tuple[bool, float, float]:
-        """PLAY_L1/PLAY_L2 sound_lv 재생 구간 (active, elapsed, duration)."""
-        if self.stage not in (self.Stage.PLAY_L1, self.Stage.PLAY_L2):
+        """PLAY_L1 sound_lv 재생 구간 (active, elapsed, duration)."""
+        if self.stage is not self.Stage.PLAY_L1:
             return False, 0.0, 0.0
         total_sec = max(0.0, float(self._current_play_total_sec))
         if total_sec <= 1e-6:
@@ -338,9 +331,7 @@ class LearningScene(FSMConversationStep):
         if self.stage in (
             self.Stage.INTRO_TIP_IN,
             self.Stage.PLAY_L1,
-            self.Stage.PLAY_L2,
             self.Stage.WAIT_AFTER_L1,
-            self.Stage.WAIT_AFTER_L2,
         ):
             tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
             self._draw_tip_box_above_gauge(
@@ -355,25 +346,6 @@ class LearningScene(FSMConversationStep):
         """학습 듣기 단계에서 사용할 listen 아이콘을 로드한다."""
         root = Path(__file__).resolve().parents[3]
         return load_mode_icon(root, "listen.png")
-
-    def _load_title_image_surface(self, filename: str) -> pygame.Surface | None:
-        root = Path(__file__).resolve().parents[3]
-        candidates = (
-            root / "resource" / "image" / "title" / filename,
-            root / "resource" / "images" / "title" / filename,
-            root / "resource" / "image" / "icon" / filename,
-            root / "resource" / "images" / "icon" / filename,
-            root / "resource" / "image" / filename,
-            root / "resource" / "images" / filename,
-        )
-        for path in candidates:
-            if not path.exists():
-                continue
-            try:
-                return pygame.image.load(str(path))
-            except Exception:
-                continue
-        return None
 
     def _load_tip_box_surface(self) -> pygame.Surface | None:
         root = Path(__file__).resolve().parents[3]
@@ -392,29 +364,16 @@ class LearningScene(FSMConversationStep):
         return None
 
     def _draw_title(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
-        surf = self._title_image_surface
-        if surf is None:
-            return
         alpha = int(max(0, min(255, self.drawer.fade_alpha(self.title_channel))))
-        if alpha <= 0:
-            return
-        # 단어 모드 타이틀("단어_공부하기")과 같은 위치/스케일 기준을 사용한다.
-        margin_left = 44
-        margin_top = 18
-        max_w = int(ctx.width * 0.54)
-        max_h = 114
-        sw, sh = int(surf.get_width()), int(surf.get_height())
-        if sw <= 0 or sh <= 0:
-            return
-        scale = min(float(max_w) / float(sw), float(max_h) / float(sh), 1.0)
-        tw = max(1, int(round(sw * scale)))
-        th = max(1, int(round(sh * scale)))
-        draw = pygame.transform.smoothscale(surf, (tw, th)) if (tw != sw or th != sh) else surf.copy()
-        if alpha < 255:
-            draw.set_alpha(alpha)
-        x = max(self.style.layout.min_margin_x, margin_left)
-        y = max(0, margin_top)
-        screen.blit(draw, (x, y))
+        draw_conversation_scene_title(
+            screen,
+            text=self.title_text,
+            alpha=alpha,
+            frame_width=int(ctx.width),
+            frame_height=int(ctx.height),
+            min_margin_x=int(self.style.layout.min_margin_x),
+            color=resolve_scene_title_color(self.title_text, fallback=self.title_color),
+        )
 
     def _draw_play_listen_overlay(
         self,
@@ -423,15 +382,13 @@ class LearningScene(FSMConversationStep):
         ctx: FrameContext,
         item: ConversationItemLike,
     ) -> None:
-        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘만 표시한다."""
-        play = (self.Stage.PLAY_L1, self.Stage.PLAY_L2)
-        wait_after = (self.Stage.WAIT_AFTER_L1, self.Stage.WAIT_AFTER_L2)
-        if self.stage not in play + wait_after:
+        """PLAY_L1 및 직후 대기(WAIT_AFTER_L1)에서 재생바·listen 아이콘만 표시한다."""
+        if self.stage not in (self.Stage.PLAY_L1, self.Stage.WAIT_AFTER_L1):
             return
         total_sec = max(0.0, float(self._current_play_total_sec))
         if total_sec <= 1e-6:
             return
-        if self.stage in play:
+        if self.stage is self.Stage.PLAY_L1:
             remaining_sec = max(0.0, float(self.timer))
             current_sec = min(total_sec, max(0.0, total_sec - remaining_sec))
         else:
