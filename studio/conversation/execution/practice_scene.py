@@ -26,7 +26,10 @@ from ..core.types import (
 from ..core.conversation_step import IConversationStep
 from ..follow_audio import PracticeFollowSoundPlayer
 from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
-from ..tools.playback_bar import PlaybackBarRenderer
+from ..tools.playback_bar import (
+    CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX,
+    PlaybackBarRenderer,
+)
 from utils.pinyin_processor import get_pinyin_processor
 
 logger = logging.getLogger(__name__)
@@ -35,8 +38,8 @@ logger = logging.getLogger(__name__)
 _SUB_VARIANT_WAIT_WARN_SEC = 90.0
 _SUB_VARIANT_WAIT_MAX_SEC = 180.0
 
-# sub 변형: 팁·문장 동시 표시 → 팁 아웃 → 듣기/말하기 재생
-_SubPlayPhase = Literal["intro_hold", "tip_out", "playing"]
+# sub 변형: 팁·문장 동시 표시 → 듣기/말하기 재생(팁 유지)
+_SubPlayPhase = Literal["intro_hold", "playing"]
 
 
 def _sanitize_wait_sec(v: float, *, fallback: float) -> float:
@@ -447,7 +450,7 @@ class PracticeScene(IConversationStep):
                     self.drawer.fade_off(self._sentence_channel, self.base_to_sub_slide_out_sec)
             return
 
-        # SHOW_SUB_CONTENT: sub별 팁 인 → 문장 인 → 팁 아웃 → 듣기/말하기 타이머
+        # SHOW_SUB_CONTENT: sub별 팁·문장 표시 → 듣기/말하기 타이머(팁 유지)
         if self.stage == self.Stage.SHOW_SUB_CONTENT:
             if self._sub_play_phase != self._sub_phase_log_last:
                 self._sub_phase_log_last = self._sub_play_phase
@@ -463,14 +466,7 @@ class PracticeScene(IConversationStep):
             if self._sub_play_phase == "intro_hold":
                 self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
                 if self._sub_intro_wait_remaining_sec <= 0.0:
-                    self._sub_play_phase = "tip_out"
-                    self.drawer.fade_off(self._tip_intro_channel, self._tip_intro_fade_out_sec)
-                    self._sub_intro_wait_remaining_sec = self._tip_intro_fade_out_sec
-                return
-            if self._sub_play_phase == "tip_out":
-                self._sub_intro_wait_remaining_sec = max(0.0, self._sub_intro_wait_remaining_sec - eff_dt)
-                if self._sub_intro_wait_remaining_sec <= 0.0:
-                    self.drawer.hide_now(self._tip_intro_channel)
+                    self.drawer.show_now(self._tip_intro_channel)
                     self._sub_play_phase = "playing"
                     wait_total = self._start_current_sub_variant_audio_and_get_wait()
                     wt = _clamp_sub_variant_wait(
@@ -578,7 +574,7 @@ class PracticeScene(IConversationStep):
         return valid
 
     def _begin_sub_variant_intro(self) -> None:
-        """sub 변형: 팁·문장 동시 표시 → 팁 아웃 → 음성/게이지."""
+        """sub 변형: 팁·문장 동시 표시 → 음성/게이지(팁 유지)."""
         self.drawer.show_now(self._tip_intro_channel)
         self.drawer.show_now(self._sentence_channel)
         self._sub_play_phase = "intro_hold"
@@ -823,8 +819,7 @@ class PracticeScene(IConversationStep):
 
         if (
             self.stage == self.Stage.SHOW_SUB_CONTENT
-            and self._sub_play_phase
-            in ("intro_hold", "tip_out")
+            and self._sub_play_phase in ("intro_hold", "playing")
             and self._current_sub_variant is not None
         ):
             variant = self._current_sub_variant if isinstance(self._current_sub_variant, dict) else {}
@@ -853,29 +848,8 @@ class PracticeScene(IConversationStep):
                 scale_y=0.36,
                 scale_x=0.55,
             )
-            if self._sub_play_phase in ("intro_hold", "tip_out", "playing"):
-                slide_y = self._sentence_slide_y_offset_px()
-                render_item = self._sub_variant_render_item(item)
-                self._draw_sub_sentence_with_highlight(
-                    screen,
-                    ctx=ctx,
-                    base_item=item,
-                    render_item=render_item,
-                    y_offset_px=slide_y,
-                )
-            return
-
-        if not self._content_visible:
-            return
-
-        slide_y = self._sentence_slide_y_offset_px()
-        render_item = item
-        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
+            slide_y = self._sentence_slide_y_offset_px()
             render_item = self._sub_variant_render_item(item)
-
-        # SHOW_SUB_CONTENT에서는 기본 한자색을 흰색으로 그리고,
-        # 슬롯에 들어간 alt_word 구간만 연습색(AMBER)으로 오버레이한다.
-        if self.stage == self.Stage.SHOW_SUB_CONTENT and self._current_sub_variant is not None:
             self._draw_sub_sentence_with_highlight(
                 screen,
                 ctx=ctx,
@@ -886,6 +860,12 @@ class PracticeScene(IConversationStep):
             if self._sub_play_phase == "playing":
                 self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
             return
+
+        if not self._content_visible:
+            return
+
+        slide_y = self._sentence_slide_y_offset_px()
+        render_item = item
 
         draw_style = self._style
         # SHOW_CONTENT 단계의 한자 색은 흰색으로 고정한다.
@@ -1419,7 +1399,7 @@ class PracticeScene(IConversationStep):
         draw = draw.copy()
         draw.set_alpha(px_alpha)
         x = int(bar_rect.centerx - (tw // 2))
-        y = int(bar_rect.top - th + 24)
+        y = int(bar_rect.top - th + CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX)
         x = max(0, min(int(ctx.width) - tw, x))
         y = max(0, y)
         screen.blit(draw, (x, y))

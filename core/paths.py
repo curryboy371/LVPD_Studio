@@ -99,6 +99,9 @@ STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN = 1.0
 # Edge TTS ko_sub_* 산출은 원본 레벨이 낮은 편 → 중국어 듣기와 체감 맞춤
 STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN = 0.85
 
+# TTS 합성 말하기 속도 배율(1.0=기본). edge-tts rate로 변환(1.1→+10%, 1.2→+20%). gtts는 1.0 미만만 slow.
+STUDIO_TTS_RATE_MULTIPLIER = 1.3
+
 # utils/video_audio_extract: 비디오→동명 MP3 시 libmp3lame -q:a (0=최고 VBR)
 STUDIO_VIDEO_EXTRACT_MP3_LAME_Q = 0
 

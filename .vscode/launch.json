@@ -52,7 +52,7 @@
         "--mode",
         "debug",
         "--topic",
-        "hair"
+        "restaurant"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",

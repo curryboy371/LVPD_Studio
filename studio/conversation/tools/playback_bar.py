@@ -25,6 +25,12 @@ import pygame
 HorizontalAlign = Literal["left", "center", "right"]
 VerticalAlign = Literal["top", "bottom"]
 
+# 회화 모드 재생 게이지: 화면 하단 여백(작을수록 Y가 아래).
+CONVERSATION_PLAYBACK_BAR_MARGIN_BOTTOM_PX = 10
+
+# Tip box Y: bar_rect.top - box_h + offset (작을수록 위).
+CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX = -16
+
 
 @dataclass(frozen=True)
 class PlaybackBarStyle:
@@ -63,7 +69,7 @@ class PlaybackBarLayout:
     align_x: HorizontalAlign = "center"
     align_y: VerticalAlign = "bottom"
     margin_x_px: int = 24
-    margin_y_px: int = 64
+    margin_y_px: int = CONVERSATION_PLAYBACK_BAR_MARGIN_BOTTOM_PX
     x_px: Optional[int] = None
     y_px: Optional[int] = None
 

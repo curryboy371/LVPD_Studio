@@ -15,6 +15,7 @@ from typing import Any, Optional, Protocol
 from core.paths import (
     DEFAULT_KO_NARRATION_SOUND_DIR,
     LEGACY_KO_NARRATION_SOUND_DIR,
+    STUDIO_TTS_RATE_MULTIPLIER,
     get_repo_root,
 )
 
@@ -114,14 +115,40 @@ def measure_audio_duration_sec(path: str | Path) -> float:
     return 0.0
 
 
+def normalize_tts_rate_multiplier(multiplier: float | None) -> float:
+    """TTS 속도 배율(1.0=기본). 비정상 값은 1.0, 범위는 0.25~3.0."""
+    if multiplier is None:
+        return float(STUDIO_TTS_RATE_MULTIPLIER)
+    try:
+        m = float(multiplier)
+    except (TypeError, ValueError):
+        return 1.0
+    if not (m > 0.0) or m != m:  # NaN / non-positive
+        return 1.0
+    return max(0.25, min(3.0, m))
+
+
+def tts_rate_multiplier_to_edge_rate(multiplier: float | None) -> str:
+    """배율 → edge-tts `rate` 문자열 (1.0→+0%, 1.1→+10%, 0.9→-10%)."""
+    m = normalize_tts_rate_multiplier(multiplier)
+    pct = int(round((m - 1.0) * 100.0))
+    if pct >= 0:
+        return f"+{pct}%"
+    return f"{pct}%"
+
+
 class GttsProvider:
-    """Google TTS (온라인)."""
+    """Google TTS (온라인). 1.0보다 느리게만 `slow=True` 지원(빠르게는 edge 사용)."""
+
+    def __init__(self, *, rate_multiplier: float | None = None) -> None:
+        self._rate_multiplier = normalize_tts_rate_multiplier(rate_multiplier)
 
     def synthesize(self, text: str, *, lang: str = "ko", out_path: Path) -> Path:
         from gtts import gTTS
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        tts = gTTS(text=text, lang=lang)
+        slow = self._rate_multiplier < 0.95
+        tts = gTTS(text=text, lang=lang, slow=slow)
         tts.save(str(out_path))
         return out_path
 
@@ -129,8 +156,14 @@ class GttsProvider:
 class EdgeTtsProvider:
     """Microsoft Edge TTS (온라인, 품질 우수)."""
 
-    def __init__(self, voice: str = "ko-KR-SunHiNeural") -> None:
+    def __init__(
+        self,
+        voice: str = "ko-KR-SunHiNeural",
+        *,
+        rate_multiplier: float | None = None,
+    ) -> None:
         self._voice = voice
+        self._edge_rate = tts_rate_multiplier_to_edge_rate(rate_multiplier)
 
     def synthesize(self, text: str, *, lang: str = "ko", out_path: Path) -> Path:
         import asyncio
@@ -140,19 +173,29 @@ class EdgeTtsProvider:
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         async def _run() -> None:
-            communicate = edge_tts.Communicate(text, self._voice)
+            communicate = edge_tts.Communicate(
+                text,
+                self._voice,
+                rate=self._edge_rate,
+            )
             await communicate.save(str(out_path))
 
         asyncio.run(_run())
         return out_path
 
 
-def resolve_tts_provider(name: str = "gtts", *, voice: str = "") -> ITtsProvider:
+def resolve_tts_provider(
+    name: str = "gtts",
+    *,
+    voice: str = "",
+    rate_multiplier: float | None = None,
+) -> ITtsProvider:
     key = (name or "gtts").strip().lower()
+    rate = normalize_tts_rate_multiplier(rate_multiplier)
     if key in ("edge", "edge-tts", "edge_tts"):
         v = (voice or "ko-KR-SunHiNeural").strip()
-        return EdgeTtsProvider(voice=v)
-    return GttsProvider()
+        return EdgeTtsProvider(voice=v, rate_multiplier=rate)
+    return GttsProvider(rate_multiplier=rate)
 
 
 def resolve_tts_config_for_set(

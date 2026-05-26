@@ -8,8 +8,19 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from audio.ko_narration import format_tts_log_label, resolve_tts_config_for_set
+from audio.ko_narration import (
+    format_tts_log_label,
+    resolve_tts_config_for_set,
+    tts_rate_multiplier_to_edge_rate,
+)
 from data.ko_narration_loader import load_ko_narration_tables
+
+
+def test_tts_rate_multiplier_to_edge_rate() -> None:
+    assert tts_rate_multiplier_to_edge_rate(1.0) == "+0%"
+    assert tts_rate_multiplier_to_edge_rate(1.1) == "+10%"
+    assert tts_rate_multiplier_to_edge_rate(1.2) == "+20%"
+    assert tts_rate_multiplier_to_edge_rate(0.9) == "-10%"
 
 
 def test_resolve_tts_config_from_set_table(tmp_path: Path) -> None:

@@ -15,7 +15,10 @@ from ..core.scene_transition import SceneTransitionMode
 from ..core.types import ConversationItemLike, FrameContext, SentenceStyleConfig
 from ..core.conversation_step_fsm import FSMConversationStep, StageConfig
 from ..tools.mode_icons import blit_mode_icon_bottom_left, load_mode_icon
-from ..tools.playback_bar import PlaybackBarRenderer
+from ..tools.playback_bar import (
+    CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX,
+    PlaybackBarRenderer,
+)
 
 LISTEN_BAR_COLOR = (46, 204, 113)
 
@@ -26,7 +29,6 @@ class LearningScene(FSMConversationStep):
     class Stage(Enum):
         TITLE = auto()
         INTRO_TIP_IN = auto()
-        INTRO_TIP_OUT = auto()
         PLAY_L1 = auto()
         WAIT_AFTER_L1 = auto()
         PLAY_L2 = auto()
@@ -133,10 +135,6 @@ class LearningScene(FSMConversationStep):
             ),
             S.INTRO_TIP_IN: StageConfig(
                 on_enter=self._enter_intro_tip_in,
-                next_stage=S.INTRO_TIP_OUT,
-            ),
-            S.INTRO_TIP_OUT: StageConfig(
-                on_enter=self._enter_intro_tip_out,
                 next_stage=S.PLAY_L1,
             ),
             S.PLAY_L1: StageConfig(
@@ -200,15 +198,11 @@ class LearningScene(FSMConversationStep):
         return self.title_fade_in_sec
 
     def _enter_intro_tip_in(self) -> float:
-        """팁 박스·문장을 동시에 표시한 뒤 잠시 유지."""
+        """팁 박스·문장을 동시에 표시한 뒤 잠시 유지(팁은 이후 재생 구간까지 유지)."""
         self.drawer.show_now(self.title_channel)
         self.drawer.show_now(self.tip_intro_channel)
         self.drawer.show_now(self.sentence_channel)
         return max(0.0, self.sentence_intro_hold_sec)
-
-    def _enter_intro_tip_out(self) -> float:
-        self.drawer.fade_off(self.tip_intro_channel, self.tip_box_intro_fade_out_sec)
-        return self.tip_box_intro_fade_out_sec
 
     @staticmethod
     def _clip_duration_sec(path: str) -> float:
@@ -225,7 +219,7 @@ class LearningScene(FSMConversationStep):
 
     def _enter_play(self, stage: "LearningScene.Stage") -> float:
         self.drawer.show_now(self.title_channel)
-        self.drawer.hide_now(self.tip_intro_channel)
+        self.drawer.show_now(self.tip_intro_channel)
         self.drawer.show_now(self.sentence_channel)
 
         path = str(self.current_item.get(self.stage_audio_keys[stage]) or "").strip()
@@ -341,7 +335,13 @@ class LearningScene(FSMConversationStep):
             )
 
         self._draw_title(screen, ctx=ctx)
-        if self.stage in (self.Stage.INTRO_TIP_IN, self.Stage.INTRO_TIP_OUT):
+        if self.stage in (
+            self.Stage.INTRO_TIP_IN,
+            self.Stage.PLAY_L1,
+            self.Stage.PLAY_L2,
+            self.Stage.WAIT_AFTER_L1,
+            self.Stage.WAIT_AFTER_L2,
+        ):
             tip_text = str(item.get("tip") or "").strip() if isinstance(item, dict) else ""
             self._draw_tip_box_above_gauge(
                 screen,
@@ -423,10 +423,7 @@ class LearningScene(FSMConversationStep):
         ctx: FrameContext,
         item: ConversationItemLike,
     ) -> None:
-        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘만 표시한다.
-
-        팁 박스는 인트로에서만 페이드 인/아웃하고, 음성 재생 구간에는 두지 않는다.
-        """
+        """PLAY_L1/PLAY_L2 및 직후 대기(WAIT_AFTER_*)에서 재생바·listen 아이콘만 표시한다."""
         play = (self.Stage.PLAY_L1, self.Stage.PLAY_L2)
         wait_after = (self.Stage.WAIT_AFTER_L1, self.Stage.WAIT_AFTER_L2)
         if self.stage not in play + wait_after:
@@ -484,7 +481,7 @@ class LearningScene(FSMConversationStep):
         draw = draw.copy()
         draw.set_alpha(px_alpha)
         x = int(bar_rect.centerx - (tw // 2))
-        y = int(bar_rect.top - th + 24)
+        y = int(bar_rect.top - th + CONVERSATION_TIP_BOX_Y_OFFSET_FROM_BAR_TOP_PX)
         x = max(0, min(int(ctx.width) - tw, x))
         y = max(0, y)
         screen.blit(draw, (x, y))
