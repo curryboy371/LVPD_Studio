@@ -1,0 +1,82 @@
+# LVPD Table Editor
+
+`resource/table` 엑셀을 그리드로 보고 편집·저장한 뒤, 기존 `tools.csv_gen` 규칙으로 CSV를 생성하는 데스크톱 도구입니다.
+
+## 실행
+
+프로젝트 루트에서:
+
+```bat
+run_table_editor.bat
+```
+
+또는:
+
+```bat
+python -m extra.table_editor
+lvpd.bat editor
+```
+
+`lvpd.bat` 메인 메뉴에서 **E) 테이블 편집기** 도 동일합니다.
+
+## 모드
+
+### 단어장 (`words.xlsx`)
+
+- **시트**: 엑셀 시트별로 데이터 표시 (다른 시트는 저장 시 유지).
+- **pos**: `(전체)` 또는 시트 내 `pos` 값으로 필터.
+- **검색** (Enter):
+  - 숫자 → `id` 일치 행으로 이동.
+  - 한자 → `word` 완전 일치. 여러 id면 선택 대화상자, 하나면 바로 이동.
+- **더블클릭** / **새로 만들기**: 동일 편집 창. **새로 만들기**는 다음 id·pos 필터·TTS 기본(`edge` / `ko-KR-SunHiNeural`) 자동 입력.
+- **새 단어** 편집에서 `word` 입력 후 **Enter**: `img_path`·`sound_path` = 한자, `masking` = 글자 수만큼 `0` (입력 `000` → 저장 `"000"`).
+- **masking**: 편집창에는 `000`처럼 숫자만 보이고, 저장 시 엑셀/CSV에는 `"000"` 형태로 기록.
+- **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키. 확인 후 현재 시트에서 제거(저장 전까지 메모리만 변경).
+- **tts_type** / **tts_voice**: 드롭다운 선택 (`edge` \| `gtts`, Edge 목소리 `ko-KR-SunHiNeural` \| `ko-KR-InJoonNeural`). `gtts`일 때 voice는 비움.
+- **tip**: 줄마다 `[입력] [+] [-]` 한 줄. `+` 는 아래 줄 추가, `-` 는 해당 줄 삭제. 저장 시 `\\n` 으로 합침.
+- **img_path**: **이미지 사용** / **이미지 미사용** — 미사용 시 `none`·입력·클립보드 비활성. 사용 시 `word`와 동일 stem·입력 가능. **클립보드 사용**은 임시 저장 후 **저장** 시 파일 반영.
+
+### 회화모드
+
+- **topic**: `(전체)` 또는 base 시트의 `topic` 값으로 목록 필터.
+- **위·아래 분할**: `base_sentences`(전체) / `sub_sentences`(선택한 base id의 `base_id`와 일치하는 행만).
+- 처음에는 **sub** 영역이 숨겨지고, base 그리드에서 행을 **클릭**하면 아래에 sub가 나타납니다. 각 그리드는 세로·가로 스크롤.
+- **base 열기** / **sub 열기**: 각각 별도 xlsx. 툴바 **저장**은 base·sub 모두 저장.
+- **검색**: base id(숫자) — 선택 및 sub 필터 연동.
+- **sub 새로 만들기**: base 선택 후 가능 (`base_id` 자동).
+- **base raw_sentence**: 슬롯별 편집 (`단어` / `, ` / `?` / `？`). 미리보기 아래 **칸 그리드**에 슬롯마다 한자·`words.id` 표시(미등록 빨강, 중복 id 주황).
+- **현재 탭 CSV** / **회화 전체 CSV**: base·sub CSV 동시 생성.
+
+## 단축키
+
+- 입력창: `Ctrl+C` / `Ctrl+V` / `Ctrl+X` / `Ctrl+A`
+- 편집 창 저장: **저장** 버튼 (또는 `Ctrl+Enter`)
+
+## 기본 경로
+
+| 테이블 | 엑셀 | CSV |
+|--------|------|-----|
+| words | `resource/table/words.xlsx` | `resource/csv/words.csv` |
+| base | `resource/table/base_sentences.xlsx` | `resource/csv/base_sentences.csv` |
+| sub | `resource/table/sub_sentences.xlsx` | `resource/csv/sub_sentences.csv` |
+
+CSV 보내기는 `python -m tools.csv_gen` / `lvpd.bat csv` 와 동일한 변환 함수를 호출합니다.
+
+## 백업
+
+파일을 **처음 저장**할 때 같은 폴더에 `*.xlsx.bak` 이 없으면 1회 복사합니다.
+
+## 의존성
+
+- Python 표준 `tkinter`
+- `pandas`, `openpyxl`
+
+설치 (프로젝트 루트):
+
+```bat
+py -3 -m pip install -r extra\table_editor\requirements.txt
+```
+
+전체 스튜디오 의존성은 루트 [`requirements.txt`](../../requirements.txt) 를 사용합니다.
+
+한자 가독성이 낮으면 Windows에 CJK 폰트(예: Noto Sans CJK) 설치를 권장합니다.

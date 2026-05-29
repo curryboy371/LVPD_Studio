@@ -1,6 +1,6 @@
 """
 base_sentences 엑셀 → base_sentences.csv 변환.
-media는 플랫 컬럼: video_path, video_start_ms, video_end_ms, sound_lv_path.
+media는 플랫 컬럼: video_path, sound_lv_path.
 """
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ FIELDNAMES = [
     "raw_sentence",
     "translation",
     "video_path",
-    "video_start_ms",
-    "video_end_ms",
     "sound_lv_path",
     "tip",
 ]
@@ -62,8 +60,6 @@ def base_sentences_excel_to_csv(
             continue
 
         video_path = _normalize(row.get("video_path", ""))
-        video_start_ms = _to_int(row.get("video_start_ms", row.get("video_start_ms")), 0)
-        video_end_ms = _to_int(row.get("video_end_ms", row.get("video_end_ms")), 0)
         sound_lv = _normalize(
             row.get(
                 "sound_lv_path",
@@ -80,8 +76,6 @@ def base_sentences_excel_to_csv(
             "raw_sentence": raw_sent,
             "translation": _normalize(row.get("translation", "")),
             "video_path": video_path,
-            "video_start_ms": video_start_ms,
-            "video_end_ms": video_end_ms,
             "sound_lv_path": sound_lv,
             "tip": _normalize(row.get("tip", row.get("life_tip", row.get("life_tips", "")))),
         })

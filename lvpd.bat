@@ -41,6 +41,8 @@ if /I "%CAT%"=="run" goto cli_run
 if /I "%CAT%"=="f5" goto cli_f5
 if /I "%CAT%"=="audio" goto cli_audio
 if /I "%CAT%"=="hanzi" goto cli_hanzi
+if /I "%CAT%"=="editor" goto cli_table_editor
+if /I "%CAT%"=="table-editor" goto cli_table_editor
 if /I "%CAT%"=="help" goto show_help
 echo [오류] 알 수 없는 작업: %CAT%
 exit /b 1
@@ -83,6 +85,10 @@ exit /b %ERRORLEVEL%
 call :do_hanzi %*
 exit /b %ERRORLEVEL%
 
+:cli_table_editor
+call :do_table_editor
+exit /b %ERRORLEVEL%
+
 :main_menu
 cls
 echo.
@@ -95,6 +101,7 @@ echo   1  CSV 생성
 echo   2  TTS 생성
 echo   4  비디오-^>MP3
 echo   5  한자 프레임
+echo   E  테이블 편집기 ^(extra.table_editor^)
 echo.
 echo  [F5 화면 debug - studio.runner]
 echo   6  숏츠 단어   (shorts + vocabulary)
@@ -112,6 +119,7 @@ set /p "MENU_CHOICE=선택: "
 
 if /I "!MENU_CHOICE!"=="0" exit /b 0
 if /I "!MENU_CHOICE!"=="H" goto show_help
+if /I "!MENU_CHOICE!"=="E" call :do_table_editor
 if "!MENU_CHOICE!"=="1" call :do_csv
 if "!MENU_CHOICE!"=="2" call :do_tts
 if "!MENU_CHOICE!"=="3" call :do_run
@@ -208,7 +216,8 @@ echo   lvpd.bat tts 3 15              숏츠 회화 ko set_id
 echo   lvpd.bat tts 3 topic shangchai 숏츠 회화 topic
 echo   lvpd.bat tts 4 topic jingyesi  숏츠 단어 topic
 echo   lvpd.bat tts 4 set 1001        숏츠 단어 인트로 set
-echo   lvpd.bat csv / tts / run / audio / hanzi
+echo   lvpd.bat csv / tts / run / audio / hanzi / editor
+echo   lvpd.bat editor              테이블 편집기 GUI
 echo.
 if not "%SKIP_PAUSE%"=="1" pause
 exit /b 0
@@ -246,6 +255,13 @@ echo.
 echo [한자 프레임]
 %_PY% -m pip install -q playwright 2>nul
 %_PY% tools\hanzi\render_svg_frames.py --skip-existing %*
+goto :eof
+
+:do_table_editor
+call :setup_py
+echo.
+echo [테이블 편집기]
+%_PY% -m extra.table_editor
 goto :eof
 
 :setup_py

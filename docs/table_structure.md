@@ -48,8 +48,6 @@
 | raw_sentence | str | O | 원문(예: `{苹果}{多少}{钱}？`) |
 | translation | str | - | 번역 |
 | video_path | str | - | 영상 경로 |
-| video_start_ms | int | - | 시작(ms) |
-| video_end_ms | int | - | 종료(ms) |
 | sound_lv_path | str | - | 음성 |
 
 ---
