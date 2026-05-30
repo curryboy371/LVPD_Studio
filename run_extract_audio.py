@@ -10,6 +10,20 @@ _REPO = Path(__file__).resolve().parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+
+def _configure_stdio() -> None:
+    """Windows cp949 콘솔에서 한자 경로 출력 시 UnicodeEncodeError 방지."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, AttributeError):
+            pass
+
+
+_configure_stdio()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -27,7 +41,7 @@ def main() -> None:
     if created:
         logger.info("오디오 추출 완료: %d개 MP3 생성", len(created))
         for p in created:
-            print("  ", p)
+            logger.info("  %s", p)
     else:
         logger.info("추출할 비디오가 없습니다.")
 

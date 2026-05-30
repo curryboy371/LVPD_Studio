@@ -20,6 +20,7 @@ from utils.pinyin_masking import (
 from utils.pinyin_processor import get_pinyin_processor
 
 from .constants import _REPO_ROOT
+from .slot_replacement import resolve_main_word_id
 
 _SLOT_APPEND = "__append__"
 # sub_sentences.alt_word_id=0 → 해당 target_slot_order 슬롯을 문장에서 제거
@@ -700,6 +701,7 @@ def _load_sub_sentences_csv(csv_path: str) -> dict[int, list[dict]]:
                     "alt_word_ids": alt_word_ids,
                     "alt_translation": str(row.get("alt_translation") or "").strip(),
                     "alt_sound_path": str(row.get("alt_sound_path") or "").strip(),
+                    "main_slot": str(row.get("main_slot") or "").strip(),
                 }
                 
                 grouped.setdefault(base_id, []).append(item)
@@ -834,6 +836,49 @@ def _primary_sub_replacement(
         if not _is_alt_word_remove(entry[1]) and str(entry[2] or "").strip():
             return entry
     return None
+
+
+def _resolve_word_img_path(raw: str) -> str:
+    p = (raw or "").strip()
+    if not p or p.lower() == "none":
+        return ""
+    path = Path(p.replace("\\", "/"))
+    if not path.is_absolute():
+        path = (_REPO_ROOT / path).resolve()
+    return str(path) if path.is_file() else ""
+
+
+def _attach_main_word_image_meta(
+    variant_dict: dict[str, Any],
+    *,
+    main_slot: str,
+    slot_orders: list[Any],
+    alt_word_ids: list[int],
+    fallback_word_id: int,
+) -> None:
+    main_wid = resolve_main_word_id(
+        main_slot=main_slot,
+        slot_orders=slot_orders,
+        alt_word_ids=alt_word_ids,
+        fallback_word_id=fallback_word_id,
+    )
+    if main_wid <= 0:
+        return
+    variant_dict["main_word_id"] = main_wid
+    img_path = ""
+    try:
+        from data.table_manager import get_word
+
+        word = get_word(main_wid)
+        if word is not None:
+            img_path = (word.img_path or "").strip()
+    except Exception:
+        img_path = ""
+    if not img_path:
+        return
+    resolved = _resolve_word_img_path(img_path)
+    if resolved:
+        variant_dict["main_word_img_path"] = resolved
 
 
 def _replace_multiple_slots_in_raw_sentence(
@@ -1196,6 +1241,18 @@ def _attach_sub_variants_to_base_rows(
                 variant_dict["alt_hanzi_len"] = int(span[1])
             if spans:
                 variant_dict["alt_hanzi_spans"] = spans
+            fallback_wid = (
+                int(primary_alt_word_id)
+                if primary is not None and not _is_alt_word_remove(primary_alt_word_id)
+                else 0
+            )
+            _attach_main_word_image_meta(
+                variant_dict,
+                main_slot=str(v.get("main_slot") or "").strip(),
+                slot_orders=slot_orders,
+                alt_word_ids=alt_word_ids,
+                fallback_word_id=fallback_wid,
+            )
             replacement_pairs = [
                 (w, m)
                 for _slot, _wid, w, _mean, m in resolved_replacements

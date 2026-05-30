@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from extra.table_editor.services.search import sort_rows_by_id
+from extra.table_editor.services.search import ids_equal, sort_rows_by_id
 
 
 class TablePanel(ttk.Frame):
@@ -14,23 +14,43 @@ class TablePanel(ttk.Frame):
         master: tk.Misc,
         fieldnames: list[str],
         *,
+        display_columns: list[str] | None = None,
+        computed_columns: dict[str, Callable[[dict[str, str]], str]] | None = None,
         on_double_click: Callable[[dict[str, str]], None] | None = None,
         on_select: Callable[[dict[str, str] | None], None] | None = None,
+        row_sort: Callable[[list[dict[str, str]]], list[dict[str, str]]] | None = None,
     ) -> None:
         super().__init__(master)
         self._fieldnames = list(fieldnames)
+        self._display_columns = list(display_columns) if display_columns else None
+        self._computed_columns = dict(computed_columns or {})
         self._on_double_click = on_double_click
         self._on_select = on_select
+        self._row_sort = row_sort
         self._rows: list[dict[str, str]] = []
         self._iid_to_index: dict[str, int] = {}
+        self._suppress_select = 0
 
         self._build_tree()
+
+    def _notify_select_enabled(self) -> bool:
+        return self._suppress_select <= 0
+
+    def _visible_columns(self) -> list[str]:
+        if self._display_columns is not None:
+            return list(self._display_columns)
+        return self._fieldnames[:6] if len(self._fieldnames) > 6 else list(self._fieldnames)
+
+    def _cell_value(self, row: dict[str, str], col: str) -> str:
+        if col in self._computed_columns:
+            return self._computed_columns[col](row)
+        return row.get(col, "")
 
     def _build_tree(self) -> None:
         container = ttk.Frame(self)
         container.pack(fill=tk.BOTH, expand=True)
 
-        display_cols = self._fieldnames[:6] if len(self._fieldnames) > 6 else self._fieldnames
+        display_cols = self._visible_columns()
         self._tree = ttk.Treeview(
             container,
             columns=display_cols,
@@ -43,7 +63,11 @@ class TablePanel(ttk.Frame):
 
         for col in display_cols:
             self._tree.heading(col, text=col)
-            width = 120 if col in ("word", "raw_sentence", "meaning", "translation") else 72
+            width = (
+                160
+                if col in ("word", "raw_sentence", "meaning", "translation", "완성형", "alt_translation", "text")
+                else 72
+            )
             self._tree.column(col, width=width, minwidth=48, stretch=True)
 
         self._tree.grid(row=0, column=0, sticky="nsew")
@@ -58,7 +82,12 @@ class TablePanel(ttk.Frame):
             self._tree.bind("<<TreeviewSelect>>", self._handle_select)
 
     def set_rows(self, rows: list[dict[str, str]]) -> None:
-        self._rows = sort_rows_by_id(list(rows))
+        ordered = list(rows)
+        if self._row_sort is not None:
+            ordered = self._row_sort(ordered)
+        else:
+            ordered = sort_rows_by_id(ordered)
+        self._rows = ordered
         self._refresh_tree()
 
     def get_rows(self) -> list[dict[str, str]]:
@@ -77,23 +106,55 @@ class TablePanel(ttk.Frame):
         target = row_id.strip()
         children = self._tree.get_children()
         for i, row in enumerate(self._rows):
-            if (row.get("id") or "").strip() == target:
+            if ids_equal(row.get("id", ""), target):
                 if i < len(children):
                     iid = children[i]
-                    self._tree.selection_set(iid)
-                    self._tree.focus(iid)
-                    self._tree.see(iid)
+                    self._suppress_select += 1
+                    try:
+                        self._tree.selection_set(iid)
+                        self._tree.focus(iid)
+                        self._tree.see(iid)
+                    finally:
+                        self._suppress_select -= 1
                 return True
         return False
 
-    def _refresh_tree(self) -> None:
-        self._tree.delete(*self._tree.get_children())
-        self._iid_to_index.clear()
-        display_cols = list(self._tree["columns"])
+    def scroll_to_row(
+        self,
+        predicate: Callable[[dict[str, str]], bool],
+        *,
+        select: bool = True,
+    ) -> bool:
+        children = self._tree.get_children()
         for i, row in enumerate(self._rows):
-            values = [row.get(c, "") for c in display_cols]
-            iid = self._tree.insert("", tk.END, values=values)
-            self._iid_to_index[iid] = i
+            if not predicate(row):
+                continue
+            if i >= len(children):
+                return False
+            iid = children[i]
+            if select:
+                self._suppress_select += 1
+                try:
+                    self._tree.selection_set(iid)
+                    self._tree.focus(iid)
+                finally:
+                    self._suppress_select -= 1
+            self._tree.see(iid)
+            return True
+        return False
+
+    def _refresh_tree(self) -> None:
+        self._suppress_select += 1
+        try:
+            self._tree.delete(*self._tree.get_children())
+            self._iid_to_index.clear()
+            display_cols = self._visible_columns()
+            for i, row in enumerate(self._rows):
+                values = [self._cell_value(row, c) for c in display_cols]
+                iid = self._tree.insert("", tk.END, values=values)
+                self._iid_to_index[iid] = i
+        finally:
+            self._suppress_select -= 1
 
     def _handle_double_click(self, _event: tk.Event) -> None:
         row = self.get_selected_row()
@@ -101,18 +162,27 @@ class TablePanel(ttk.Frame):
             self._on_double_click(row)
 
     def _handle_select(self, _event: tk.Event) -> None:
+        if not self._notify_select_enabled():
+            return
         if self._on_select:
             self._on_select(self.get_selected_row())
 
     def clear_selection(self) -> None:
-        self._tree.selection_remove(self._tree.selection())
-        if self._on_select:
+        sel = self._tree.selection()
+        if not sel:
+            return
+        self._suppress_select += 1
+        try:
+            self._tree.selection_remove(sel)
+        finally:
+            self._suppress_select -= 1
+        if self._on_select and self._notify_select_enabled():
             self._on_select(None)
 
     def update_row(self, row: dict[str, str], *, original_id: str | None = None) -> None:
         oid = (original_id or row.get("id", "")).strip()
         for i, existing in enumerate(self._rows):
-            if (existing.get("id") or "").strip() == oid:
+            if ids_equal(existing.get("id", ""), oid):
                 self._rows[i] = dict(row)
                 self._refresh_tree()
                 self.select_row_by_id(row.get("id", ""))

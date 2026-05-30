@@ -1,6 +1,6 @@
 """
 sub_sentences 엑셀 → sub_sentences.csv 변환.
-컬럼: id, base_id, target_slot_order, alt_word_id, alt_translation, alt_sound_path.
+컬럼: id, base_id, target_slot_order, alt_word_id, main_slot, alt_translation, alt_sound_path.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ FIELDNAMES = [
     "base_id",
     "target_slot_order",
     "alt_word_id",
+    "main_slot",
     "alt_translation",
     "alt_sound_path",
 ]
@@ -73,6 +74,7 @@ def sub_sentences_excel_to_csv(
             # 다중 치환 구분자를 파이프(|)로 통일해 CSV 저장한다.
             "target_slot_order": _normalize_multi_pipe(row.get("target_slot_order")),
             "alt_word_id": _normalize_multi_pipe(row.get("alt_word_id")),
+            "main_slot": _normalize(row.get("main_slot", "")),
             "alt_translation": _normalize(row.get("alt_translation", "")),
             "alt_sound_path": _normalize(row.get("alt_sound_path", "")),
         })

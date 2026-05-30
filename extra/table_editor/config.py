@@ -6,6 +6,10 @@ from pathlib import Path
 from core.paths import (
     DEFAULT_BASE_SENTENCES_CSV,
     DEFAULT_BASE_SENTENCES_EXCEL,
+    DEFAULT_KO_NARRATION_LINES_CSV,
+    DEFAULT_KO_NARRATION_LINES_EXCEL,
+    DEFAULT_KO_NARRATION_SETS_CSV,
+    DEFAULT_KO_NARRATION_SETS_EXCEL,
     DEFAULT_SUB_SENTENCES_CSV,
     DEFAULT_SUB_SENTENCES_EXCEL,
     DEFAULT_WORDS_TABLE_CSV,
@@ -17,6 +21,7 @@ from extra.table_editor.data.fields import BASE_FIELDNAMES, SUB_FIELDNAMES
 APP_TITLE = "LVPD Table Editor"
 POS_FILTER_ALL = "(전체)"
 TOPIC_FILTER_ALL = "(전체)"
+CONVERSATION_DISPLAY_COL = "완성형"
 IMG_PATH_FIELD = "img_path"
 IMG_PATH_NONE = "none"
 MASKING_FIELD = "masking"
@@ -42,10 +47,11 @@ BASE_EDITOR_FIELDNAMES: list[str] = [
 
 SUB_SLOT_ORDER_FIELD = "target_slot_order"
 SUB_ALT_WORD_ID_FIELD = "alt_word_id"
+SUB_MAIN_SLOT_FIELD = "main_slot"
 SUB_EDITOR_FIELDNAMES: list[str] = [
     f
     for f in SUB_FIELDNAMES
-    if f not in (SUB_SLOT_ORDER_FIELD, SUB_ALT_WORD_ID_FIELD)
+    if f not in (SUB_SLOT_ORDER_FIELD, SUB_ALT_WORD_ID_FIELD, SUB_MAIN_SLOT_FIELD)
 ]
 
 LONG_TEXT_FIELDS = frozenset({
@@ -55,6 +61,7 @@ LONG_TEXT_FIELDS = frozenset({
     "situation_subtitle",
     "hook_title",
     "last_hold_text",
+    "text",
 })
 
 # words.csv · ko_narration_sets — TTS 엔진/목소리 (배치·런타임과 동일)
@@ -77,10 +84,12 @@ __all__ = [
     "APP_TITLE",
     "POS_FILTER_ALL",
     "TOPIC_FILTER_ALL",
+    "CONVERSATION_DISPLAY_COL",
     "RAW_SENTENCE_FIELD",
     "BASE_EDITOR_FIELDNAMES",
     "SUB_SLOT_ORDER_FIELD",
     "SUB_ALT_WORD_ID_FIELD",
+    "SUB_MAIN_SLOT_FIELD",
     "SUB_EDITOR_FIELDNAMES",
     "LONG_TEXT_FIELDS",
     "MULTILINE_LINES_FIELDS",
@@ -95,6 +104,10 @@ __all__ = [
     "DEFAULT_SUB_SENTENCES_EXCEL",
     "DEFAULT_WORDS_TABLE_CSV",
     "DEFAULT_WORDS_TABLE_EXCEL",
+    "DEFAULT_KO_NARRATION_SETS_CSV",
+    "DEFAULT_KO_NARRATION_SETS_EXCEL",
+    "DEFAULT_KO_NARRATION_LINES_CSV",
+    "DEFAULT_KO_NARRATION_LINES_EXCEL",
     "get_repo_root",
     "get_table_editor_tmp_dir",
     "IMG_PATH_FIELD",

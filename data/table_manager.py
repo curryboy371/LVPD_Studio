@@ -325,6 +325,7 @@ def load_sub_sentences_from_csv(
                         base_id=_to_int(row.get("base_id"), 0),
                         target_slot_order=_to_int(row.get("target_slot_order"), 0),
                         alt_word_id=_to_int(row.get("alt_word_id"), 0),
+                        main_slot=_str(row.get("main_slot")),
                         alt_translation=_str(row.get("alt_translation")),
                         alt_sound_path=_str(row.get("alt_sound_path")),
                     )

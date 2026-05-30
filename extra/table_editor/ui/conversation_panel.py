@@ -7,6 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 from extra.table_editor.config import (
+    CONVERSATION_DISPLAY_COL,
     DEFAULT_BASE_SENTENCES_CSV,
     DEFAULT_BASE_SENTENCES_EXCEL,
     DEFAULT_SUB_SENTENCES_CSV,
@@ -15,17 +16,22 @@ from extra.table_editor.config import (
     TOPIC_FILTER_ALL,
 )
 from extra.table_editor.data.fields import BASE_FIELDNAMES, SUB_FIELDNAMES
-from extra.table_editor.data.workbook import ExcelWorkbookStore
+from extra.table_editor.data.workbook import ExcelWorkbookStore, normalize_id_display
 from extra.table_editor.services.csv_export import export_base_csv, export_sub_csv
+from extra.table_editor.services.raw_sentence_slots import raw_to_display
 from extra.table_editor.services.search import (
-    allocate_next_row_id,
+    allocate_next_sub_row_id,
     filter_rows_by_base_id,
     filter_rows_by_topic,
     find_row_by_id,
+    find_row_index_by_id,
+    find_sub_row_index,
     ids_equal,
     parse_search_query,
+    sub_row_id_exists,
     unique_topic_values,
 )
+from extra.table_editor.services.sub_sentence_preview_cache import SubSentencePreviewCache
 from extra.table_editor.ui.row_editor_dialog import RowEditorDialog
 from extra.table_editor.ui.table_panel import TablePanel
 
@@ -49,6 +55,7 @@ class ConversationPanel(ttk.Frame):
         self._all_base_rows: list[dict[str, str]] = []
         self._all_sub_rows: list[dict[str, str]] = []
         self._selected_base_id = ""
+        self._sub_preview_cache = SubSentencePreviewCache()
 
         self._build_ui()
 
@@ -96,6 +103,18 @@ class ConversationPanel(ttk.Frame):
         self._base_table = TablePanel(
             self._base_frame,
             BASE_FIELDNAMES,
+            display_columns=[
+                "id",
+                "topic",
+                CONVERSATION_DISPLAY_COL,
+                "translation",
+                "raw_sentence",
+            ],
+            computed_columns={
+                CONVERSATION_DISPLAY_COL: lambda row: raw_to_display(
+                    row.get("raw_sentence", "")
+                ),
+            },
             on_double_click=self._edit_base_row,
             on_select=self._on_base_selected,
         )
@@ -105,6 +124,18 @@ class ConversationPanel(ttk.Frame):
         self._sub_table = TablePanel(
             self._sub_frame,
             SUB_FIELDNAMES,
+            display_columns=[
+                "id",
+                "base_id",
+                CONVERSATION_DISPLAY_COL,
+                "main_slot",
+                "alt_translation",
+                "target_slot_order",
+                "alt_word_id",
+            ],
+            computed_columns={
+                CONVERSATION_DISPLAY_COL: self._sub_display_for_table_row,
+            },
             on_double_click=self._edit_sub_row,
         )
         self._sub_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -346,10 +377,32 @@ class ConversationPanel(ttk.Frame):
             return
         self._selected_base_id = base_id
         self._show_sub_panel()
+        self._warm_sub_preview_cache_for_base(base_id)
         self._refresh_sub_view()
         n = len(filter_rows_by_base_id(self._all_sub_rows, base_id))
         self._new_sub_btn.configure(state=tk.NORMAL)
         self._on_status(f"base id {base_id} 선택 — sub {n}건")
+
+    def _normalize_conversation_ids(self, row: dict[str, str]) -> dict[str, str]:
+        out = dict(row)
+        for col in ("id", "base_id"):
+            if col in out:
+                out[col] = normalize_id_display(out.get(col, ""))
+        return out
+
+    def _dedupe_rows_by_id(
+        self, rows: list[dict[str, str]], *, keep_index: int, row_id: str
+    ) -> list[dict[str, str]]:
+        return [
+            r
+            for i, r in enumerate(rows)
+            if i == keep_index or not ids_equal(r.get("id", ""), row_id)
+        ]
+
+    def _sub_display_for_table_row(self, row: dict[str, str]) -> str:
+        base_id = (row.get("base_id") or "").strip() or self._selected_base_id
+        base_raw = self._base_raw_sentence_for(base_id)
+        return self._cached_sub_display_sentence(row, base_raw)
 
     def _refresh_sub_view(self) -> None:
         if not self._selected_base_id:
@@ -395,7 +448,10 @@ class ConversationPanel(ttk.Frame):
             )
             return
         defaults = {c: "" for c in SUB_FIELDNAMES}
-        defaults["id"] = allocate_next_row_id(self._all_sub_rows)
+        defaults["id"] = allocate_next_sub_row_id(
+            self._all_sub_rows,
+            self._selected_base_id,
+        )
         defaults["base_id"] = self._selected_base_id
         self._open_sub_editor(defaults, is_new=True, title="새 sub 행")
 
@@ -405,12 +461,17 @@ class ConversationPanel(ttk.Frame):
             is_new=False,
             title="base 행 편집",
             original_id=row.get("id", ""),
+            original_row=dict(row),
             on_after_save=self._on_base_row_saved,
         )
 
     def _edit_sub_row(self, row: dict[str, str]) -> None:
         self._open_sub_editor(
-            dict(row), is_new=False, title="sub 행 편집", original_id=row.get("id", "")
+            dict(row),
+            is_new=False,
+            title="sub 행 편집",
+            original_id=row.get("id", ""),
+            original_row=dict(row),
         )
 
     def _on_base_row_saved(self, values: dict[str, str], _new: bool) -> None:
@@ -422,6 +483,14 @@ class ConversationPanel(ttk.Frame):
                     row["base_id"] = new_id
             self._selected_base_id = new_id
             self._flush_sub()
+            self._refresh_sub_view()
+        base_id = new_id or old_sel
+        if base_id:
+            self._sub_preview_cache.invalidate_for_base(
+                base_id,
+                self._all_sub_rows,
+                self._base_raw_sentence_for(base_id),
+            )
             self._refresh_sub_view()
         self._update_topic_combo()
         self._apply_base_filter()
@@ -440,17 +509,41 @@ class ConversationPanel(ttk.Frame):
         is_new: bool,
         title: str,
         original_id: str | None = None,
+        original_row: dict[str, str] | None = None,
         on_after_save: Callable[[dict[str, str], bool], None] | None = None,
     ) -> None:
+        row_snapshot = dict(original_row or row)
         def on_save(values: dict[str, str], new: bool) -> None:
+            values = self._normalize_conversation_ids(values)
             if new:
+                if find_row_index_by_id(self._all_base_rows, values.get("id", "")) is not None:
+                    messagebox.showwarning(
+                        "검증",
+                        f"id {values.get('id', '')} 가 이미 존재합니다.",
+                        parent=self,
+                    )
+                    return False
                 self._all_base_rows.append(values)
             else:
-                oid = (original_id or "").strip()
-                for i, r in enumerate(self._all_base_rows):
-                    if (r.get("id") or "").strip() == oid:
-                        self._all_base_rows[i] = values
-                        break
+                idx = find_row_index_by_id(
+                    self._all_base_rows,
+                    original_id or "",
+                    match=row_snapshot,
+                    fieldnames=BASE_FIELDNAMES,
+                )
+                if idx is None:
+                    messagebox.showwarning(
+                        "저장",
+                        f"base id {original_id} 행을 찾을 수 없습니다.",
+                        parent=self,
+                    )
+                    return False
+                self._all_base_rows[idx] = values
+                self._all_base_rows = self._dedupe_rows_by_id(
+                    self._all_base_rows,
+                    keep_index=idx,
+                    row_id=values.get("id", ""),
+                )
             self._base_store.set_rows(self._all_base_rows)
             if on_after_save:
                 on_after_save(values, new)
@@ -460,6 +553,57 @@ class ConversationPanel(ttk.Frame):
             self._base_table.select_row_by_id(values.get("id", ""))
             self._on_child_dirty()
             self._on_status(f"{'추가' if new else '수정'}: id {values.get('id', '')}")
+            return True
+
+        def on_delete() -> bool:
+            bid = (original_id or row_snapshot.get("id") or "").strip()
+            if not bid:
+                messagebox.showwarning("삭제", "id가 없는 행은 삭제할 수 없습니다.", parent=self)
+                return False
+            subs = filter_rows_by_base_id(self._all_sub_rows, bid)
+            detail = f"id={bid}"
+            topic = (row_snapshot.get("topic") or "").strip()
+            translation = (row_snapshot.get("translation") or "").strip()
+            if topic:
+                detail += f"\ntopic: {topic}"
+            if translation:
+                detail += f"\ntranslation: {translation}"
+            prompt = f"base 행을 삭제할까요?\n\n{detail}"
+            if subs:
+                prompt += f"\n\n연결된 sub {len(subs)}건도 함께 삭제됩니다."
+            if not messagebox.askyesno("base 삭제", prompt, parent=self):
+                return False
+            idx = find_row_index_by_id(
+                self._all_base_rows,
+                bid,
+                match=row_snapshot,
+                fieldnames=BASE_FIELDNAMES,
+            )
+            if idx is None:
+                messagebox.showwarning(
+                    "삭제",
+                    f"base id {bid} 행을 찾을 수 없습니다.",
+                    parent=self,
+                )
+                return False
+            del self._all_base_rows[idx]
+            if subs:
+                self._all_sub_rows = [
+                    r
+                    for r in self._all_sub_rows
+                    if not ids_equal(r.get("base_id", ""), bid)
+                ]
+                self._sub_store.set_rows(self._all_sub_rows)
+            self._base_store.set_rows(self._all_base_rows)
+            if ids_equal(self._selected_base_id, bid):
+                self._hide_sub_panel()
+            self._update_topic_combo()
+            self._apply_base_filter()
+            self._schedule_warm_sub_preview_cache()
+            self._on_child_dirty()
+            sub_note = f", sub {len(subs)}건" if subs else ""
+            self._on_status(f"삭제: base id {bid}{sub_note}")
+            return True
 
         RowEditorDialog(
             self,
@@ -470,6 +614,7 @@ class ConversationPanel(ttk.Frame):
             existing_ids=self._base_existing_ids(),
             original_id=original_id,
             on_save=on_save,
+            on_delete=None if is_new else on_delete,
         )
 
     def _open_row_editor(
@@ -522,6 +667,46 @@ class ConversationPanel(ttk.Frame):
                 return (r.get("raw_sentence") or "").strip()
         return ""
 
+    def _schedule_warm_sub_preview_cache(self) -> None:
+        self.after_idle(self._warm_sub_preview_cache)
+
+    def _warm_sub_preview_cache(self) -> None:
+        if not self._all_sub_rows:
+            return
+        self._sub_preview_cache.warm_rows(
+            self._all_sub_rows,
+            self._base_raw_sentence_for,
+        )
+        if self._selected_base_id:
+            self.after_idle(self._refresh_sub_view)
+
+    def _warm_sub_preview_cache_for_base(self, base_id: str) -> None:
+        bid = (base_id or "").strip()
+        if not bid:
+            return
+        rows = filter_rows_by_base_id(self._all_sub_rows, bid)
+        if not rows:
+            return
+        base_raw = self._base_raw_sentence_for(bid)
+        self._sub_preview_cache.warm_rows(rows, lambda _bid=bid: base_raw)
+        self._refresh_sub_view()
+
+    def _cached_sub_display_sentence(
+        self, row: dict[str, str], base_raw_sentence: str
+    ) -> str:
+        cached = self._sub_preview_cache.get(row, base_raw_sentence)
+        if cached is not None:
+            return cached
+        return self._sub_preview_cache.build(row, base_raw_sentence)
+
+    def _sub_existing_ids(self, base_id: str) -> set[str]:
+        bid = (base_id or "").strip()
+        return {
+            (r.get("id") or "").strip()
+            for r in self._all_sub_rows
+            if ids_equal(r.get("base_id", ""), bid) and (r.get("id") or "").strip()
+        }
+
     def _open_sub_editor(
         self,
         row: dict[str, str],
@@ -529,37 +714,112 @@ class ConversationPanel(ttk.Frame):
         is_new: bool,
         title: str,
         original_id: str | None = None,
+        original_row: dict[str, str] | None = None,
     ) -> None:
+        row_snapshot = dict(original_row or row)
+
         def on_save(values: dict[str, str], new: bool) -> None:
+            values = self._normalize_conversation_ids(values)
+            base_id = (
+                (values.get("base_id") or "").strip()
+                or self._selected_base_id
+            )
             if not (values.get("base_id") or "").strip() and self._selected_base_id:
                 values["base_id"] = self._selected_base_id
             if new:
+                if sub_row_id_exists(self._all_sub_rows, base_id, values.get("id", "")):
+                    messagebox.showwarning(
+                        "검증",
+                        f"base {base_id} 에 id {values.get('id', '')} 가 이미 있습니다.",
+                        parent=self,
+                    )
+                    return False
                 self._all_sub_rows.append(values)
             else:
-                oid = (original_id or "").strip()
-                for i, r in enumerate(self._all_sub_rows):
-                    if (r.get("id") or "").strip() == oid:
-                        self._all_sub_rows[i] = values
-                        break
+                edit_base_id = (
+                    (row_snapshot.get("base_id") or "").strip() or base_id
+                )
+                idx = find_sub_row_index(
+                    self._all_sub_rows,
+                    edit_base_id,
+                    original_id or "",
+                    match=row_snapshot,
+                    fieldnames=SUB_FIELDNAMES,
+                )
+                if idx is None:
+                    messagebox.showwarning(
+                        "저장",
+                        f"sub id {original_id} (base {edit_base_id}) 행을 찾을 수 없습니다.",
+                        parent=self,
+                    )
+                    return False
+                self._all_sub_rows[idx] = values
+                self._all_sub_rows = [
+                    r
+                    for i, r in enumerate(self._all_sub_rows)
+                    if i == idx
+                    or not (
+                        ids_equal(r.get("base_id", ""), base_id)
+                        and ids_equal(r.get("id", ""), values.get("id", ""))
+                    )
+                ]
             self._sub_store.set_rows(self._all_sub_rows)
+            base_raw = self._base_raw_sentence_for(
+                (values.get("base_id") or "").strip() or self._selected_base_id
+            )
+            self._sub_preview_cache.build(values, base_raw)
             self._refresh_sub_view()
             self._on_child_dirty()
             self._on_status(f"{'추가' if new else '수정'}: sub id {values.get('id', '')}")
+            return True
+
+        def on_delete() -> bool:
+            base_id = (row_snapshot.get("base_id") or "").strip() or self._selected_base_id
+            sid = (original_id or row_snapshot.get("id") or "").strip()
+            if not base_id or not sid:
+                messagebox.showwarning("삭제", "id가 없는 행은 삭제할 수 없습니다.", parent=self)
+                return False
+            detail = f"base_id={base_id}, id={sid}"
+            alt = (row_snapshot.get("alt_translation") or "").strip()
+            if alt:
+                detail += f"\nalt_translation: {alt}"
+            if not messagebox.askyesno("sub 삭제", f"sub 행을 삭제할까요?\n\n{detail}", parent=self):
+                return False
+            idx = find_sub_row_index(
+                self._all_sub_rows,
+                base_id,
+                sid,
+                match=row_snapshot,
+                fieldnames=SUB_FIELDNAMES,
+            )
+            if idx is None:
+                messagebox.showwarning(
+                    "삭제",
+                    f"sub id {sid} (base {base_id}) 행을 찾을 수 없습니다.",
+                    parent=self,
+                )
+                return False
+            del self._all_sub_rows[idx]
+            self._sub_store.set_rows(self._all_sub_rows)
+            self._refresh_sub_view()
+            self._on_child_dirty()
+            self._on_status(f"삭제: sub id {sid} (base {base_id})")
+            return True
 
         base_id = (row.get("base_id") or "").strip() or self._selected_base_id
+        base_raw = self._base_raw_sentence_for(base_id)
+        cached_display = self._cached_sub_display_sentence(row, base_raw)
         RowEditorDialog(
             self,
             SUB_EDITOR_FIELDNAMES,
             row,
             title=title,
             is_new=is_new,
-            existing_ids={
-                (r.get("id") or "").strip()
-                for r in self._all_sub_rows
-                if (r.get("id") or "").strip()
-            },
+            existing_ids=self._sub_existing_ids(base_id),
             original_id=original_id,
             on_save=on_save,
-            base_raw_sentence=self._base_raw_sentence_for(base_id),
+            on_delete=None if is_new else on_delete,
+            base_raw_sentence=base_raw,
+            sub_display_sentence=cached_display,
         )
 

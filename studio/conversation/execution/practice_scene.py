@@ -42,6 +42,11 @@ logger = logging.getLogger(__name__)
 _SUB_VARIANT_WAIT_WARN_SEC = 90.0
 _SUB_VARIANT_WAIT_MAX_SEC = 180.0
 
+# sub main word 이미지 — listen 아이콘(좌하)과 대칭 우하단
+_MAIN_WORD_IMG_MAX_PX = 280
+_MAIN_WORD_IMG_MARGIN_RIGHT_PX = 56
+_MAIN_WORD_IMG_MARGIN_BOTTOM_PX = 72
+
 # sub 변형: 팁·문장 동시 표시 → 듣기 → 문장 1회 더 재생(팁 유지)
 _SubPlayPhase = Literal["intro_hold", "playing"]
 
@@ -196,6 +201,7 @@ class PracticeScene(IConversationStep):
         self._sub_render_item_cache_key: tuple | None = None
         self._sub_render_item_cached: ConversationItemLike | None = None
         self._clip_duration_cache: dict[str, float] = {}
+        self._main_word_image_cache: dict[str, pygame.Surface | None] = {}
         self.drawer.hide_now(self._title_channel)
         self.drawer.hide_now(self._sentence_channel)
         self.drawer.hide_now(self._tip_intro_channel)
@@ -829,6 +835,7 @@ class PracticeScene(IConversationStep):
             )
             if self._sub_play_phase == "playing":
                 self._draw_sub_content_playback_bar(screen, ctx=ctx, item=item)
+            self._draw_main_word_image_bottom_right(screen, ctx=ctx, variant=variant)
             return
 
         if not self._content_visible:
@@ -1378,3 +1385,63 @@ class PracticeScene(IConversationStep):
     def _draw_mode_icon(self, screen: pygame.Surface, *, ctx: FrameContext) -> None:
         """듣기 아이콘을 좌하단에 표시한다."""
         blit_mode_icon_bottom_left(screen, self._listen_icon_surface, frame_height=ctx.height)
+
+    def _resolve_main_word_img_path(self, variant: dict) -> str:
+        cached = str(variant.get("main_word_img_path") or "").strip()
+        if cached:
+            return cached
+        wid = int(variant.get("main_word_id") or 0)
+        if wid <= 0:
+            return ""
+        try:
+            from data.table_manager import get_word
+
+            word = get_word(wid)
+            return (word.img_path or "").strip() if word else ""
+        except Exception:
+            return ""
+
+    def _get_scaled_main_word_image(self, img_path: str) -> pygame.Surface | None:
+        key = (img_path or "").strip()
+        if not key:
+            return None
+        if key in self._main_word_image_cache:
+            return self._main_word_image_cache[key]
+        path = Path(key.replace("\\", "/"))
+        if not path.is_absolute():
+            path = get_repo_root() / path
+        if not path.is_file():
+            self._main_word_image_cache[key] = None
+            return None
+        try:
+            surf = pygame.image.load(str(path)).convert_alpha()
+        except Exception:
+            self._main_word_image_cache[key] = None
+            return None
+        sw, sh = surf.get_size()
+        max_px = _MAIN_WORD_IMG_MAX_PX
+        scale = min(max_px / max(sw, 1), max_px / max(sh, 1), 1.0)
+        if scale < 1.0:
+            nw = max(1, int(sw * scale))
+            nh = max(1, int(sh * scale))
+            if hasattr(pygame.transform, "smoothscale"):
+                surf = pygame.transform.smoothscale(surf, (nw, nh))
+            else:
+                surf = pygame.transform.scale(surf, (nw, nh))
+        self._main_word_image_cache[key] = surf
+        return surf
+
+    def _draw_main_word_image_bottom_right(
+        self,
+        screen: pygame.Surface,
+        *,
+        ctx: FrameContext,
+        variant: dict,
+    ) -> None:
+        img_path = self._resolve_main_word_img_path(variant)
+        surf = self._get_scaled_main_word_image(img_path)
+        if surf is None:
+            return
+        x = int(ctx.width) - surf.get_width() - _MAIN_WORD_IMG_MARGIN_RIGHT_PX
+        y = int(ctx.height) - surf.get_height() - _MAIN_WORD_IMG_MARGIN_BOTTOM_PX
+        screen.blit(surf, (x, y))

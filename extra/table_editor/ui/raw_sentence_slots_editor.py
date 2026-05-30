@@ -67,7 +67,7 @@ class RawSentenceSlotsEditor(ttk.Frame):
 
         preview_frame = ttk.Frame(right)
         preview_frame.pack(fill=tk.X, pady=(6, 0))
-        ttk.Label(preview_frame, text="미리보기:").pack(side=tk.LEFT)
+        ttk.Label(preview_frame, text="완성형 문장:").pack(side=tk.LEFT)
         self._preview_var = tk.StringVar()
         ttk.Label(
             preview_frame,

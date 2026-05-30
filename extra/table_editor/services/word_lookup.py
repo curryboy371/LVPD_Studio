@@ -9,11 +9,13 @@ from extra.table_editor.data.fields import WORDS_FIELDNAMES
 from extra.table_editor.data.workbook import MultiSheetWorkbookStore
 
 _hanzi_to_ids: dict[str, list[str]] | None = None
+_id_to_hanzi: dict[str, str] | None = None
 
 
 def clear_words_index_cache() -> None:
-    global _hanzi_to_ids
+    global _hanzi_to_ids, _id_to_hanzi
     _hanzi_to_ids = None
+    _id_to_hanzi = None
 
 
 def _normalize_id(value: str) -> str:
@@ -85,22 +87,24 @@ def format_word_ids(ids: list[str]) -> str:
     return " | ".join(ids)
 
 
-def lookup_hanzi_by_word_id(word_id: str) -> str:
-    """words.id → 한자 (첫 매칭)."""
-    target = (word_id or "").strip()
-    if not target:
-        return ""
-    try:
-        tid = int(float(target))
-    except (ValueError, TypeError):
-        tid = None
+def get_word_id_to_hanzi() -> dict[str, str]:
+    global _id_to_hanzi
+    if _id_to_hanzi is not None:
+        return _id_to_hanzi
+    index: dict[str, str] = {}
     for hanzi, ids in get_hanzi_to_word_ids().items():
         for wid in ids:
-            try:
-                if int(float(wid)) == tid:
-                    return hanzi
-            except (ValueError, TypeError):
-                if wid == target:
-                    return hanzi
-    return ""
+            norm = _normalize_id(wid)
+            if norm and norm not in index:
+                index[norm] = hanzi
+    _id_to_hanzi = index
+    return _id_to_hanzi
+
+
+def lookup_hanzi_by_word_id(word_id: str) -> str:
+    """words.id → 한자 (첫 매칭)."""
+    target = _normalize_id(word_id)
+    if not target:
+        return ""
+    return get_word_id_to_hanzi().get(target, "")
 

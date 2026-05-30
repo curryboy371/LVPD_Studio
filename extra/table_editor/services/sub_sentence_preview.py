@@ -1,12 +1,12 @@
 """sub 치환 적용 후 완성형 표시 문장."""
 from __future__ import annotations
 
-from studio.conversation.data_loading import (
-    _parse_alt_word_ids,
-    _parse_target_slot_orders,
-    _replace_multiple_slots_in_raw_sentence,
-    _sort_key_slot_order,
-    _zip_slot_orders_and_alt_word_ids,
+from studio.conversation.slot_replacement import (
+    parse_alt_word_ids as _parse_alt_word_ids,
+    parse_target_slot_orders as _parse_target_slot_orders,
+    replace_multiple_slots_in_raw_sentence as _replace_multiple_slots_in_raw_sentence,
+    sort_key_slot_order as _sort_key_slot_order,
+    zip_slot_orders_and_alt_word_ids as _zip_slot_orders_and_alt_word_ids,
 )
 
 from extra.table_editor.services.raw_sentence_slots import raw_to_display
@@ -15,52 +15,6 @@ from extra.table_editor.services.sub_replacement_slots import (
     pairs_to_storage,
 )
 from extra.table_editor.services.word_lookup import lookup_hanzi_by_word_id
-
-_APPEND_TOKENS = frozenset({"end", "last", "suffix", "맨끝", "끝"})
-_PREFIX_TOKENS = frozenset({"-1", "front", "start", "prefix", "맨앞", "앞"})
-
-
-def split_slot_order_display(slot_order: str) -> tuple[str, str]:
-    """편집 UI: 정수(또는 end 등) / 소수(중간) 분리."""
-    token = (slot_order or "").strip()
-    if not token:
-        return "", ""
-    low = token.lower()
-    if low in _APPEND_TOKENS:
-        return "end", ""
-    if low in _PREFIX_TOKENS:
-        return "-1", ""
-    if "." in token:
-        left, right = token.split(".", 1)
-        left = left.strip()
-        right = right.strip()
-        if left and right:
-            return left, f".{right}"
-        if left:
-            return left, ""
-        return "", f".{right}" if right else token
-    return token, ""
-
-
-def combine_slot_and_middle(slot_main: str, middle: str) -> str:
-    """슬롯 + 중간(소수) 입력 → target_slot_order 문자열."""
-    main = (slot_main or "").strip()
-    mid = (middle or "").strip()
-    if not mid:
-        return main
-    if mid.lower() in _APPEND_TOKENS:
-        return "end"
-    if mid.lower() in _PREFIX_TOKENS:
-        return "-1"
-    if "." in mid and not mid.startswith("."):
-        return mid
-    if mid.startswith("."):
-        if main:
-            return f"{main}{mid}"
-        return mid.lstrip(".") or mid
-    if main:
-        return f"{main}.{mid}"
-    return mid
 
 
 def sort_replacement_pairs(pairs: list[ReplacementPair]) -> list[ReplacementPair]:

@@ -3,14 +3,18 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from extra.table_editor.config import APP_TITLE
 from extra.table_editor.ui.clipboard_bindings import bind_clipboard_on_class
-from extra.table_editor.ui.conversation_panel import ConversationPanel
-from extra.table_editor.ui.vocabulary_panel import VocabularyPanel
+from extra.table_editor.ui.main_panel import MainPanel
 
-Mode = Literal["conversation", "vocabulary"]
+if TYPE_CHECKING:
+    from extra.table_editor.ui.conversation_panel import ConversationPanel
+    from extra.table_editor.ui.tts_panel import TtsPanel
+    from extra.table_editor.ui.vocabulary_panel import VocabularyPanel
+
+Mode = Literal["main", "conversation", "vocabulary", "tts"]
 
 
 class MainWindow(tk.Tk):
@@ -19,12 +23,14 @@ class MainWindow(tk.Tk):
         self.title(APP_TITLE)
         self.geometry("1100x700")
         self.minsize(800, 500)
+        self._main_geometry = "1100x780"
         self._vocab_geometry = "1100x700"
         self._conv_geometry = "1100x920"
+        self._tts_geometry = "1100x860"
 
         bind_clipboard_on_class(self)
 
-        self._mode = tk.StringVar(value="vocabulary")
+        self._mode = tk.StringVar(value="main")
         self._status_var = tk.StringVar(value="준비")
         self._path_var = tk.StringVar(value="")
 
@@ -35,40 +41,92 @@ class MainWindow(tk.Tk):
         self._content.pack(fill=tk.BOTH, expand=True)
 
         self._ui_ready = False
-        self._vocab = VocabularyPanel(
+        self._vocab: VocabularyPanel | None = None
+        self._conv: ConversationPanel | None = None
+        self._tts: TtsPanel | None = None
+        self._panel_defaults_loaded: set[Mode] = set()
+        self._main = MainPanel(
             self._content,
             on_status=self._set_status,
-            on_dirty_change=self._on_panel_dirty,
-        )
-        self._conv = ConversationPanel(
-            self._content,
-            on_status=self._set_status,
-            on_dirty_change=self._on_panel_dirty,
         )
         self._ui_ready = True
-        self._vocab.load_defaults()
-        self._conv.load_defaults()
-
-        self._show_mode("vocabulary")
+        self._show_mode("main")
 
         status = ttk.Label(self, textvariable=self._status_var, relief=tk.SUNKEN, anchor="w")
         status.pack(fill=tk.X, side=tk.BOTTOM)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _ensure_vocab(self) -> "VocabularyPanel":
+        if self._vocab is None:
+            from extra.table_editor.ui.vocabulary_panel import VocabularyPanel
+
+            self._vocab = VocabularyPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._vocab
+
+    def _ensure_conv(self) -> "ConversationPanel":
+        if self._conv is None:
+            from extra.table_editor.ui.conversation_panel import ConversationPanel
+
+            self._conv = ConversationPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._conv
+
+    def _ensure_tts(self) -> "TtsPanel":
+        if self._tts is None:
+            from extra.table_editor.ui.tts_panel import TtsPanel
+
+            self._tts = TtsPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._tts
+
+    def _ensure_panel_defaults(self, mode: Mode) -> None:
+        if mode in self._panel_defaults_loaded:
+            return
+        if mode == "vocabulary":
+            label, loader = "단어장", self._ensure_vocab().load_defaults
+        elif mode == "conversation":
+            label, loader = "회화", self._ensure_conv().load_defaults
+        elif mode == "tts":
+            label, loader = "TTS", self._ensure_tts().load_defaults
+        else:
+            return
+        self._set_status(f"{label} 데이터 로딩 중…")
+        try:
+            loader()
+            self._panel_defaults_loaded.add(mode)
+            self._set_status("준비")
+        except Exception as ex:
+            self._set_status(f"{label} 로드 실패: {ex}")
+
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self)
         bar.pack(fill=tk.X, padx=8, pady=4)
+        self._toolbar = bar
 
-        ttk.Button(bar, text="파일 열기", command=self._open_file).pack(side=tk.LEFT, padx=2)
-        ttk.Button(bar, text="저장", command=self._save).pack(side=tk.LEFT, padx=2)
-        ttk.Button(bar, text="다른 이름으로 저장", command=self._save_as).pack(
-            side=tk.LEFT, padx=2
+        self._open_btn = ttk.Button(bar, text="파일 열기", command=self._open_file)
+        self._open_btn.pack(side=tk.LEFT, padx=2)
+        self._save_btn = ttk.Button(bar, text="저장", command=self._save)
+        self._save_btn.pack(side=tk.LEFT, padx=2)
+        self._save_as_btn = ttk.Button(
+            bar, text="다른 이름으로 저장", command=self._save_as
         )
+        self._save_as_btn.pack(side=tk.LEFT, padx=2)
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-        ttk.Button(bar, text="현재 탭 CSV", command=self._export_current_csv).pack(
-            side=tk.LEFT, padx=2
+        self._export_csv_btn = ttk.Button(
+            bar, text="현재 탭 CSV", command=self._export_current_csv
         )
+        self._export_csv_btn.pack(side=tk.LEFT, padx=2)
         self._export_all_btn = ttk.Button(
             bar, text="회화 전체 CSV", command=self._export_all_csv
         )
@@ -79,6 +137,13 @@ class MainWindow(tk.Tk):
     def _build_mode_selector(self) -> None:
         frame = ttk.LabelFrame(self, text="모드")
         frame.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Radiobutton(
+            frame,
+            text="메인 (빠른 작업)",
+            variable=self._mode,
+            value="main",
+            command=lambda: self._switch_mode("main"),
+        ).pack(side=tk.LEFT, padx=12, pady=4)
         ttk.Radiobutton(
             frame,
             text="단어장 (words.xlsx)",
@@ -93,40 +158,95 @@ class MainWindow(tk.Tk):
             value="conversation",
             command=lambda: self._switch_mode("conversation"),
         ).pack(side=tk.LEFT, padx=12, pady=4)
+        ttk.Radiobutton(
+            frame,
+            text="TTS (ko_narration sets / lines)",
+            variable=self._mode,
+            value="tts",
+            command=lambda: self._switch_mode("tts"),
+        ).pack(side=tk.LEFT, padx=12, pady=4)
 
-    def _active_panel(self) -> VocabularyPanel | ConversationPanel:
+    def _active_panel(self) -> "MainPanel | VocabularyPanel | ConversationPanel | TtsPanel":
         if not getattr(self, "_ui_ready", False):
-            return self._vocab
-        return self._conv if self._mode.get() == "conversation" else self._vocab
+            return self._main
+        mode = self._mode.get()
+        if mode == "main":
+            return self._main
+        if mode == "conversation":
+            return self._ensure_conv()
+        if mode == "tts":
+            return self._ensure_tts()
+        return self._ensure_vocab()
 
     def _persist_visible_edits(self) -> None:
         if not getattr(self, "_ui_ready", False):
             return
-        if self._vocab.winfo_ismapped():
+        if self._vocab is not None and self._vocab.winfo_ismapped():
             self._vocab._flush_current_sheet()
-        if self._conv.winfo_ismapped():
+        if self._conv is not None and self._conv.winfo_ismapped():
             self._conv.flush_all()
+        if self._tts is not None and self._tts.winfo_ismapped():
+            self._tts.flush_all()
+
+    def _update_toolbar_for_mode(self, mode: Mode) -> None:
+        if mode == "main":
+            self._open_btn.pack_forget()
+            self._save_btn.pack_forget()
+            self._save_as_btn.pack_forget()
+            self._export_all_btn.pack_forget()
+            if not self._export_csv_btn.winfo_ismapped():
+                self._export_csv_btn.pack(side=tk.LEFT, padx=2)
+        else:
+            if not self._open_btn.winfo_ismapped():
+                self._open_btn.pack(side=tk.LEFT, padx=2)
+            if not self._save_btn.winfo_ismapped():
+                self._save_btn.pack(side=tk.LEFT, padx=2)
+            if not self._save_as_btn.winfo_ismapped():
+                self._save_as_btn.pack(side=tk.LEFT, padx=2)
+            if not self._export_csv_btn.winfo_ismapped():
+                self._export_csv_btn.pack(side=tk.LEFT, padx=2)
 
     def _show_mode(self, mode: Mode) -> None:
         self._persist_visible_edits()
-        self._vocab.pack_forget()
-        self._conv.pack_forget()
+        self._main.pack_forget()
+        if self._vocab is not None:
+            self._vocab.pack_forget()
+        if self._conv is not None:
+            self._conv.pack_forget()
+        if self._tts is not None:
+            self._tts.pack_forget()
         self._export_all_btn.pack_forget()
-        if mode == "conversation":
-            self._conv.pack(fill=tk.BOTH, expand=True)
+        self._update_toolbar_for_mode(mode)
+        if mode == "main":
+            self._main.pack(fill=tk.BOTH, expand=True)
+            self.geometry(self._main_geometry)
+            self.minsize(900, 560)
+        elif mode == "conversation":
+            self._ensure_conv().pack(fill=tk.BOTH, expand=True)
             self._export_all_btn.pack(side=tk.LEFT, padx=2)
             self.geometry(self._conv_geometry)
             self.minsize(800, 720)
+        elif mode == "tts":
+            self._ensure_tts().pack(fill=tk.BOTH, expand=True)
+            self.geometry(self._tts_geometry)
+            self.minsize(800, 680)
         else:
-            self._vocab.pack(fill=tk.BOTH, expand=True)
+            self._ensure_vocab().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._vocab_geometry)
             self.minsize(800, 500)
+        if mode != "main":
+            self.after(1, lambda m=mode: self._ensure_panel_defaults(m))
         self._update_path_label()
 
     def _switch_mode(self, mode: Mode) -> None:
-        current: Mode = (
-            "conversation" if self._conv.winfo_ismapped() else "vocabulary"
-        )
+        if self._main.winfo_ismapped():
+            current: Mode = "main"
+        elif self._conv is not None and self._conv.winfo_ismapped():
+            current = "conversation"
+        elif self._tts is not None and self._tts.winfo_ismapped():
+            current = "tts"
+        else:
+            current = "vocabulary"
         if mode == current:
             return
         if not self._confirm_leave_panel(current):
@@ -135,16 +255,24 @@ class MainWindow(tk.Tk):
         self._show_mode(mode)
 
     def _confirm_leave_panel(self, leaving: Mode) -> bool:
-        if leaving == "vocabulary" and self._vocab.is_dirty:
+        if leaving == "main":
+            return True
+        if leaving == "vocabulary" and self._vocab is not None and self._vocab.is_dirty:
             return messagebox.askyesno(
                 "저장 확인",
                 "단어장에 저장되지 않은 변경이 있습니다. 계속할까요?",
                 parent=self,
             )
-        if leaving == "conversation" and self._conv.is_dirty:
+        if leaving == "conversation" and self._conv is not None and self._conv.is_dirty:
             return messagebox.askyesno(
                 "저장 확인",
                 "회화 데이터에 저장되지 않은 변경이 있습니다. 계속할까요?",
+                parent=self,
+            )
+        if leaving == "tts" and self._tts is not None and self._tts.is_dirty:
+            return messagebox.askyesno(
+                "저장 확인",
+                "TTS 데이터에 저장되지 않은 변경이 있습니다. 계속할까요?",
                 parent=self,
             )
         return True
@@ -156,14 +284,23 @@ class MainWindow(tk.Tk):
     def _update_path_label(self) -> None:
         if not getattr(self, "_ui_ready", False):
             return
-        panel = self._active_panel()
-        if isinstance(panel, VocabularyPanel):
-            p = panel.file_path
-            dirty = panel.is_dirty
+        mode = self._mode.get()
+        if mode == "main":
+            dirty = False
+            path_str = self._main.path_summary()
+        elif mode == "vocabulary" and self._vocab is not None:
+            p = self._vocab.file_path
+            dirty = self._vocab.is_dirty
             path_str = str(p) if p else "(파일 없음)"
+        elif mode == "tts" and self._tts is not None:
+            dirty = self._tts.is_dirty
+            path_str = self._tts.path_summary()
+        elif mode == "conversation" and self._conv is not None:
+            dirty = self._conv.is_dirty
+            path_str = self._conv.path_summary()
         else:
-            dirty = panel.is_dirty
-            path_str = panel.path_summary()
+            dirty = False
+            path_str = "(파일 없음)"
         self._path_var.set(f"{'* ' if dirty else ''}{path_str}")
 
     def _set_status(self, msg: str) -> None:
@@ -171,31 +308,47 @@ class MainWindow(tk.Tk):
         self._update_path_label()
 
     def _open_file(self) -> None:
+        if self._mode.get() == "main":
+            return
         self._active_panel().open_file_dialog()
         self._update_path_label()
 
     def _save(self) -> None:
+        if self._mode.get() == "main":
+            return
         self._active_panel().save()
         self._update_path_label()
 
     def _save_as(self) -> None:
+        if self._mode.get() == "main":
+            return
         self._active_panel().save_as()
         self._update_path_label()
 
     def _export_current_csv(self) -> None:
+        mode = self._mode.get()
+        if mode == "main":
+            self._main.export_current_csv()
+            return
         panel = self._active_panel()
-        if isinstance(panel, VocabularyPanel):
+        if mode == "vocabulary":
             panel.export_csv()
+        elif mode == "tts":
+            panel.export_all_csv()
         else:
             panel.export_current_csv()
 
     def _export_all_csv(self) -> None:
-        if isinstance(self._conv, ConversationPanel):
+        if self._conv is not None:
             self._conv.export_all_csv()
 
     def _on_close(self) -> None:
         self._persist_visible_edits()
-        dirty = self._vocab.is_dirty or self._conv.is_dirty
+        dirty = (
+            (self._vocab is not None and self._vocab.is_dirty)
+            or (self._conv is not None and self._conv.is_dirty)
+            or (self._tts is not None and self._tts.is_dirty)
+        )
         if dirty:
             if not messagebox.askyesno(
                 "종료",

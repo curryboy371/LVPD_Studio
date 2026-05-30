@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Callable
+from typing import Any, Callable
 
 from extra.table_editor.config import (
     BASE_EDITOR_FIELDNAMES,
@@ -19,6 +19,7 @@ from extra.table_editor.config import (
     ROW_EDITOR_MINSIZE_WORDS,
     SUB_ALT_WORD_ID_FIELD,
     SUB_EDITOR_FIELDNAMES,
+    SUB_MAIN_SLOT_FIELD,
     SUB_SLOT_ORDER_FIELD,
 )
 from extra.table_editor.data.fields import BASE_FIELDNAMES
@@ -26,11 +27,14 @@ from extra.table_editor.services.masking_format import (
     masking_for_display,
     masking_for_storage,
 )
+from extra.table_editor.services.raw_sentence_slots import raw_to_display
+from extra.table_editor.services.search import ids_equal
+from extra.table_editor.services.sentence_media_paths import (
+    apply_base_sentence_media_paths,
+    apply_sub_sentence_media_paths,
+    is_valid_display_sentence,
+)
 from extra.table_editor.services.word_autofill import apply_hanzi_autofill
-from extra.table_editor.ui.img_path_editor import ImgPathEditor
-from extra.table_editor.ui.multiline_lines_editor import MultilineLinesEditor
-from extra.table_editor.ui.raw_sentence_slots_editor import RawSentenceSlotsEditor
-from extra.table_editor.ui.sub_replacement_slots_editor import SubReplacementSlotsEditor
 
 
 class RowEditorDialog(tk.Toplevel):
@@ -44,8 +48,10 @@ class RowEditorDialog(tk.Toplevel):
         is_new: bool = False,
         existing_ids: set[str] | None = None,
         original_id: str | None = None,
-        on_save: Callable[[dict[str, str], bool], None],
+        on_save: Callable[[dict[str, str], bool], bool | None],
+        on_delete: Callable[[], bool | None] | None = None,
         base_raw_sentence: str = "",
+        sub_display_sentence: str = "",
     ) -> None:
         super().__init__(parent)
         self.title(title)
@@ -54,14 +60,13 @@ class RowEditorDialog(tk.Toplevel):
         self._is_new = is_new
         self._existing_ids = existing_ids or set()
         self._original_id = (original_id or row.get("id", "")).strip()
+        self._save_in_progress = False
         self._on_save = on_save
-        self._widgets: dict[
-            str,
-            tk.Entry | tk.Text | ttk.Combobox | MultilineLinesEditor | RawSentenceSlotsEditor,
-        ] = {}
-        self._img_editor: ImgPathEditor | None = None
-        self._raw_sentence_editor: RawSentenceSlotsEditor | None = None
-        self._sub_slots_editor: SubReplacementSlotsEditor | None = None
+        self._on_delete = on_delete
+        self._widgets: dict[str, Any] = {}
+        self._img_editor: Any = None
+        self._raw_sentence_editor: Any = None
+        self._sub_slots_editor: Any = None
         self._scroll_canvas: tk.Canvas | None = None
         self._is_words_editor = IMG_PATH_FIELD in fieldnames
         self._is_base_editor = (
@@ -110,6 +115,8 @@ class RowEditorDialog(tk.Toplevel):
         self._bind_dialog_mousewheel()
 
         if self._is_base_editor:
+            from extra.table_editor.ui.raw_sentence_slots_editor import RawSentenceSlotsEditor
+
             slot_block = ttk.LabelFrame(inner, text="슬롯 (raw_sentence)")
             slot_block.pack(fill=tk.X, padx=12, pady=4)
             slot_editor = RawSentenceSlotsEditor(
@@ -119,8 +126,13 @@ class RowEditorDialog(tk.Toplevel):
             )
             slot_editor.pack(fill=tk.X, padx=4, pady=4)
             self._raw_sentence_editor = slot_editor
+            self._add_media_path_autofill_bar(inner, mode="base")
 
         if self._is_sub_editor:
+            from extra.table_editor.ui.sub_replacement_slots_editor import (
+                SubReplacementSlotsEditor,
+            )
+
             slot_block = ttk.Frame(inner)
             slot_block.pack(fill=tk.X, padx=12, pady=4)
             sub_editor = SubReplacementSlotsEditor(
@@ -128,15 +140,20 @@ class RowEditorDialog(tk.Toplevel):
                 base_raw_sentence=base_raw_sentence,
                 slot_order_value=row.get(SUB_SLOT_ORDER_FIELD, ""),
                 alt_word_id_value=row.get(SUB_ALT_WORD_ID_FIELD, ""),
+                main_slot_value=row.get(SUB_MAIN_SLOT_FIELD, ""),
+                initial_display_sentence=sub_display_sentence,
             )
             sub_editor.pack(fill=tk.X)
             self._sub_slots_editor = sub_editor
+            self._add_media_path_autofill_bar(inner, mode="sub")
 
         for col in self._fieldnames:
             value = row.get(col, "")
             if col == RAW_SENTENCE_FIELD:
                 continue
             if col == IMG_PATH_FIELD:
+                from extra.table_editor.ui.img_path_editor import ImgPathEditor
+
                 block = ttk.Frame(inner)
                 block.pack(fill=tk.X, padx=12, pady=4)
                 self._img_editor = ImgPathEditor(block, initial_path=value)
@@ -144,6 +161,8 @@ class RowEditorDialog(tk.Toplevel):
                 continue
 
             if col in MULTILINE_LINES_FIELDS or (self._is_base_editor and col == "tip"):
+                from extra.table_editor.ui.multiline_lines_editor import MultilineLinesEditor
+
                 editor = MultilineLinesEditor(inner, label=col, initial_value=value)
                 editor.pack(fill=tk.X, padx=12, pady=4)
                 self._widgets[col] = editor
@@ -192,6 +211,10 @@ class RowEditorDialog(tk.Toplevel):
 
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=8, pady=12, side=tk.BOTTOM)
+        if not self._is_new and self._on_delete is not None:
+            ttk.Button(btn_frame, text="삭제", command=self._delete).pack(
+                side=tk.LEFT, padx=(12, 4)
+            )
         ttk.Button(btn_frame, text="저장", command=self._save).pack(side=tk.RIGHT, padx=(4, 12))
         ttk.Button(btn_frame, text="취소", command=self._cancel).pack(side=tk.RIGHT, padx=4)
 
@@ -199,6 +222,48 @@ class RowEditorDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._cancel())
         self.bind("<Control-Return>", lambda _e: self._save())
         self.after_idle(_on_inner_configure)
+
+    def _add_media_path_autofill_bar(self, parent: ttk.Frame, *, mode: str) -> None:
+        bar = ttk.Frame(parent)
+        bar.pack(fill=tk.X, padx=12, pady=(0, 6))
+        if mode == "base":
+            label = "완성 문장 이름으로 video_path · sound_lv_path 자동 입력"
+            command = self._autofill_base_media_paths
+        else:
+            label = "완성 문장 이름으로 alt_sound_path 자동 입력"
+            command = self._autofill_sub_media_paths
+        ttk.Button(bar, text=label, command=command).pack(side=tk.LEFT)
+
+    def _autofill_base_media_paths(self) -> None:
+        if self._raw_sentence_editor is None:
+            return
+        display = raw_to_display(self._raw_sentence_editor.get_value())
+        if not is_valid_display_sentence(display):
+            messagebox.showwarning(
+                "경로 자동 입력",
+                "완성형 문장을 확인할 수 없습니다.\nraw_sentence 슬롯을 입력하세요.",
+                parent=self,
+            )
+            return
+        filled = apply_base_sentence_media_paths({}, display_sentence=display)
+        for col in ("video_path", "sound_lv_path"):
+            if col in self._widgets:
+                self._set_field_value(col, filled.get(col, ""))
+
+    def _autofill_sub_media_paths(self) -> None:
+        if self._sub_slots_editor is None:
+            return
+        display = self._sub_slots_editor.get_display_sentence()
+        if not is_valid_display_sentence(display):
+            messagebox.showwarning(
+                "경로 자동 입력",
+                f"완성형 문장을 확인할 수 없습니다.\n{display}",
+                parent=self,
+            )
+            return
+        filled = apply_sub_sentence_media_paths({}, display_sentence=display)
+        if "alt_sound_path" in self._widgets:
+            self._set_field_value("alt_sound_path", filled.get("alt_sound_path", ""))
 
     def _bind_dialog_mousewheel(self) -> None:
         def _on_wheel(event: tk.Event) -> None:
@@ -224,7 +289,7 @@ class RowEditorDialog(tk.Toplevel):
         w = self._widgets.get(col)
         if w is None:
             return
-        if isinstance(w, MultilineLinesEditor):
+        if hasattr(w, "set_value") and callable(getattr(w, "set_value")):
             w.set_value(value)
             return
         if isinstance(w, tk.Text):
@@ -304,9 +369,10 @@ class RowEditorDialog(tk.Toplevel):
         if self._raw_sentence_editor is not None:
             out[RAW_SENTENCE_FIELD] = self._raw_sentence_editor.get_value()
         if self._sub_slots_editor is not None:
-            order, alt_id = self._sub_slots_editor.get_values()
+            order, alt_id, main_slot = self._sub_slots_editor.get_values()
             out[SUB_SLOT_ORDER_FIELD] = order
             out[SUB_ALT_WORD_ID_FIELD] = alt_id
+            out[SUB_MAIN_SLOT_FIELD] = main_slot
         for col in self._fieldnames:
             if col == IMG_PATH_FIELD:
                 if self._img_editor is not None:
@@ -315,7 +381,7 @@ class RowEditorDialog(tk.Toplevel):
                     out[col] = ""
                 continue
             w = self._widgets[col]
-            if isinstance(w, MultilineLinesEditor):
+            if hasattr(w, "get_value") and callable(getattr(w, "get_value")):
                 out[col] = w.get_value()
             elif isinstance(w, tk.Text):
                 out[col] = w.get("1.0", tk.END).strip()
@@ -332,13 +398,24 @@ class RowEditorDialog(tk.Toplevel):
                     out[col] = ""
         return out
 
+    def _id_exists(self, row_id: str) -> bool:
+        target = (row_id or "").strip()
+        if not target:
+            return False
+        for existing in self._existing_ids:
+            if ids_equal(existing, target):
+                return True
+        return False
+
     def _save(self) -> None:
+        if self._save_in_progress:
+            return
         values = self._read_values()
         rid = values.get("id", "").strip()
         if not rid:
             messagebox.showwarning("검증", "id를 입력하세요.", parent=self)
             return
-        if rid != self._original_id and rid in self._existing_ids:
+        if not ids_equal(rid, self._original_id) and self._id_exists(rid):
             messagebox.showwarning(
                 "검증",
                 f"id {rid} 가 이미 존재합니다.",
@@ -350,7 +427,22 @@ class RowEditorDialog(tk.Toplevel):
                 values = self._img_editor.commit_on_save(values)
             except OSError:
                 return
-        self._on_save(values, self._is_new)
+        self._save_in_progress = True
+        if self._on_save(values, self._is_new) is False:
+            self._save_in_progress = False
+            return
+        self._cleanup_img()
+        self.destroy()
+
+    def _delete(self) -> None:
+        if self._is_new or self._on_delete is None or self._save_in_progress:
+            return
+        self._save_in_progress = True
+        try:
+            if self._on_delete() is False:
+                return
+        finally:
+            self._save_in_progress = False
         self._cleanup_img()
         self.destroy()
 
