@@ -65,7 +65,18 @@ class TablePanel(ttk.Frame):
             self._tree.heading(col, text=col)
             width = (
                 160
-                if col in ("word", "raw_sentence", "meaning", "translation", "완성형", "alt_translation", "text")
+                if col in (
+                    "word",
+                    "raw_sentence",
+                    "meaning",
+                    "translation",
+                    "완성형",
+                    "alt_translation",
+                    "text",
+                    "한자",
+                    "뜻",
+                    "desc",
+                )
                 else 72
             )
             self._tree.column(col, width=width, minwidth=48, stretch=True)

@@ -184,6 +184,37 @@ def filter_rows_by_set_id(
     return [r for r in rows if ids_equal(r.get("set_id", ""), target)]
 
 
+def filter_ko_lines_by_set_and_id(
+    rows: list[dict[str, str]], set_id: str, line_id: str
+) -> list[dict[str, str]]:
+    """선택 set 안의 특정 line id(seq 행들)."""
+    sid = (set_id or "").strip()
+    lid = (line_id or "").strip()
+    if not sid or not lid:
+        return []
+    return [
+        r
+        for r in rows
+        if ids_equal(r.get("set_id", ""), sid) and ids_equal(r.get("id", ""), lid)
+    ]
+
+
+def unique_ko_line_id_rows(
+    rows: list[dict[str, str]], set_id: str
+) -> list[dict[str, str]]:
+    """선택 set의 고유 line id 목록 (id 컬럼만)."""
+    scoped = sort_ko_narration_lines_by_id_seq(filter_rows_by_set_id(rows, set_id))
+    out: list[dict[str, str]] = []
+    for row in scoped:
+        lid = (row.get("id") or "").strip()
+        if not lid:
+            continue
+        if any(ids_equal(lid, existing.get("id", "")) for existing in out):
+            continue
+        out.append({"id": lid})
+    return out
+
+
 def find_row_by_id(rows: list[dict[str, str]], row_id: str) -> dict[str, str] | None:
     idx = find_row_index_by_id(rows, row_id)
     if idx is None:

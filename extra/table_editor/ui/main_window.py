@@ -13,8 +13,9 @@ if TYPE_CHECKING:
     from extra.table_editor.ui.conversation_panel import ConversationPanel
     from extra.table_editor.ui.tts_panel import TtsPanel
     from extra.table_editor.ui.vocabulary_panel import VocabularyPanel
+    from extra.table_editor.ui.vocabulary_word_rows_panel import VocabularyWordRowsPanel
 
-Mode = Literal["main", "conversation", "vocabulary", "tts"]
+Mode = Literal["main", "conversation", "vocabulary", "vocab_rows", "tts"]
 
 
 class MainWindow(tk.Tk):
@@ -25,6 +26,7 @@ class MainWindow(tk.Tk):
         self.minsize(800, 500)
         self._main_geometry = "1100x780"
         self._vocab_geometry = "1100x700"
+        self._vocab_rows_geometry = "1100x700"
         self._conv_geometry = "1100x920"
         self._tts_geometry = "1100x860"
 
@@ -42,6 +44,7 @@ class MainWindow(tk.Tk):
 
         self._ui_ready = False
         self._vocab: VocabularyPanel | None = None
+        self._vocab_rows: VocabularyWordRowsPanel | None = None
         self._conv: ConversationPanel | None = None
         self._tts: TtsPanel | None = None
         self._panel_defaults_loaded: set[Mode] = set()
@@ -67,6 +70,19 @@ class MainWindow(tk.Tk):
                 on_dirty_change=self._on_panel_dirty,
             )
         return self._vocab
+
+    def _ensure_vocab_rows(self) -> "VocabularyWordRowsPanel":
+        if self._vocab_rows is None:
+            from extra.table_editor.ui.vocabulary_word_rows_panel import (
+                VocabularyWordRowsPanel,
+            )
+
+            self._vocab_rows = VocabularyWordRowsPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._vocab_rows
 
     def _ensure_conv(self) -> "ConversationPanel":
         if self._conv is None:
@@ -95,6 +111,11 @@ class MainWindow(tk.Tk):
             return
         if mode == "vocabulary":
             label, loader = "단어장", self._ensure_vocab().load_defaults
+        elif mode == "vocab_rows":
+            label, loader = (
+                "단어장 행",
+                self._ensure_vocab_rows().load_defaults,
+            )
         elif mode == "conversation":
             label, loader = "회화", self._ensure_conv().load_defaults
         elif mode == "tts":
@@ -153,6 +174,13 @@ class MainWindow(tk.Tk):
         ).pack(side=tk.LEFT, padx=12, pady=4)
         ttk.Radiobutton(
             frame,
+            text="단어장 행 (vocabulary_word_rows.xlsx)",
+            variable=self._mode,
+            value="vocab_rows",
+            command=lambda: self._switch_mode("vocab_rows"),
+        ).pack(side=tk.LEFT, padx=12, pady=4)
+        ttk.Radiobutton(
+            frame,
             text="회화모드 (base / sub)",
             variable=self._mode,
             value="conversation",
@@ -166,7 +194,9 @@ class MainWindow(tk.Tk):
             command=lambda: self._switch_mode("tts"),
         ).pack(side=tk.LEFT, padx=12, pady=4)
 
-    def _active_panel(self) -> "MainPanel | VocabularyPanel | ConversationPanel | TtsPanel":
+    def _active_panel(
+        self,
+    ) -> "MainPanel | VocabularyPanel | VocabularyWordRowsPanel | ConversationPanel | TtsPanel":
         if not getattr(self, "_ui_ready", False):
             return self._main
         mode = self._mode.get()
@@ -176,6 +206,8 @@ class MainWindow(tk.Tk):
             return self._ensure_conv()
         if mode == "tts":
             return self._ensure_tts()
+        if mode == "vocab_rows":
+            return self._ensure_vocab_rows()
         return self._ensure_vocab()
 
     def _persist_visible_edits(self) -> None:
@@ -183,6 +215,8 @@ class MainWindow(tk.Tk):
             return
         if self._vocab is not None and self._vocab.winfo_ismapped():
             self._vocab._flush_current_sheet()
+        if self._vocab_rows is not None and self._vocab_rows.winfo_ismapped():
+            self._vocab_rows._flush_rows()
         if self._conv is not None and self._conv.winfo_ismapped():
             self._conv.flush_all()
         if self._tts is not None and self._tts.winfo_ismapped():
@@ -211,6 +245,8 @@ class MainWindow(tk.Tk):
         self._main.pack_forget()
         if self._vocab is not None:
             self._vocab.pack_forget()
+        if self._vocab_rows is not None:
+            self._vocab_rows.pack_forget()
         if self._conv is not None:
             self._conv.pack_forget()
         if self._tts is not None:
@@ -230,6 +266,10 @@ class MainWindow(tk.Tk):
             self._ensure_tts().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._tts_geometry)
             self.minsize(800, 680)
+        elif mode == "vocab_rows":
+            self._ensure_vocab_rows().pack(fill=tk.BOTH, expand=True)
+            self.geometry(self._vocab_rows_geometry)
+            self.minsize(800, 500)
         else:
             self._ensure_vocab().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._vocab_geometry)
@@ -245,6 +285,8 @@ class MainWindow(tk.Tk):
             current = "conversation"
         elif self._tts is not None and self._tts.winfo_ismapped():
             current = "tts"
+        elif self._vocab_rows is not None and self._vocab_rows.winfo_ismapped():
+            current = "vocab_rows"
         else:
             current = "vocabulary"
         if mode == current:
@@ -261,6 +303,16 @@ class MainWindow(tk.Tk):
             return messagebox.askyesno(
                 "저장 확인",
                 "단어장에 저장되지 않은 변경이 있습니다. 계속할까요?",
+                parent=self,
+            )
+        if (
+            leaving == "vocab_rows"
+            and self._vocab_rows is not None
+            and self._vocab_rows.is_dirty
+        ):
+            return messagebox.askyesno(
+                "저장 확인",
+                "단어장 행에 저장되지 않은 변경이 있습니다. 계속할까요?",
                 parent=self,
             )
         if leaving == "conversation" and self._conv is not None and self._conv.is_dirty:
@@ -291,6 +343,10 @@ class MainWindow(tk.Tk):
         elif mode == "vocabulary" and self._vocab is not None:
             p = self._vocab.file_path
             dirty = self._vocab.is_dirty
+            path_str = str(p) if p else "(파일 없음)"
+        elif mode == "vocab_rows" and self._vocab_rows is not None:
+            p = self._vocab_rows.file_path
+            dirty = self._vocab_rows.is_dirty
             path_str = str(p) if p else "(파일 없음)"
         elif mode == "tts" and self._tts is not None:
             dirty = self._tts.is_dirty
@@ -333,6 +389,8 @@ class MainWindow(tk.Tk):
         panel = self._active_panel()
         if mode == "vocabulary":
             panel.export_csv()
+        elif mode == "vocab_rows":
+            panel.export_csv()
         elif mode == "tts":
             panel.export_all_csv()
         else:
@@ -346,6 +404,7 @@ class MainWindow(tk.Tk):
         self._persist_visible_edits()
         dirty = (
             (self._vocab is not None and self._vocab.is_dirty)
+            or (self._vocab_rows is not None and self._vocab_rows.is_dirty)
             or (self._conv is not None and self._conv.is_dirty)
             or (self._tts is not None and self._tts.is_dirty)
         )

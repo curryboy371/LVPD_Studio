@@ -47,6 +47,19 @@ lvpd.bat editor
 - **tip**: 줄마다 `[입력] [+] [-]` 한 줄. `+` 는 아래 줄 추가, `-` 는 해당 줄 삭제. 저장 시 `\\n` 으로 합침.
 - **img_path**: **이미지 사용** / **이미지 미사용** — 미사용 시 `none`·입력·클립보드 비활성. 사용 시 `word`와 동일 stem·입력 가능. **클립보드 사용**은 임시 저장 후 **저장** 시 파일 반영.
 
+### 단어장 행 (`vocabulary_word_rows.xlsx`)
+
+단어장 세션에 포함할 `(topic, word_id)` 목록입니다. 컬럼: `id`, `topic`, `word_id`, `desc`.
+그리드에는 `words.xlsx` 기준 **한자·뜻·시트·품사**가 `word_id`로 조회되어 표시됩니다(읽기 전용).
+
+- **topic**: `(전체)` 또는 표에 있는 topic 값으로 필터.
+- **검색** (Enter):
+  - 숫자 → `id` 일치 행으로 이동. 없으면 `word_id` 일치 행.
+  - 문자열 → `topic` 완전 일치 시 해당 topic 필터 적용.
+- **더블클릭** / **새로 만들기**: 행 편집. **새로 만들기**는 다음 `id`·현재 topic 필터를 자동 입력.
+- **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키.
+- **저장** / **현재 탭 CSV**: `resource/csv/vocabulary_word_rows.csv` 생성 (`word_id` ≥ 1 행만 포함).
+
 ### 회화모드
 
 - **topic**: `(전체)` 또는 base 시트의 `topic` 값으로 목록 필터.
@@ -68,6 +81,7 @@ lvpd.bat editor
 | 테이블 | 엑셀 | CSV |
 |--------|------|-----|
 | words | `resource/table/words.xlsx` | `resource/csv/words.csv` |
+| vocabulary_word_rows | `resource/table/vocabulary_word_rows.xlsx` | `resource/csv/vocabulary_word_rows.csv` |
 | base | `resource/table/base_sentences.xlsx` | `resource/csv/base_sentences.csv` |
 | sub | `resource/table/sub_sentences.xlsx` | `resource/csv/sub_sentences.csv` |
 
