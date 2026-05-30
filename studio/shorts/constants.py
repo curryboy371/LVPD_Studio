@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from core.paths import SHORTS_HEIGHT, SHORTS_WIDTH, get_repo_root
 
@@ -721,10 +721,9 @@ def shorts_conv_main_word_meaning_font_pt(label_pt: int) -> int:
 
 # 회화 하단 situation_subtitle (CTA 문구)
 SHORTS_CONV_SITUATION_FONT_PT = 40
-SHORTS_CONV_SITUATION_COLOR_SEGMENT_SEC = 3.8
-SHORTS_CONV_SITUATION_HUE_COUNT = 5
-SHORTS_CONV_SITUATION_SATURATION = 0.44
-SHORTS_CONV_SITUATION_VALUE = 0.96
+SHORTS_CONV_SITUATION_COLORS: tuple[tuple[int, int, int], ...] = SHORTS_HOOK_TITLE_LINE1_COLORS
+SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC = 0.55
+SHORTS_CONV_SITUATION_MIN_CONTRAST_SQ = 18000
 
 
 def shorts_conv_situation_font_pt(frame_height: int) -> int:
@@ -733,37 +732,87 @@ def shorts_conv_situation_font_pt(frame_height: int) -> int:
     return max(34, int(SHORTS_CONV_SITUATION_FONT_PT * sy))
 
 
-def _smoothstep01(t: float) -> float:
-    t = max(0.0, min(1.0, float(t)))
-    return t * t * (3.0 - 2.0 * t)
+def _rgb_dist_sq(a: tuple[int, int, int], b: tuple[int, int, int]) -> int:
+    return (
+        (int(a[0]) - int(b[0])) ** 2
+        + (int(a[1]) - int(b[1])) ** 2
+        + (int(a[2]) - int(b[2])) ** 2
+    )
 
 
-def shorts_conv_situation_subtitle_color(phase_sec: float, seed: int) -> tuple[int, int, int]:
-    """회화 situation_subtitle — 밝·중채도 hue만 서서히 변화 (가독성 유지)."""
-    import colorsys
+def _lerp_rgb(
+    a: tuple[int, int, int],
+    b: tuple[int, int, int],
+    t: float,
+) -> tuple[int, int, int]:
+    u = max(0.0, min(1.0, float(t)))
+    return (
+        int(round(a[0] + (b[0] - a[0]) * u)),
+        int(round(a[1] + (b[1] - a[1]) * u)),
+        int(round(a[2] + (b[2] - a[2]) * u)),
+    )
+
+
+def pick_random_situation_subtitle_color(rng: Any) -> tuple[int, int, int]:
     import random
 
-    rng = random.Random(int(seed) ^ 0x5A17_0001)
-    n = max(2, int(SHORTS_CONV_SITUATION_HUE_COUNT))
-    hues = [rng.random() for _ in range(n)]
-    seg = max(0.8, float(SHORTS_CONV_SITUATION_COLOR_SEGMENT_SEC))
-    total = seg * (n - 1)
-    if total <= 1e-6:
-        h = hues[0]
-    else:
-        t = float(phase_sec) % total
-        idx = min(int(t / seg), n - 2)
-        local = _smoothstep01((t - idx * seg) / seg)
-        h0, h1 = hues[idx], hues[idx + 1]
-        dh = h1 - h0
-        if dh > 0.5:
-            dh -= 1.0
-        elif dh < -0.5:
-            dh += 1.0
-        h = (h0 + dh * local) % 1.0
-    r, g, b = colorsys.hsv_to_rgb(
-        h,
-        float(SHORTS_CONV_SITUATION_SATURATION),
-        float(SHORTS_CONV_SITUATION_VALUE),
-    )
-    return int(r * 255), int(g * 255), int(b * 255)
+    pool = SHORTS_CONV_SITUATION_COLORS
+    if not pool:
+        return (255, 110, 175)
+    if isinstance(rng, random.Random):
+        return rng.choice(pool)
+    return pool[0]
+
+
+def pick_contrasting_situation_subtitle_color(
+    rng: Any,
+    current: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """팔레트에서 current 와 RGB 거리가 큰 색을 무작위 선택."""
+    palette = [c for c in SHORTS_CONV_SITUATION_COLORS if c != current]
+    if not palette:
+        return pick_random_situation_subtitle_color(rng)
+    ranked = sorted(palette, key=lambda c: _rgb_dist_sq(c, current), reverse=True)
+    min_sq = int(SHORTS_CONV_SITUATION_MIN_CONTRAST_SQ)
+    strong = [c for c in ranked if _rgb_dist_sq(c, current) >= min_sq]
+    pool = strong if len(strong) >= 2 else ranked[: max(3, len(ranked) // 2)]
+    import random
+
+    if isinstance(rng, random.Random):
+        return rng.choice(pool)
+    return pool[0]
+
+
+class SituationSubtitleColorAnimator:
+    """situation_subtitle: 랜덤 시작 → 대비색으로 빠르게 전환 → 도달 시 새 대비색, 반복."""
+
+    __slots__ = ("_from", "_rng", "_seg_elapsed", "_to")
+
+    def __init__(self, *, seed: int = 0) -> None:
+        import random
+
+        self._rng = random.Random(int(seed) ^ 0x5A17_0001)
+        self._from = pick_random_situation_subtitle_color(self._rng)
+        self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+        self._seg_elapsed = 0.0
+
+    def reset(self, *, seed: int = 0) -> None:
+        import random
+
+        self._rng = random.Random(int(seed) ^ 0x5A17_0001)
+        self._from = pick_random_situation_subtitle_color(self._rng)
+        self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+        self._seg_elapsed = 0.0
+
+    def tick(self, dt_sec: float) -> None:
+        dur = max(1e-6, float(SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC))
+        self._seg_elapsed += max(0.0, float(dt_sec))
+        while self._seg_elapsed >= dur:
+            self._seg_elapsed -= dur
+            self._from = self._to
+            self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+
+    def current_color(self) -> tuple[int, int, int]:
+        dur = max(1e-6, float(SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC))
+        t = min(1.0, self._seg_elapsed / dur)
+        return _lerp_rgb(self._from, self._to, t)

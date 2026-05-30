@@ -1100,8 +1100,7 @@ class ShortsDrawer:
         channel: str,
         subtitle_progress: Optional[float] = None,
         conversation_situation: bool = False,
-        color_phase_sec: float = 0.0,
-        color_seed: int = 0,
+        subtitle_color: Optional[tuple[int, int, int]] = None,
     ) -> None:
         alpha = self.fade_alpha(channel)
         if alpha <= 0:
@@ -1114,13 +1113,10 @@ class ShortsDrawer:
             return
         fh = max(1, int(screen.get_height()))
         if conversation_situation:
-            from studio.shorts.constants import (
-                shorts_conv_situation_font_pt,
-                shorts_conv_situation_subtitle_color,
-            )
+            from studio.shorts.constants import shorts_conv_situation_font_pt
 
             font = self._conv_situation_subtitle_font(shorts_conv_situation_font_pt(fh))
-            sub_color = shorts_conv_situation_subtitle_color(color_phase_sec, color_seed)
+            sub_color = subtitle_color or (220, 225, 235)
         else:
             font = self._bottom_font
             sub_color = (220, 225, 235)

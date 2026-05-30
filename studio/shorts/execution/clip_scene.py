@@ -168,7 +168,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
-        self._situation_subtitle_color_elapsed = 0.0
+        self._situation_subtitle_color_anim: Optional[Any] = None
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -207,7 +207,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
-        self._situation_subtitle_color_elapsed = 0.0
+        self._situation_subtitle_color_anim: Optional[Any] = None
 
     @property
     def stage(self) -> ClipStage:
@@ -417,6 +417,7 @@ class ClipScene:
         self._vocab_meaning_entered = False
         self._conv_translation_plan = None
         self._conv_translation_entered = False
+        self._situation_subtitle_color_anim = None
         self._vocab_after_video_action = ""
         self._ensure_ko_plan()
         self._ensure_vocab_meaning_plan()
@@ -1195,7 +1196,7 @@ class ClipScene:
         self._drawer.tick_fade(dt_sec)
         self._timer += max(0.0, float(dt_sec))
         if self._situation_subtitle_for_bottom():
-            self._situation_subtitle_color_elapsed += max(0.0, float(dt_sec))
+            self._tick_situation_subtitle_color(dt_sec)
 
         if self._stage == ClipStage.VIDEO_PLAY:
             self._try_start_deferred_ko_narration()
@@ -2055,7 +2056,7 @@ class ClipScene:
             dur = max(0.0, float(self._sentence_sound_duration or self._sound_once_duration))
             if dur <= 1e-6:
                 dur = 3.0
-            if self._conv_cn_subphase == "replay_pause":
+            if self._conv_cn_subphase == "replay_pause" or self._conv_script_step_pause:
                 return dur, dur
             if not self._is_voice_finished():
                 return max(0.0, float(self._learn_elapsed)), dur
@@ -2123,6 +2124,27 @@ class ClipScene:
             return ""
         return str(self._clip.get("situation_subtitle") or "").strip()
 
+    def _situation_subtitle_color_seed(self) -> int:
+        try:
+            return int(self._clip.get("clip_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _ensure_situation_subtitle_color_anim(self) -> Any:
+        from studio.shorts.constants import SituationSubtitleColorAnimator
+
+        if self._situation_subtitle_color_anim is None:
+            self._situation_subtitle_color_anim = SituationSubtitleColorAnimator(
+                seed=self._situation_subtitle_color_seed()
+            )
+        return self._situation_subtitle_color_anim
+
+    def _tick_situation_subtitle_color(self, dt_sec: float) -> None:
+        self._ensure_situation_subtitle_color_anim().tick(dt_sec)
+
+    def _situation_subtitle_color_now(self) -> tuple[int, int, int]:
+        return self._ensure_situation_subtitle_color_anim().current_color()
+
     def _draw_situation_bottom_zone(
         self,
         screen: pygame.Surface,
@@ -2132,18 +2154,17 @@ class ClipScene:
     ) -> None:
         if not situation:
             return
-        try:
-            color_seed = int(self._clip.get("clip_id") or 0)
-        except (TypeError, ValueError):
-            color_seed = 0
         self._drawer.draw_bottom_zone(
             screen,
             zones=zones,
             situation_subtitle=situation,
             channel=_CHANNEL_BOTTOM,
             conversation_situation=self._is_conversation_clip(),
-            color_phase_sec=self._situation_subtitle_color_elapsed,
-            color_seed=color_seed,
+            subtitle_color=(
+                self._situation_subtitle_color_now()
+                if self._is_conversation_clip()
+                else None
+            ),
         )
 
     def _should_show_learn_karaoke(self) -> bool:
