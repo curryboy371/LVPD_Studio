@@ -358,9 +358,9 @@ def run(
 
 
 def _is_shorts_studio(studio: IStudio) -> bool:
-    """isinstance 대신 prefix로 판별 (debugpy 이중 로드 시에도 동작)."""
+    """isinstance 대신 title로 판별 (debugpy 이중 로드 시에도 동작)."""
     try:
-        return studio.get_recording_prefix() == "SHORTS_REC"
+        return "숏츠" in (studio.get_title() or "")
     except Exception:
         return False
 

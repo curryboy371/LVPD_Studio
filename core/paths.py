@@ -94,6 +94,9 @@ STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN = 0.5
 # 회화 연습 주황 게이지 배경음 선형 볼륨(1.0=원본). pygame 재생과 녹화 mux에 동일 적용.
 STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN = 0.4
 
+# 숏츠(bg_short) 배경음 선형 볼륨 — 일반 회화·단어장 practice bg(0.4)와 별도.
+STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN = 0.6
+
 # 회화 삽입 음성(pygame ch1): 중국어 mp3·기타
 STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN = 1.0
 # Edge TTS ko_sub_* 산출은 원본 레벨이 낮은 편 → 중국어 듣기와 체감 맞춤

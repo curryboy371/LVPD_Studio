@@ -233,23 +233,15 @@ class MainPanel(ttk.Frame):
             )
             return
         if kind == "shorts_conv":
-            if _NUMERIC.match(raw):
-                argv = [
-                    "-m",
-                    "tools.tts_gen.build_shorts_ko_narration",
-                    "--set-id",
-                    raw,
-                ]
-                title = f"숏츠 회화 TTS set {raw}"
-            else:
-                argv = [
+            self._run_task(
+                [
                     "-m",
                     "tools.tts_gen.build_shorts_ko_narration",
                     "--topic",
                     raw,
-                ]
-                title = f"숏츠 회화 TTS topic {raw}"
-            self._run_task(argv, title=title)
+                ],
+                title=f"숏츠 회화 TTS topic {raw}",
+            )
             return
         if kind == "shorts_vocab":
             if _NUMERIC.match(raw):

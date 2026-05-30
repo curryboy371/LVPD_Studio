@@ -46,13 +46,16 @@ def build_font_bundle(sizes: ShortsFontSizes) -> FontBundle:
 
     from studio.conversation.tools.fonts import WHITE
 
+    from studio.shorts.constants import shorts_conv_meaning_font_pt
+
     cn = int(sizes.cn)
     py = int(sizes.pinyin)
     kr = int(sizes.kr)
+    conv_kr = shorts_conv_meaning_font_pt(kr)
     return FontBundle(
         hanzi_ft=load_font_chinese_freetype(cn, WHITE),
         hanzi_pg=load_font_chinese(cn, WHITE, weight="bold"),
         pinyin_ft=load_font_chinese_freetype(py, WHITE),
         pinyin_pg=load_font_chinese(py, WHITE),
-        translation_pg=load_font_korean(kr, WHITE),
+        translation_pg=load_font_korean(conv_kr, WHITE),
     )

@@ -13,6 +13,7 @@ from core.paths import (
     STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN,
     STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN,
     STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN,
+    STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN,
 )
 from studio.recording_events import (
     InsertSound,
@@ -37,22 +38,38 @@ def _mux_segment_audio_role(path: str) -> str:
     return "embedded" if _is_embedded_video_audio_path(path) else "sidecar"
 
 
+def _is_shorts_bg_insert_path(path: str) -> bool:
+    """숏츠 bg_short — mux 시 0.6·루프·페이드."""
+    norm = str(path or "").replace("\\", "/").lower()
+    return "/resource/sound/bg_short/" in norm
+
+
+def _is_practice_bg_insert_path(path: str) -> bool:
+    """일반 회화 practice bg — mux 시 0.4·루프·페이드 (bg, background)."""
+    norm = str(path or "").replace("\\", "/").lower()
+    return (
+        "/resource/sound/background/" in norm
+        or "/resource/sound/bg/" in norm
+    )
+
+
+def _is_bg_loop_insert_path(path: str) -> bool:
+    """practice·숏츠 bg: mux 시 0초부터 동일 곡을 구간 길이만큼 루프."""
+    return _is_shorts_bg_insert_path(path) or _is_practice_bg_insert_path(path)
+
+
 def _insert_sound_mux_role(path: str) -> str:
     """InsertSound mux 역할: bg(루프·페이드) vs 회화 삽입 음성 vs 기본 sidecar."""
-    norm = str(path or "").replace("\\", "/").lower()
-    if "/resource/sound/background/" in norm or "/resource/sound/bg/" in norm:
+    if _is_shorts_bg_insert_path(path):
+        return "bg_insert_shorts"
+    if _is_practice_bg_insert_path(path):
         return "bg_insert"
+    norm = str(path or "").replace("\\", "/").lower()
     if "/resource/sound/follow/" in norm:
         return "bg_insert"
     if "ko_sub_" in norm:
         return "voice_ko"
     return "voice"
-
-
-def _is_bg_loop_insert_path(path: str) -> bool:
-    """resource/sound/bg 배경음: mux 시 0초부터 동일 곡을 구간 길이만큼 루프."""
-    norm = str(path or "").replace("\\", "/").lower()
-    return "/resource/sound/background/" in norm or "/resource/sound/bg/" in norm
 
 
 def _mux_volume_prefix(role: str) -> str:
@@ -62,6 +79,9 @@ def _mux_volume_prefix(role: str) -> str:
         return f"volume={g},"
     if role == "bg_insert":
         g = max(0.0, min(2.0, float(STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)))
+        return f"volume={g},"
+    if role == "bg_insert_shorts":
+        g = max(0.0, min(2.0, float(STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN)))
         return f"volume={g},"
     if role == "voice_ko":
         g = max(0.0, min(2.0, float(STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN)))
@@ -304,7 +324,7 @@ def _build_audio_from_events(
         gain = _mux_volume_prefix(role)
         fade = ""
         loop = ""
-        if role == "bg_insert":
+        if role in ("bg_insert", "bg_insert_shorts"):
             fade_sec = min(1.0, max(0.1, dur * 0.45))
             out_start = max(0.0, dur - fade_sec)
             fade = f"afade=t=in:st=0:d={fade_sec},afade=t=out:st={out_start}:d={fade_sec},"

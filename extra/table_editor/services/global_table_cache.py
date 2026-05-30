@@ -24,11 +24,14 @@ from extra.table_editor.data.fields import (
     SUB_FIELDNAMES,
 )
 from extra.table_editor.data.workbook import ExcelWorkbookStore
+from extra.table_editor.services.ko_narration_lines_normalize import (
+    normalize_ko_narration_line_rows,
+)
 from extra.table_editor.services.search import (
     filter_rows_by_base_id,
     filter_rows_by_set_id,
     ids_equal,
-    sort_ko_narration_lines_by_seq,
+    sort_ko_narration_lines_by_id,
     sort_rows_by_id,
 )
 from extra.table_editor.services.sub_replacement_slots import parse_replacement_pairs
@@ -75,16 +78,6 @@ def _truncate(text: str, max_len: int = 48) -> str:
     if len(t) <= max_len:
         return t
     return t[: max_len - 1] + "…"
-
-
-def _ko_line_seq_is_one(row: dict[str, str]) -> bool:
-    raw = (row.get("seq") or "").strip()
-    if not raw:
-        return False
-    try:
-        return int(float(raw)) == 1
-    except (ValueError, TypeError):
-        return False
 
 
 def _combo_label(item_id: str, preview: str) -> str:
@@ -151,10 +144,12 @@ class GlobalTableCache:
             DEFAULT_SUB_SENTENCES_CSV,
             SUB_FIELDNAMES,
         )
-        self._ko_line_rows = _read_table_rows(
-            DEFAULT_KO_NARRATION_LINES_EXCEL,
-            DEFAULT_KO_NARRATION_LINES_CSV,
-            KO_NARRATION_LINES_FIELDNAMES,
+        self._ko_line_rows = normalize_ko_narration_line_rows(
+            _read_table_rows(
+                DEFAULT_KO_NARRATION_LINES_EXCEL,
+                DEFAULT_KO_NARRATION_LINES_CSV,
+                KO_NARRATION_LINES_FIELDNAMES,
+            )
         )
         self._build_indexes()
         logger.debug(
@@ -187,7 +182,7 @@ class GlobalTableCache:
                 continue
             self._ko_lines_by_set_id.setdefault(sid, []).append(row)
         for sid in self._ko_lines_by_set_id:
-            self._ko_lines_by_set_id[sid] = sort_ko_narration_lines_by_seq(
+            self._ko_lines_by_set_id[sid] = sort_ko_narration_lines_by_id(
                 self._ko_lines_by_set_id[sid]
             )
 
@@ -312,19 +307,18 @@ class GlobalTableCache:
         options: list[SelectOption] = []
         seen_ids: set[str] = set()
         for row in self._ko_lines_by_set_id.get(sid, []):
-            if not _ko_line_seq_is_one(row):
-                continue
             line_id = _norm_row_id(row.get("id", ""))
             if not line_id or line_id in seen_ids:
                 continue
             seen_ids.add(line_id)
             text = (row.get("text") or "").strip() or "(text 없음)"
+            preview = text.replace("\n", " / ")
             self._ko_text_by_key[(sid, line_id)] = text
             options.append(
                 SelectOption(
                     id=line_id,
-                    label=_combo_label(line_id, text),
-                    preview=text,
+                    label=_combo_label(line_id, preview),
+                    preview=preview,
                 )
             )
         self._ko_options_by_set[sid] = options

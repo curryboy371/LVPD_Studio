@@ -383,22 +383,23 @@ class ShortsDrawer:
         frame_inner_size: Optional[tuple[int, int]] = None,
     ) -> Optional[pygame.Rect]:
         """중앙 구역에 비율 유지(contain)로 비디오 프레임만 출력. 반환: 프레임 Rect."""
-        frame_rect = self.compute_center_video_frame_rect(
-            rect,
-            pad=pad,
-            player=player,
-            frozen_frame=frozen_frame,
-            frame_inner_size=frame_inner_size,
-        )
-        if frame_rect is None:
+        inner = rect.inflate(-pad * 2, -pad * 2)
+        if inner.width <= 0 or inner.height <= 0:
             return None
+        iw, ih = frame_inner_size or (inner.width, inner.height)
+        iw, ih = max(1, int(iw)), max(1, int(ih))
         frame = frozen_frame
         if frame is None and player is not None:
-            inner = rect.inflate(-pad * 2, -pad * 2)
-            iw, ih = frame_inner_size or (inner.width, inner.height)
-            frame = player.get_frame(max(1, int(iw)), max(1, int(ih)), contain=True)
+            frame = player.get_frame(iw, ih, contain=True)
         if frame is None:
             return None
+        fw, fh = frame.get_width(), frame.get_height()
+        frame_rect = pygame.Rect(
+            inner.centerx - fw // 2,
+            inner.centery - fh // 2,
+            fw,
+            fh,
+        )
         a = max(0, min(255, int(alpha)))
         if a <= 0:
             return None
@@ -827,9 +828,7 @@ class ShortsDrawer:
         data = build_sentence_render_data_with_tone_icons(item_karaoke)
         cn_elapsed = float(elapsed_sec)
         cn_dur = max(1e-6, float(sound_duration_sec))
-        if meaning_karaoke is not None:
-            cn_elapsed = 0.0
-            cn_dur = 1.0
+        static_cn = meaning_karaoke is not None
         trans_y = self._karaoke.draw(
             screen,
             data=data,
@@ -842,8 +841,9 @@ class ShortsDrawer:
             pinyin_y_offset=shorts_pinyin_y_offset(fh),
             pinyin_hanzi_gap=shorts_pinyin_hanzi_gap(fh),
             translation_extra_gap=shorts_translation_extra_gap(fh),
-            return_translation_y=meaning_karaoke is not None and bool(meaning_text),
+            return_translation_y=static_cn and bool(meaning_text),
             hanzi_karaoke_only=True,
+            static_cn_text=static_cn,
         )
         if meaning_karaoke is not None and meaning_text and trans_y is not None:
             el, dur = meaning_karaoke

@@ -81,6 +81,7 @@
 | ko_narration_id | int | O | `ko_narration_sets.id` (= `ko_narration_lines.set_id`). |
 | ko_narration_line_id | str | - | `ko_narration_lines.id` 목록: `1\|2\|3`. 비우면 **1,2,3…** (sub 순서대로 i번째 멘트) |
 | sub_sentence_id | str | O* | 재생할 `sub_sentences.id`: `1\|2\|3` (`base_id`와 같은 base). **필수** — 중국어는 sub 만 재생 |
+| sound_repeat_count | str | - | sub 중국어 mp3 재생 횟수. `1` 또는 `2\|1\|1` (`sub_sentence_id` 순, 1개면 전체 동일). 기본 **1** |
 | last_hold_sec | float | - | CTA_HOLD 대기 시간(초, 소수 가능). 비우면 **2.5** |
 | bg_path | str | - | 클립 배경음. 비우면 `resource/sound/bg`에서 랜덤. 경로 지정 시 해당 파일만 재생 (repo 상대·절대) |
 

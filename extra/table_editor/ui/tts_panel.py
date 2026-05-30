@@ -24,12 +24,15 @@ from extra.table_editor.services.csv_export import (
     export_ko_narration_lines_csv,
     export_ko_narration_sets_csv,
 )
+from extra.table_editor.services.ko_narration_lines_normalize import (
+    ko_line_rows_for_editor,
+    read_ko_line_rows_from_excel,
+    rows_need_ko_line_merge,
+)
 from extra.table_editor.services.post_save_csv import export_csv_paths
 from extra.table_editor.services.search import (
     allocate_next_ko_line_id,
-    allocate_next_ko_line_seq,
     allocate_next_row_id,
-    filter_ko_lines_by_set_and_id,
     filter_rows_by_set_id,
     find_ko_line_row_index,
     find_row_by_id,
@@ -37,14 +40,13 @@ from extra.table_editor.services.search import (
     ids_equal,
     ko_line_id_exists,
     parse_search_query,
-    sort_ko_narration_lines_by_id_seq,
-    unique_ko_line_id_rows,
+    sort_ko_narration_lines_by_id,
 )
 from extra.table_editor.ui.table_panel import TablePanel
 
 
 class TtsPanel(ttk.Frame):
-    """위: ko_narration_sets / 아래: line id 목록 + seq 목록."""
+    """위: ko_narration_sets / 아래: 선택 set 의 lines (id 1행, text는 \\n 구분)."""
 
     def __init__(
         self,
@@ -62,7 +64,6 @@ class TtsPanel(ttk.Frame):
         self._all_set_rows: list[dict[str, str]] = []
         self._all_line_rows: list[dict[str, str]] = []
         self._selected_set_id = ""
-        self._selected_line_id = ""
         self._syncing_selection = False
         self._build_ui()
 
@@ -108,45 +109,23 @@ class TtsPanel(ttk.Frame):
         )
         self._sets_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._detail_frame: ttk.LabelFrame | None = None
-        self._detail_inner: ttk.Panedwindow | None = None
-        self._line_id_frame: ttk.LabelFrame | None = None
-        self._line_id_table: TablePanel | None = None
         self._lines_frame: ttk.LabelFrame | None = None
         self._lines_table: TablePanel | None = None
         self._detail_visible = False
 
     def _ensure_detail_ui(self) -> None:
-        if self._detail_frame is not None:
+        if self._lines_frame is not None:
             return
 
-        self._detail_frame = ttk.LabelFrame(
-            self._paned,
-            text="lines — set id · seq",
-        )
-        self._detail_inner = ttk.Panedwindow(self._detail_frame, orient=tk.HORIZONTAL)
-        self._detail_inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self._line_id_frame = ttk.LabelFrame(self._detail_inner, text="id")
-        self._detail_inner.add(self._line_id_frame, weight=1)
-        self._line_id_table = TablePanel(
-            self._line_id_frame,
-            ["id"],
-            display_columns=["id"],
-            on_select=self._on_line_id_selected,
-        )
-        self._line_id_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
         self._lines_frame = ttk.LabelFrame(
-            self._detail_inner,
-            text="seq (set 선택)",
+            self._paned,
+            text="ko_narration_lines (set 선택)",
         )
-        self._detail_inner.add(self._lines_frame, weight=3)
         self._lines_table = TablePanel(
             self._lines_frame,
             KO_NARRATION_LINES_FIELDNAMES,
-            display_columns=["id", "seq", "text"],
-            row_sort=sort_ko_narration_lines_by_id_seq,
+            display_columns=["id", "text"],
+            row_sort=sort_ko_narration_lines_by_id,
             on_double_click=self._edit_line_row,
         )
         self._lines_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -186,13 +165,10 @@ class TtsPanel(ttk.Frame):
             self._sets_table.set_rows(self._all_set_rows)
             self._hide_detail_panel()
             self._selected_set_id = ""
-            self._selected_line_id = ""
             if self._lines_table is not None:
                 self._lines_table.set_rows([])
-            if self._line_id_table is not None:
-                self._line_id_table.set_rows([])
             if self._lines_frame is not None:
-                self._lines_frame.configure(text="seq (set 선택)")
+                self._lines_frame.configure(text="ko_narration_lines (set 선택)")
             self._new_line_btn.configure(state=tk.DISABLED)
             self._sets_table.clear_selection()
         finally:
@@ -201,12 +177,20 @@ class TtsPanel(ttk.Frame):
         self._on_status(f"sets 로드: {path}")
 
     def _load_lines(self, path: Path) -> None:
+        path = Path(path)
+        raw_rows = read_ko_line_rows_from_excel(path)
+        merged = ko_line_rows_for_editor(raw_rows)
         self._lines_store.load(path)
-        self._all_line_rows = self._lines_store.get_rows()
-        self._refresh_line_id_nav(sync_selection=False)
+        self._lines_store.set_rows(merged)
+        self._all_line_rows = list(merged)
+        if rows_need_ko_line_merge(raw_rows):
+            self._on_status(
+                f"lines 로드: {path} (legacy seq 행 → id당 1행, text \\n 병합)"
+            )
+        else:
+            self._on_status(f"lines 로드: {path}")
         self._refresh_lines_view()
         self._on_child_dirty()
-        self._on_status(f"lines 로드: {path}")
 
     def _open_sets_dialog(self) -> None:
         path = filedialog.askopenfilename(
@@ -235,6 +219,7 @@ class TtsPanel(ttk.Frame):
         self._sets_store.set_rows(self._all_set_rows)
 
     def _flush_lines(self) -> None:
+        self._all_line_rows = ko_line_rows_for_editor(self._all_line_rows)
         self._lines_store.set_rows(self._all_line_rows)
 
     def flush_all(self) -> None:
@@ -389,42 +374,24 @@ class TtsPanel(ttk.Frame):
             return ""
         return (row.get("title") or "").strip()
 
-    def _refresh_line_id_nav(self, *, sync_selection: bool = True) -> None:
-        if self._line_id_table is None:
-            return
-        if not self._selected_set_id:
-            self._line_id_table.set_rows([])
-            return
-        id_rows = unique_ko_line_id_rows(self._all_line_rows, self._selected_set_id)
-        self._line_id_table.set_rows(id_rows)
-        if sync_selection and self._selected_line_id:
-            if not self._line_id_table.select_row_by_id(self._selected_line_id):
-                self._selected_line_id = ""
-        elif sync_selection:
-            self._line_id_table.clear_selection()
-
     def _show_detail_panel(self) -> None:
         self._ensure_detail_ui()
-        assert self._detail_frame is not None
+        assert self._lines_frame is not None
         if not self._detail_visible:
-            self._paned.add(self._detail_frame, weight=2)
+            self._paned.add(self._lines_frame, weight=2)
             self._detail_visible = True
-            self._refresh_line_id_nav(sync_selection=False)
 
     def _hide_detail_panel(self) -> None:
-        if self._detail_visible and self._detail_frame is not None:
-            self._paned.forget(self._detail_frame)
+        if self._detail_visible and self._lines_frame is not None:
+            self._paned.forget(self._lines_frame)
             self._detail_visible = False
 
     def _clear_set_selection(self) -> None:
         self._selected_set_id = ""
-        self._selected_line_id = ""
         if self._lines_table is not None:
             self._lines_table.set_rows([])
-        if self._line_id_table is not None:
-            self._line_id_table.set_rows([])
         if self._lines_frame is not None:
-            self._lines_frame.configure(text="seq (set 선택)")
+            self._lines_frame.configure(text="ko_narration_lines (set 선택)")
         self._new_line_btn.configure(state=tk.DISABLED)
         self._syncing_selection = True
         try:
@@ -438,13 +405,11 @@ class TtsPanel(ttk.Frame):
         *,
         skip_sync: str | None = None,
     ) -> None:
-        """skip_sync: 사용자가 클릭한 표('sets')는 다시 선택하지 않음 (이벤트 루프 방지)."""
         sid = (set_id or "").strip()
         if not sid:
             self._clear_set_selection()
             return
         self._selected_set_id = sid
-        self._selected_line_id = ""
         self._new_line_btn.configure(state=tk.NORMAL)
         self._syncing_selection = True
         try:
@@ -453,32 +418,22 @@ class TtsPanel(ttk.Frame):
                 self._sets_table.select_row_by_id(sid)
         finally:
             self._syncing_selection = False
-        self._refresh_line_id_nav(sync_selection=False)
         self._refresh_lines_view()
         n = len(filter_rows_by_set_id(self._all_line_rows, sid))
-        self._on_status(f"set id {sid} 선택 — seq {n}건")
+        self._on_status(f"set id {sid} 선택 — line {n}건")
 
     def _refresh_lines_view(self) -> None:
         if self._lines_table is None or self._lines_frame is None:
             return
         if not self._selected_set_id:
             self._lines_table.set_rows([])
-            self._lines_frame.configure(text="seq (set 선택)")
+            self._lines_frame.configure(text="ko_narration_lines (set 선택)")
             return
-        if self._selected_line_id:
-            filtered = filter_ko_lines_by_set_and_id(
-                self._all_line_rows,
-                self._selected_set_id,
-                self._selected_line_id,
-            )
-        else:
-            filtered = filter_rows_by_set_id(self._all_line_rows, self._selected_set_id)
+        filtered = filter_rows_by_set_id(self._all_line_rows, self._selected_set_id)
         title = self._set_title_for(self._selected_set_id)
-        label = f"seq — set_id {self._selected_set_id}"
+        label = f"ko_narration_lines — set_id {self._selected_set_id}"
         if title:
             label += f" · {title}"
-        if self._selected_line_id:
-            label += f" · id {self._selected_line_id}"
         self._lines_frame.configure(text=label)
         self._lines_table.set_rows(filtered)
 
@@ -494,29 +449,6 @@ class TtsPanel(ttk.Frame):
         if ids_equal(set_id, self._selected_set_id):
             return
         self._apply_set_selection(set_id, skip_sync="sets")
-
-    def _on_line_id_selected(self, row: dict[str, str] | None) -> None:
-        if self._syncing_selection:
-            return
-        if row is None:
-            if not self._selected_line_id:
-                return
-            self._selected_line_id = ""
-            self._refresh_lines_view()
-            return
-        line_id = (row.get("id") or "").strip()
-        if ids_equal(line_id, self._selected_line_id):
-            return
-        self._selected_line_id = line_id
-        self._refresh_lines_view()
-        n = len(
-            filter_ko_lines_by_set_and_id(
-                self._all_line_rows,
-                self._selected_set_id,
-                line_id,
-            )
-        )
-        self._on_status(f"line id {line_id} 선택 — seq {n}건")
 
     def _run_search(self) -> None:
         kind, value = parse_search_query(self._search_var.get())
@@ -538,7 +470,7 @@ class TtsPanel(ttk.Frame):
 
     def _normalize_ids(self, row: dict[str, str]) -> dict[str, str]:
         out = dict(row)
-        for col in ("id", "set_id", "seq"):
+        for col in ("id", "set_id"):
             if col in out:
                 out[col] = normalize_id_display(out.get(col, ""))
         return out
@@ -578,9 +510,6 @@ class TtsPanel(ttk.Frame):
             self._all_line_rows, self._selected_set_id
         )
         defaults["set_id"] = self._selected_set_id
-        defaults["seq"] = allocate_next_ko_line_seq(
-            self._all_line_rows, self._selected_set_id
-        )
         self._open_line_editor(defaults, is_new=True, title="새 line 행")
 
     def _edit_set_row(self, row: dict[str, str]) -> None:
@@ -611,6 +540,53 @@ class TtsPanel(ttk.Frame):
         original_row: dict[str, str] | None = None,
     ) -> None:
         row_snapshot = dict(original_row or row)
+
+        def on_delete() -> bool:
+            sid = (original_id or row_snapshot.get("id") or "").strip()
+            if not sid:
+                messagebox.showwarning("삭제", "id가 없는 행은 삭제할 수 없습니다.", parent=self)
+                return False
+            title = (row_snapshot.get("title") or "").strip()
+            lines = filter_rows_by_set_id(self._all_line_rows, sid)
+            detail = f"id={sid}"
+            if title:
+                detail += f"\ntitle: {title}"
+            prompt = f"set 행을 삭제할까요?\n\n{detail}"
+            if lines:
+                prompt += f"\n\n연결된 line {len(lines)}건도 함께 삭제됩니다."
+            if not messagebox.askyesno("set 삭제", prompt, parent=self):
+                return False
+            idx = find_row_index_by_id(
+                self._all_set_rows,
+                sid,
+                match=row_snapshot,
+                fieldnames=KO_NARRATION_SETS_FIELDNAMES,
+            )
+            if idx is None:
+                messagebox.showwarning(
+                    "삭제",
+                    f"set id {sid} 행을 찾을 수 없습니다.",
+                    parent=self,
+                )
+                return False
+            del self._all_set_rows[idx]
+            if lines:
+                self._all_line_rows = [
+                    r
+                    for r in self._all_line_rows
+                    if not ids_equal(r.get("set_id", ""), sid)
+                ]
+                self._lines_store.set_rows(self._all_line_rows)
+            self._sets_store.set_rows(self._all_set_rows)
+            self._sets_table.set_rows(self._all_set_rows)
+            if ids_equal(self._selected_set_id, sid):
+                self._clear_set_selection()
+            else:
+                self._refresh_lines_view()
+            self._on_child_dirty()
+            line_note = f", line {len(lines)}건" if lines else ""
+            self._on_status(f"삭제: set id {sid}{line_note}")
+            return True
 
         def on_save(values: dict[str, str], new: bool) -> bool | None:
             values = self._normalize_ids(values)
@@ -649,7 +625,6 @@ class TtsPanel(ttk.Frame):
                     self._flush_lines()
             self._sets_store.set_rows(self._all_set_rows)
             self._sets_table.set_rows(self._all_set_rows)
-            self._refresh_line_id_nav(sync_selection=False)
             self._apply_set_selection(values.get("id", ""))
             self._on_child_dirty()
             self._on_status(f"{'추가' if new else '수정'}: set id {values.get('id', '')}")
@@ -666,6 +641,7 @@ class TtsPanel(ttk.Frame):
             existing_ids=self._set_existing_ids(),
             original_id=original_id,
             on_save=on_save,
+            on_delete=None if is_new else on_delete,
         )
 
     def _open_line_editor(
@@ -679,11 +655,47 @@ class TtsPanel(ttk.Frame):
     ) -> None:
         row_snapshot = dict(original_row or row)
 
+        def on_delete() -> bool:
+            lid = (original_id or row_snapshot.get("id") or "").strip()
+            if not lid:
+                messagebox.showwarning("삭제", "id가 없는 행은 삭제할 수 없습니다.", parent=self)
+                return False
+            set_id = (row_snapshot.get("set_id") or "").strip() or self._selected_set_id
+            text_preview = (row_snapshot.get("text") or "").strip().replace("\n", " ")[:80]
+            detail = f"set_id={set_id}  id={lid}"
+            if text_preview:
+                detail += f"\ntext: {text_preview}"
+            if not messagebox.askyesno("line 삭제", f"line 행을 삭제할까요?\n\n{detail}", parent=self):
+                return False
+            idx = find_ko_line_row_index(
+                self._all_line_rows,
+                set_id,
+                lid,
+                match=row_snapshot,
+                fieldnames=KO_NARRATION_LINES_FIELDNAMES,
+            )
+            if idx is None:
+                messagebox.showwarning(
+                    "삭제",
+                    f"line id {lid} (set {set_id}) 행을 찾을 수 없습니다.",
+                    parent=self,
+                )
+                return False
+            del self._all_line_rows[idx]
+            self._lines_store.set_rows(self._all_line_rows)
+            self._refresh_lines_view()
+            self._on_child_dirty()
+            self._on_status(f"삭제: line id {lid} (set {set_id})")
+            return True
+
         def on_save(values: dict[str, str], new: bool) -> bool | None:
             values = self._normalize_ids(values)
             set_id = (values.get("set_id") or "").strip() or self._selected_set_id
             if not (values.get("set_id") or "").strip() and self._selected_set_id:
                 values["set_id"] = self._selected_set_id
+            if not (values.get("text") or "").strip():
+                messagebox.showwarning("검증", "text를 입력하세요.", parent=self)
+                return False
             if new:
                 if ko_line_id_exists(self._all_line_rows, set_id, values.get("id", "")):
                     messagebox.showwarning(
@@ -711,7 +723,6 @@ class TtsPanel(ttk.Frame):
                     return False
                 self._all_line_rows[idx] = values
             self._lines_store.set_rows(self._all_line_rows)
-            self._refresh_line_id_nav(sync_selection=False)
             self._refresh_lines_view()
             self._on_child_dirty()
             self._on_status(f"{'추가' if new else '수정'}: line id {values.get('id', '')}")
@@ -730,4 +741,5 @@ class TtsPanel(ttk.Frame):
             ),
             original_id=original_id,
             on_save=on_save,
+            on_delete=None if is_new else on_delete,
         )

@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 
 from extra.table_editor.services.topic_sources import (
     topics_for_conversation_preview,
+    topics_for_shorts_conversation_preview,
     topics_for_vocabulary_preview,
 )
 from extra.table_editor.ui.window_placement import center_toplevel_on_parent
@@ -87,17 +88,10 @@ class TtsGenerateDialog(tk.Toplevel):
             topics = topics_for_vocabulary_preview()
             prompt = "vocabulary_word_rows.topic"
         elif kind == "shorts_conv":
-            ttk.Label(row, text="입력:", width=8).pack(side=tk.LEFT)
-            ttk.Label(
-                row,
-                text="set_id(숫자) 또는 topic",
-                foreground="#666",
-            ).pack(side=tk.LEFT, padx=(0, 8))
-            entry = ttk.Entry(row, textvariable=self._input_var, width=28)
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self._input_widget = entry
-            return
-        else:
+            ttk.Label(row, text="topic:", width=8).pack(side=tk.LEFT)
+            topics = topics_for_shorts_conversation_preview()
+            prompt = "shorts_conversation_clips.topic"
+        elif kind == "shorts_vocab":
             ttk.Label(row, text="입력:", width=8).pack(side=tk.LEFT)
             ttk.Label(
                 row,
@@ -107,6 +101,8 @@ class TtsGenerateDialog(tk.Toplevel):
             entry = ttk.Entry(row, textvariable=self._input_var, width=28)
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             self._input_widget = entry
+            return
+        else:
             return
 
         values = list(topics)

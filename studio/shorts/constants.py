@@ -24,6 +24,8 @@ SHORTS_BRAND_ICON_W = 200
 SHORTS_BRAND_ICON_H = 120
 # 1080×1920 기준 하단 중앙 — 아이콘 하단 여백(해상도에 비례 스케일, 작을수록 아래)
 SHORTS_BRAND_ICON_BOTTOM_MARGIN = 50
+# 회화 conv: 번역(뜻) 줄 폰트 — kr 대비 배율
+SHORTS_CONV_MEANING_FONT_SCALE = 1.3
 # 회화 conv: 영상 바로 아래 main_slot 단어 이미지·한자:뜻 (1080×1920 기준)
 SHORTS_CONV_MAIN_WORD_SCALE = 1.4
 SHORTS_CONV_MAIN_WORD_IMG_MAX = 160
@@ -31,6 +33,8 @@ SHORTS_CONV_MAIN_WORD_BELOW_VIDEO_GAP = 12
 SHORTS_CONV_MAIN_WORD_LABEL_GAP = 10
 SHORTS_CONV_MAIN_WORD_HANZI_PINYIN_GAP = 10
 SHORTS_CONV_MAIN_WORD_LABEL_FONT_SIZE = 34
+# main word overlay 뜻 — 한자(병음) 줄 대비 크기 (1.0 = 동일)
+SHORTS_CONV_MAIN_WORD_MEANING_FONT_RATIO = 0.82
 SHORTS_BRAND_TITLE_TEXT = ""
 SHORTS_BRAND_TITLE_COLOR = (64, 64, 64)
 SHORTS_BRAND_TITLE_FONT_SIZE = 30
@@ -48,7 +52,7 @@ SHORTS_MIDDLE_Y_OFFSET = 72
 # 1080×1920 기준 — 병음 줄 추가 y 보정(양수 = 아래)
 SHORTS_PINYIN_Y_OFFSET = 72
 # 1080×1920 기준 — 병음↔한자 줄 간격(기본 line_gap보다 좁게)
-SHORTS_PINYIN_HANZI_GAP = 60
+SHORTS_PINYIN_HANZI_GAP = 38
 # 1080×1920 기준 — 한자↔번역(뜻) 추가 간격
 SHORTS_TRANSLATION_EXTRA_GAP = 28
 # 단어 숏츠 연상 이미지 — inner 패딩·최대 크기(비디오 영역 대비)
@@ -680,3 +684,16 @@ def shorts_conv_main_word_label_font_size(frame_height: int) -> int:
     sy = h / float(SHORTS_HEIGHT)
     scale = float(SHORTS_CONV_MAIN_WORD_SCALE)
     return max(22, int(SHORTS_CONV_MAIN_WORD_LABEL_FONT_SIZE * sy * scale))
+
+
+def shorts_conv_meaning_font_pt(base_pt: int) -> int:
+    """회화 번역(뜻) 줄 pt — base_pt(보통 kr)에 SHORTS_CONV_MEANING_FONT_SCALE 적용."""
+    return max(18, int(int(base_pt) * float(SHORTS_CONV_MEANING_FONT_SCALE)))
+
+
+def shorts_conv_main_word_meaning_font_pt(label_pt: int) -> int:
+    """영상 아래 main word 뜻 pt — 한자(병음) label_pt 대비."""
+    return max(
+        16,
+        int(int(label_pt) * float(SHORTS_CONV_MAIN_WORD_MEANING_FONT_RATIO)),
+    )

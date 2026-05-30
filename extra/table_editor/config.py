@@ -67,7 +67,6 @@ LONG_TEXT_FIELDS = frozenset({
     "situation_subtitle",
     "hook_title",
     "last_hold_text",
-    "text",
 })
 
 # words.csv · ko_narration_sets — TTS 엔진/목소리 (배치·런타임과 동일)

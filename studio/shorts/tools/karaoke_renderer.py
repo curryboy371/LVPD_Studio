@@ -56,10 +56,12 @@ class KaraokeRenderer:
         fixed_hanzi_y: Optional[int] = None,
         return_translation_y: bool = False,
         hanzi_karaoke_only: bool = False,
+        static_cn_text: bool = False,
     ) -> int | None:
         """병음·한자·번역을 rect 안에 배치하고 재생 진행에 따라 좌→우로 채운다.
 
         hanzi_karaoke_only=True면 병음은 정적, 한자만 노래방 채움.
+        static_cn_text=True면 병음·한자 모두 정적(뜻 노래방은 호출측에서 별도).
         """
         del syllable_times  # 음절 단위 하이라이트 미사용
         pinyin = (data.pinyin or "").strip()
@@ -99,14 +101,23 @@ class KaraokeRenderer:
                         progress=progress,
                     )
             if hanzi:
-                after_hanzi_y = self._draw_hanzi_wipe(
-                    screen,
-                    hanzi=hanzi,
-                    center_x=center_x,
-                    y=hz_y,
-                    style=style,
-                    progress=progress,
-                )
+                if static_cn_text:
+                    after_hanzi_y = self._draw_hanzi_static(
+                        screen,
+                        hanzi=hanzi,
+                        center_x=center_x,
+                        y=hz_y,
+                        style=style,
+                    )
+                else:
+                    after_hanzi_y = self._draw_hanzi_wipe(
+                        screen,
+                        hanzi=hanzi,
+                        center_x=center_x,
+                        y=hz_y,
+                        style=style,
+                        progress=progress,
+                    )
             if return_translation_y and after_hanzi_y is not None:
                 return min(after_hanzi_y + line_gap + extra_trans, rect.bottom - 8)
             return None
@@ -136,14 +147,23 @@ class KaraokeRenderer:
             y += gap_py_hz
 
         if hanzi:
-            y = self._draw_hanzi_wipe(
-                screen,
-                hanzi=hanzi,
-                center_x=center_x,
-                y=y,
-                style=style,
-                progress=progress,
-            )
+            if static_cn_text:
+                y = self._draw_hanzi_static(
+                    screen,
+                    hanzi=hanzi,
+                    center_x=center_x,
+                    y=y,
+                    style=style,
+                )
+            else:
+                y = self._draw_hanzi_wipe(
+                    screen,
+                    hanzi=hanzi,
+                    center_x=center_x,
+                    y=y,
+                    style=style,
+                    progress=progress,
+                )
             after_hanzi_y = y
             pad_after = max(0, int(after_hanzi_pad))
             if pad_after:
@@ -391,6 +411,41 @@ class KaraokeRenderer:
                     surf_ac.set_alpha(None)
                 else:
                     surf_ac.set_alpha(old_ac)
+
+    def _draw_hanzi_static(
+        self,
+        screen: pygame.Surface,
+        *,
+        hanzi: str,
+        center_x: int,
+        y: int,
+        style: SentenceStyleConfig,
+    ) -> int:
+        """한자 정적 표시 — 노래방 채움 없음."""
+        if not hanzi:
+            return y
+        fonts = self._drawer._fonts
+        self._drawer._blit_text(
+            screen,
+            cache=self._drawer._cache_hanzi,
+            font_ft=fonts.hanzi_ft,
+            font_pg=fonts.hanzi_pg,
+            text=hanzi,
+            color=KARAOKE_ACTIVE_HANZI,
+            center_x=center_x,
+            y=y,
+            alpha=255,
+            min_margin_x=style.layout.min_margin_x,
+            align="center",
+        )
+        h = self._drawer._cached_line_height(
+            self._drawer._cache_hanzi,
+            fonts.hanzi_ft,
+            fonts.hanzi_pg,
+            hanzi,
+            KARAOKE_ACTIVE_HANZI,
+        )
+        return y + h
 
     def _draw_hanzi_wipe(
         self,

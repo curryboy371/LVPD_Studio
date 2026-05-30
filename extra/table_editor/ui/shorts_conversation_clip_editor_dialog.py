@@ -47,6 +47,12 @@ _FIELD_SPECS: list[tuple[str, str, str, str]] = [
         "ko_narration_sets.id (= ko_narration_lines.set_id)",
     ),
     (
+        "sound_repeat_count",
+        "sound_repeat_count (중국어 재생 횟수)",
+        "entry",
+        "sub 문장 mp3 반복. 1 또는 1|2|1 (sub 순). 비우면 1",
+    ),
+    (
         "last_hold_sec",
         "last_hold_sec",
         "entry",
@@ -141,6 +147,7 @@ class ShortsConversationClipEditorDialog(tk.Toplevel):
             "base_id": basic,
             "hook_title": screen,
             "ko_narration_id": narr,
+            "sound_repeat_count": play,
             "last_hold_sec": play,
             "bg_path": play,
         }
@@ -156,6 +163,8 @@ class ShortsConversationClipEditorDialog(tk.Toplevel):
             right.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
             value = row.get(field, "")
+            if field == "sound_repeat_count" and not str(value).strip():
+                value = "1"
             if kind == "multiline":
                 text = tk.Text(right, height=4, width=48, wrap=tk.WORD)
                 text.insert("1.0", normalize_multiline_input(value))
@@ -345,6 +354,8 @@ class ShortsConversationClipEditorDialog(tk.Toplevel):
             ko_pipe, sub_pipe = self._moment_pairs.get_pipe_values()
             out["ko_narration_line_id"] = ko_pipe
             out["sub_sentence_id"] = sub_pipe
+        repeat = (out.get("sound_repeat_count") or "").strip()
+        out["sound_repeat_count"] = repeat if repeat else "1"
         return out
 
     def _id_exists(self, row_id: str) -> bool:

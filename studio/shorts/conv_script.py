@@ -13,8 +13,8 @@ from core.paths import (
     get_repo_root,
 )
 from data.ko_narration_loader import (
-    KoNarrationLine,
-    get_ko_narration_lines_for_ment,
+    KoNarrationCue,
+    get_ko_narration_cues_for_ment,
     ko_cue_index_for_line,
     load_ko_narration_tables,
 )
@@ -68,15 +68,15 @@ def parse_sub_sentence_ids(row: dict[str, str]) -> list[int]:
     return ids
 
 
-def _ko_step_from_line(line: KoNarrationLine, *, set_id: int) -> dict[str, Any]:
-    ment_id = int(line.id)
-    seq = int(line.seq)
+def _ko_step_from_cue(cue: KoNarrationCue, *, set_id: int) -> dict[str, Any]:
+    ment_id = int(cue.ment_id)
+    segment = int(cue.segment)
     return {
         "kind": "ko",
         "ment_id": ment_id,
-        "seq": seq,
-        "cue_index": ko_cue_index_for_line(set_id, ment_id=ment_id, seq=seq),
-        "line_text": line.text,
+        "seq": segment,
+        "cue_index": ko_cue_index_for_line(set_id, ment_id=ment_id, seq=segment),
+        "line_text": cue.text,
     }
 
 
@@ -106,20 +106,20 @@ def _build_ko_then_sub_steps(
     sub_ids: list[int],
     ment_ids: list[int],
 ) -> list[dict[str, Any]]:
-    """``sub_sentence_id`` 각각: 한국어 TTS(멘트 전체 seq) → 중국어 mp3."""
+    """``sub_sentence_id`` 각각: 한국어 TTS(멘트 전체 segment) → 중국어 mp3."""
     out: list[dict[str, Any]] = []
     for i, sub_id in enumerate(sub_ids):
         mid = ment_ids[i] if i < len(ment_ids) else (i + 1)
-        lines = get_ko_narration_lines_for_ment(set_id, ment_id=mid)
-        if not lines:
+        cues = get_ko_narration_cues_for_ment(set_id, ment_id=mid)
+        if not cues:
             logger.warning(
                 "ko_narration_lines set_id=%s: ment_id=%s 없음 — sub %s 는 중국어만",
                 set_id,
                 mid,
                 sub_id,
             )
-        for line in lines:
-            out.append(_ko_step_from_line(line, set_id=set_id))
+        for cue in cues:
+            out.append(_ko_step_from_cue(cue, set_id=set_id))
         out.append({"kind": "sub", "sub_id": int(sub_id)})
     return out
 
@@ -146,9 +146,9 @@ def _resolve_explicit_ko_script(
                 ment_id = int(token.split(":", 1)[1].strip())
             except (TypeError, ValueError, IndexError):
                 continue
-            lines = get_ko_narration_lines_for_ment(set_id, ment_id)
-            for line in lines:
-                out.append(_ko_step_from_line(line, set_id=set_id))
+            cues = get_ko_narration_cues_for_ment(set_id, ment_id)
+            for cue in cues:
+                out.append(_ko_step_from_cue(cue, set_id=set_id))
             continue
         if token.startswith("sub:"):
             try:
@@ -230,11 +230,32 @@ def build_sub_step_payload(
     sound_raw = str(variant.get("alt_sound_path") or "").strip()
     resolved = resolve_conversation_sub_cn_sound_path(sound_raw)
     sound_path = _resolve_path(repo, str(resolved) if resolved else sound_raw)
+    from core.paths import (
+        conversation_sub_ko_mp3_path,
+        conversation_sub_ko_mp3_path_legacy,
+    )
+
+    ko_sound_path = ""
+    try:
+        sub_row_id = int(sub_row.get("id") or 0)
+        bid = int(base_id)
+        if sub_row_id > 0 and bid > 0:
+            ko_mp3 = conversation_sub_ko_mp3_path(bid, sub_row_id)
+            if not ko_mp3.is_file():
+                legacy = conversation_sub_ko_mp3_path_legacy(sub_row_id)
+                if legacy.is_file():
+                    ko_mp3 = legacy
+            if ko_mp3.is_file():
+                ko_sound_path = str(ko_mp3.resolve())
+    except (TypeError, ValueError):
+        ko_sound_path = ""
     payload: dict[str, Any] = {
+        "sub_id": int(sub_id),
         "sentence": [display] if display else [],
         "translation": [translation] if translation else [],
         "pinyin": pinyin,
         "sound_path": sound_path,
+        "ko_sound_path": ko_sound_path,
     }
     for key in (
         "main_word_id",

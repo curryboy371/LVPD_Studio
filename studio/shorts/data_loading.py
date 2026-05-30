@@ -16,7 +16,7 @@ from core.paths import (
 )
 from data.table_manager import get_base_sentences, get_word
 from studio.shorts.clip_types import CLIP_TYPE_CONVERSATION, CLIP_TYPE_VOCABULARY, normalize_clip_type
-from studio.shorts.conv_script import build_conv_playback_steps
+from studio.shorts.conv_script import build_conv_playback_steps, parse_sub_sentence_ids
 from studio.shorts.constants import SHORTS_PANDA_DIR
 from utils.pinyin_processor import get_pinyin_processor
 from utils.syllable_timing import parse_syllable_times_ms
@@ -401,6 +401,22 @@ def build_shorts_conversation_clip_list(
         if not steps:
             logger.warning("shorts conversation clip id=%s: script 단계 없음", clip_id)
             continue
+        sub_ids = parse_sub_sentence_ids(row)
+        repeat_counts = parse_vocab_int_list_field(
+            row.get("sound_repeat_count") or "",
+            max(1, len(sub_ids)),
+            default=1,
+            minimum=1,
+        )
+        clip["sound_repeat_count"] = repeat_counts[0] if repeat_counts else 1
+        clip["sound_repeat_counts"] = repeat_counts
+        sub_i = 0
+        for step in steps:
+            if str(step.get("kind") or "").strip() == "sub":
+                step["sound_repeat_count"] = (
+                    repeat_counts[sub_i] if sub_i < len(repeat_counts) else 1
+                )
+                sub_i += 1
         clip["playback_steps"] = steps
         clip["conv_script_mode"] = True
         clip["_base_cn_snapshot"] = {

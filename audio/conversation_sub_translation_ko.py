@@ -190,3 +190,56 @@ def batch_build_conversation_sub_ko_for_topic(
             logger.exception("회화 sub TTS 실패 sub_id=%s: %s", sub_id, ex)
 
     return ok, skip, fail
+
+
+def ensure_sub_translation_ko_mp3(
+    base_id: int,
+    sub_id: int,
+    text: str,
+    *,
+    build_if_missing: bool = True,
+    tts: str = "edge",
+    tts_voice: str = "ko-KR-SunHiNeural",
+) -> str:
+    """sub alt_translation TTS mp3 경로. 없으면 1회 생성 시도."""
+    from audio.ko_narration import cached_cue_audio_usable, resolve_tts_provider
+
+    try:
+        bid = int(base_id)
+        sid = int(sub_id)
+    except (TypeError, ValueError):
+        return ""
+    if bid < 1 or sid < 1:
+        return ""
+
+    out = conversation_sub_ko_mp3_path(bid, sid)
+    if out.is_file() and cached_cue_audio_usable(out):
+        return str(out.resolve())
+    legacy = conversation_sub_ko_mp3_path_legacy(sid)
+    if legacy.is_file() and cached_cue_audio_usable(legacy):
+        return str(legacy.resolve())
+
+    line = (text or "").strip()
+    if not build_if_missing or not line:
+        return ""
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        provider = resolve_tts_provider(tts, voice=tts_voice)
+        provider.synthesize(line, lang="ko", out_path=out)
+        if cached_cue_audio_usable(out):
+            logger.info(
+                "sub 번역 TTS 생성 base_id=%s sub_id=%s → %s",
+                bid,
+                sid,
+                out.relative_to(get_repo_root()),
+            )
+            return str(out.resolve())
+    except Exception as ex:
+        logger.warning(
+            "sub 번역 TTS 생성 실패 base_id=%s sub_id=%s: %s",
+            bid,
+            sid,
+            ex,
+        )
+    return ""

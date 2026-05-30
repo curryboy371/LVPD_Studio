@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Optional
 
 import pygame
@@ -30,6 +31,39 @@ from studio.shorts.tools.shorts_drawer import ShortsDrawer
 logger = logging.getLogger(__name__)
 
 _VOICE_CHANNEL_INDEX = 2
+_RECORDING_BRAND_SLUG = "여포판다"
+
+
+def _recording_topic_slug(raw: str) -> str:
+    """파일명용 topic (공백·특수문자 → _)."""
+    s = re.sub(r"[^\w\-]+", "_", (raw or "").strip(), flags=re.UNICODE)
+    return s.strip("_")
+
+
+def build_shorts_recording_prefix(
+    *,
+    shorts_mode: str,
+    session_topics: Optional[list[str]] = None,
+    clips: Optional[list[dict[str, Any]]] = None,
+) -> str:
+    """녹화 MP4 접두사: 여포판다_중국어회화_payment 형식 (+ 타임스탬프는 runner에서 부여)."""
+    from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY
+
+    kind = "단어" if shorts_mode == CLIP_TYPE_VOCABULARY else "중국어회화"
+    topics = [t.strip() for t in (session_topics or []) if (t or "").strip()]
+    if len(topics) == 1:
+        topic_part = _recording_topic_slug(topics[0]) or "all"
+    elif len(topics) > 1:
+        parts = [_recording_topic_slug(t) for t in topics[:3]]
+        parts = [p for p in parts if p]
+        topic_part = "_".join(parts) if parts else "multi"
+        if len(topics) > 3:
+            topic_part = f"{topic_part}_외{len(topics) - 3}"
+    elif clips:
+        topic_part = _recording_topic_slug(str(clips[0].get("topic") or "")) or "all"
+    else:
+        topic_part = "all"
+    return f"{_RECORDING_BRAND_SLUG}_{kind}_{topic_part}"
 
 
 class ShortsStudio(IStudio):
@@ -132,9 +166,19 @@ class ShortsStudio(IStudio):
         n = len(self._clips)
         idx = min(self._clip_index, max(0, n - 1)) + 1 if n else 0
         stage = ""
+        suffix = ""
         if self._scene is not None:
             stage = getattr(self._scene.stage, "name", str(self._scene.stage))
-        return f"clip {idx}/{n} stage={stage}"
+            extra = getattr(self._scene, "recording_progress_suffix", None)
+            if callable(extra):
+                try:
+                    suffix = str(extra() or "").strip()
+                except Exception:
+                    suffix = ""
+        line = f"clip {idx}/{n} stage={stage}"
+        if suffix:
+            line = f"{line} | {suffix}"
+        return line
 
     def get_title(self) -> str:
         return "LVPD Studio - 숏츠"
@@ -185,7 +229,11 @@ class ShortsStudio(IStudio):
             self._scene.finalize_recording_audio_segments(timeline_end_sec=timeline_end_sec)
 
     def get_recording_prefix(self) -> Optional[str]:
-        return "SHORTS_REC"
+        return build_shorts_recording_prefix(
+            shorts_mode=self._shorts_mode,
+            session_topics=self._session_topics,
+            clips=self._clips,
+        )
 
     def should_stop_recording(self) -> bool:
         return bool(self._recording_done)

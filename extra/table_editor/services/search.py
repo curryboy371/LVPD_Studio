@@ -72,15 +72,20 @@ def sort_ko_narration_lines_by_seq(rows: list[dict[str, str]]) -> list[dict[str,
     )
 
 
-def sort_ko_narration_lines_by_id_seq(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    """선택 set 내부: id → seq 순."""
+def sort_ko_narration_lines_by_id(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """set_id → id 순."""
     return sorted(
         rows,
         key=lambda r: (
+            _numeric_field_key(r.get("set_id", "")),
             _id_key(r),
-            _numeric_field_key(r.get("seq", "")),
         ),
     )
+
+
+def sort_ko_narration_lines_by_id_seq(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """(호환) set_id → id 순 — seq 열 제거 후 id만 사용."""
+    return sort_ko_narration_lines_by_id(rows)
 
 
 def filter_rows_by_pos(rows: list[dict[str, str]], pos_filter: str) -> list[dict[str, str]]:
@@ -187,7 +192,7 @@ def filter_rows_by_set_id(
 def filter_ko_lines_by_set_and_id(
     rows: list[dict[str, str]], set_id: str, line_id: str
 ) -> list[dict[str, str]]:
-    """선택 set 안의 특정 line id(seq 행들)."""
+    """선택 set 안의 특정 line id (1행)."""
     sid = (set_id or "").strip()
     lid = (line_id or "").strip()
     if not sid or not lid:
@@ -321,7 +326,7 @@ def find_ko_line_row_index(
     match: dict[str, str] | None = None,
     fieldnames: list[str] | None = None,
 ) -> int | None:
-    """set_id + id 로 ko_narration_lines 행 인덱스 (id는 set별로 중복 가능)."""
+    """set_id + id 로 ko_narration_lines 행 인덱스 (set 내 id 유일)."""
     sid = (set_id or "").strip()
     if not sid:
         return None
@@ -361,27 +366,6 @@ def allocate_next_ko_line_id(
 ) -> str:
     scoped = filter_rows_by_set_id(rows, set_id)
     return allocate_next_row_id(scoped, default=default)
-
-
-def allocate_next_ko_line_seq(
-    rows: list[dict[str, str]],
-    set_id: str,
-    *,
-    default: str = "1",
-) -> str:
-    scoped = filter_rows_by_set_id(rows, set_id)
-    seqs: list[int] = []
-    for row in scoped:
-        raw = (row.get("seq") or "").strip()
-        if not raw:
-            continue
-        try:
-            seqs.append(int(float(raw)))
-        except (ValueError, TypeError):
-            continue
-    if not seqs:
-        return default
-    return str(max(seqs) + 1)
 
 
 def allocate_next_word_id(

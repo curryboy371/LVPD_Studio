@@ -14,6 +14,7 @@ from studio.shorts.constants import (
     shorts_conv_main_word_img_max,
     shorts_conv_main_word_label_font_size,
     shorts_conv_main_word_label_gap,
+    shorts_conv_main_word_meaning_font_pt,
 )
 from utils.fonts import load_font_chinese, load_font_kr_chinese
 
@@ -147,8 +148,9 @@ def draw_conv_main_word_overlay(
     max_px = shorts_conv_main_word_img_max(fh)
     img_surf = _load_word_image(img_path, max_px=max_px) if img_path else None
     font_pt = shorts_conv_main_word_label_font_size(fh)
+    meaning_pt = shorts_conv_main_word_meaning_font_pt(font_pt)
     hanzi_line = _compose_hanzi_pinyin_line(hanzi, pinyin, font_pt=font_pt)
-    meaning_line = _render_meaning_line(meaning, font_pt=font_pt)
+    meaning_line = _render_meaning_line(meaning, font_pt=meaning_pt)
 
     label_gap = shorts_conv_main_word_label_gap(fh)
     line_gap = label_gap

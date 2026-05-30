@@ -163,3 +163,30 @@ def lookup_hanzi_by_word_id(word_id: str) -> str:
     """words.id → 한자 (첫 매칭)."""
     return lookup_word_details(word_id).get("word", "")
 
+
+def _word_search_row(word_id: str) -> dict[str, str]:
+    details = lookup_word_details(word_id)
+    return {
+        "id": _normalize_id(word_id),
+        "word": details.get("word", ""),
+        "meaning": details.get("meaning", ""),
+        "pos": details.get("pos", ""),
+        "sheet": details.get("sheet", ""),
+    }
+
+
+def search_words(query: str) -> list[dict[str, str]]:
+    """id 또는 한자(정확히 일치)로 words 검색."""
+    from extra.table_editor.services.search import parse_search_query
+
+    kind, value = parse_search_query(query)
+    if not value:
+        return []
+
+    if kind == "id":
+        row = _word_search_row(value)
+        return [row] if row.get("word") else []
+
+    ids = lookup_word_ids(value)
+    rows = [_word_search_row(wid) for wid in ids]
+    return [row for row in rows if row.get("word")]

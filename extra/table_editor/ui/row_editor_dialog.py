@@ -22,7 +22,7 @@ from extra.table_editor.config import (
     SUB_MAIN_SLOT_FIELD,
     SUB_SLOT_ORDER_FIELD,
 )
-from extra.table_editor.data.fields import BASE_FIELDNAMES
+from extra.table_editor.data.fields import BASE_FIELDNAMES, KO_NARRATION_LINES_FIELDNAMES
 from extra.table_editor.services.masking_format import (
     masking_for_display,
     masking_for_storage,
@@ -35,7 +35,10 @@ from extra.table_editor.services.sentence_media_paths import (
     is_valid_display_sentence,
 )
 from extra.table_editor.services.word_autofill import apply_hanzi_autofill
-from extra.table_editor.ui.window_placement import center_toplevel_on_parent
+from extra.table_editor.ui.window_placement import (
+    parse_window_geometry_size,
+    schedule_center_toplevel_on_parent,
+)
 
 
 class RowEditorDialog(tk.Toplevel):
@@ -54,9 +57,10 @@ class RowEditorDialog(tk.Toplevel):
         base_raw_sentence: str = "",
         sub_display_sentence: str = "",
     ) -> None:
-        super().__init__(parent)
+        root = parent.winfo_toplevel()
+        super().__init__(root)
         self.title(title)
-        self.transient(parent)
+        self.transient(root)
         self.grab_set()
         self._is_new = is_new
         self._existing_ids = existing_ids or set()
@@ -68,6 +72,7 @@ class RowEditorDialog(tk.Toplevel):
         self._img_editor: Any = None
         self._raw_sentence_editor: Any = None
         self._sub_slots_editor: Any = None
+        self._word_search_panel: Any = None
         self._scroll_canvas: tk.Canvas | None = None
         self._is_words_editor = IMG_PATH_FIELD in fieldnames
         self._is_base_editor = (
@@ -76,6 +81,7 @@ class RowEditorDialog(tk.Toplevel):
         self._is_sub_editor = (
             "base_id" in fieldnames and SUB_SLOT_ORDER_FIELD not in fieldnames
         )
+        self._is_ko_line_editor = list(fieldnames) == list(KO_NARRATION_LINES_FIELDNAMES)
         self._original_row = dict(row)
         if self._is_base_editor:
             self._fieldnames = list(BASE_EDITOR_FIELDNAMES)
@@ -88,19 +94,42 @@ class RowEditorDialog(tk.Toplevel):
         if is_words:
             self.geometry(ROW_EDITOR_GEOMETRY_WORDS)
             self.minsize(*ROW_EDITOR_MINSIZE_WORDS)
-        elif self._is_base_editor or self._is_sub_editor:
+        elif self._is_sub_editor:
+            self.geometry("1120x820")
+            self.minsize(760, 580)
+        elif self._is_base_editor:
             self.geometry("820x820")
             self.minsize(560, 580)
+        elif self._is_ko_line_editor:
+            self.geometry("680x520")
+            self.minsize(560, 360)
         else:
             self.geometry(ROW_EDITOR_GEOMETRY_DEFAULT)
             self.minsize(*ROW_EDITOR_MINSIZE_DEFAULT)
 
-        body = ttk.Frame(self)
-        body.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
+        content_host = ttk.Frame(self)
+        content_host.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
 
-        canvas = tk.Canvas(body, borderwidth=0, highlightthickness=0)
+        if self._is_sub_editor:
+            body = ttk.Panedwindow(content_host, orient=tk.HORIZONTAL)
+            body.pack(fill=tk.BOTH, expand=True)
+            scroll_host = ttk.Frame(body)
+            body.add(scroll_host, weight=3)
+            from extra.table_editor.ui.word_search_panel import WordSearchPanel
+
+            self._word_search_panel = WordSearchPanel(
+                body,
+                on_pick=self._pick_word_for_sub_slot,
+                hint="word id 입력란 클릭 후 검색·선택 (Enter / 더블클릭 / 슬롯에 넣기)",
+            )
+            body.add(self._word_search_panel, weight=1)
+        else:
+            body = content_host
+            scroll_host = body
+
+        canvas = tk.Canvas(scroll_host, borderwidth=0, highlightthickness=0)
         self._scroll_canvas = canvas
-        scroll = ttk.Scrollbar(body, orient=tk.VERTICAL, command=canvas.yview)
+        scroll = ttk.Scrollbar(scroll_host, orient=tk.VERTICAL, command=canvas.yview)
         inner = ttk.Frame(canvas)
         canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=scroll.set)
@@ -161,11 +190,30 @@ class RowEditorDialog(tk.Toplevel):
                 self._img_editor.pack(fill=tk.X)
                 continue
 
-            if col in MULTILINE_LINES_FIELDS or (self._is_base_editor and col == "tip"):
+            if col in MULTILINE_LINES_FIELDS or (self._is_base_editor and col == "tip") or (
+                self._is_ko_line_editor and col == "text"
+            ):
                 from extra.table_editor.ui.multiline_lines_editor import MultilineLinesEditor
 
-                editor = MultilineLinesEditor(inner, label=col, initial_value=value)
-                editor.pack(fill=tk.X, padx=12, pady=4)
+                label = "text" if (self._is_ko_line_editor and col == "text") else col
+                hint = (
+                    "한 줄 = TTS 1큐. + 로 줄 추가, − 로 제거 (저장 시 \\n 연결)"
+                    if self._is_ko_line_editor and col == "text"
+                    else ""
+                )
+                editor = MultilineLinesEditor(
+                    inner,
+                    label=label,
+                    initial_value=value,
+                    label_on_top=self._is_ko_line_editor and col == "text",
+                    hint=hint,
+                )
+                editor.pack(
+                    fill=tk.BOTH if (self._is_ko_line_editor and col == "text") else tk.X,
+                    expand=bool(self._is_ko_line_editor and col == "text"),
+                    padx=12,
+                    pady=4,
+                )
                 self._widgets[col] = editor
                 continue
 
@@ -223,7 +271,23 @@ class RowEditorDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._cancel())
         self.bind("<Control-Return>", lambda _e: self._save())
         self.after_idle(_on_inner_configure)
-        self.after_idle(lambda: center_toplevel_on_parent(self, parent))
+        win_w, win_h = parse_window_geometry_size(self.geometry())
+        schedule_center_toplevel_on_parent(
+            self,
+            parent,
+            width=win_w or None,
+            height=win_h or None,
+        )
+
+    def _pick_word_for_sub_slot(self, word_id: str) -> None:
+        if self._sub_slots_editor is None:
+            return
+        if not self._sub_slots_editor.apply_word_id(word_id):
+            messagebox.showwarning(
+                "단어 검색",
+                "치환 슬롯이 없습니다.",
+                parent=self,
+            )
 
     def _add_media_path_autofill_bar(self, parent: ttk.Frame, *, mode: str) -> None:
         bar = ttk.Frame(parent)

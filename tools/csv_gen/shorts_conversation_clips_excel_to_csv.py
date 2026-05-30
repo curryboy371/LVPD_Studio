@@ -23,6 +23,7 @@ FIELDNAMES = [
     "ko_narration_id",
     "ko_narration_line_id",
     "sub_sentence_id",
+    "sound_repeat_count",
     "last_hold_sec",
     "bg_path",
 ]
@@ -138,6 +139,7 @@ def shorts_conversation_clips_excel_to_csv(
             "ko_narration_id": _to_int(row.get("ko_narration_id"), 0),
             "ko_narration_line_id": ko_narration_line_id,
             "sub_sentence_id": sub_sentence_id,
+            "sound_repeat_count": _normalize(row.get("sound_repeat_count")) or "1",
             "last_hold_sec": _normalize(row.get("last_hold_sec")),
             "bg_path": _normalize(row.get("bg_path")),
         })

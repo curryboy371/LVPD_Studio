@@ -251,6 +251,7 @@ class ShortsConversationClipsPanel(ttk.Frame):
         new_id = allocate_next_row_id(self._all_rows)
         defaults: dict[str, str] = {c: "" for c in SHORTS_CONVERSATION_CLIPS_FIELDNAMES}
         defaults["id"] = new_id
+        defaults["sound_repeat_count"] = "1"
         topic = self._topic_var.get()
         if topic and topic != TOPIC_FILTER_ALL:
             defaults["topic"] = topic

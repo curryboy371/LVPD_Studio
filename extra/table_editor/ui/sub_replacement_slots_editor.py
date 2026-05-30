@@ -50,6 +50,7 @@ class SubReplacementSlotsEditor(ttk.Frame):
         self._slot_entries: list[ttk.Entry] = []
         self._id_entries: list[ttk.Entry] = []
         self._main_radios: list[ttk.Radiobutton] = []
+        self._focused_id_index = 0
         self._main_pair_index_var = tk.IntVar(
             value=index_for_main_slot(self._pairs, self._initial_main_slot)
         )
@@ -141,6 +142,7 @@ class SubReplacementSlotsEditor(ttk.Frame):
         if pair.alt_word_id:
             id_e.insert(0, pair.alt_word_id)
         id_e.bind("<KeyRelease>", lambda _e: self._sync_from_ui())
+        id_e.bind("<FocusIn>", lambda _e, i=index: self._set_focused_id_index(i))
 
         main_rb = ttk.Radiobutton(
             row,
@@ -188,6 +190,24 @@ class SubReplacementSlotsEditor(ttk.Frame):
         if not slot or not wid or wid == "0":
             fallback = index_for_main_slot(self._read_pairs_from_ui(), "")
             self._main_pair_index_var.set(fallback)
+
+    def _set_focused_id_index(self, index: int) -> None:
+        if 0 <= index < len(self._id_entries):
+            self._focused_id_index = index
+
+    def apply_word_id(self, word_id: str) -> bool:
+        """현재 포커스된 word id 입력란에 id를 넣는다."""
+        if not self._id_entries:
+            return False
+        idx = self._focused_id_index
+        if idx < 0 or idx >= len(self._id_entries):
+            idx = 0
+        entry = self._id_entries[idx]
+        entry.delete(0, tk.END)
+        entry.insert(0, (word_id or "").strip())
+        entry.focus_set()
+        self._sync_from_ui()
+        return True
 
     def _pair_from_row(self, index: int) -> ReplacementPair:
         slot_e = self._slot_entries[index]

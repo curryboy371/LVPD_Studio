@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from core.paths import get_repo_root
+from core.paths import STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN, get_repo_root
 from studio.conversation.bg_audio import (
     ConversationBackgroundPlayer,
     load_background_sound_file,
@@ -20,6 +20,7 @@ class ShortsBackgroundPlayer(ConversationBackgroundPlayer):
     """숏츠 전용: 랜덤·폴백은 bg_short, bg_path 지정 시 해당 파일."""
 
     def __init__(self, **kwargs) -> None:
+        kwargs.setdefault("volume", STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN)
         super().__init__(**kwargs)
         self._sounds = []
         self._last_index = None

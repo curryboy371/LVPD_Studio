@@ -108,7 +108,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo [완료] release\ 폴더의 SHORTS_REC*.mp4 를 확인하세요.
+echo [완료] release\ 폴더의 여포판다_*.mp4 를 확인하세요.
 pause
 exit /b 0
 
