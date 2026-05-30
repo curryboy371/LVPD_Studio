@@ -1,6 +1,7 @@
-"""메인 모드 — CSV/TTS/에셋/미리보기 빠른 실행."""
+"""메인 모드 — CSV/TTS/에셋/미리보기/녹화 빠른 실행."""
 from __future__ import annotations
 
+import os
 import re
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
@@ -10,12 +11,21 @@ from core.paths import get_repo_root
 from extra.table_editor.services.task_runner import TaskRunner
 from extra.table_editor.services.topic_sources import (
     topics_for_conversation_preview,
+    topics_for_shorts_conversation_preview,
+    topics_for_shorts_vocabulary_preview,
     topics_for_vocabulary_preview,
 )
-from extra.table_editor.ui.topic_select_dialog import TopicSelectDialog
+from extra.table_editor.ui.studio_run_dialog import StudioRunDialog
 from extra.table_editor.ui.tts_generate_dialog import TtsGenerateDialog
 
 _NUMERIC = re.compile(r"^\d+$")
+
+_RECORD_MAX_SEC: dict[tuple[str, str], int] = {
+    ("conversation", ""): 900,
+    ("vocabulary", ""): 1800,
+    ("shorts", "conversation"): 900,
+    ("shorts", "vocabulary"): 900,
+}
 
 
 class MainPanel(ttk.Frame):
@@ -67,7 +77,7 @@ class MainPanel(ttk.Frame):
         )
         ttk.Label(
             top,
-            text="TTS·F5 등에 사용",
+            text="TTS·스튜디오 실행에 사용",
             foreground="#666",
         ).pack(side=tk.LEFT, padx=(8, 0))
 
@@ -89,18 +99,19 @@ class MainPanel(ttk.Frame):
             ("비디오 → MP3 추출", self._run_video_to_mp3),
             ("한자 프레임 생성", self._run_hanzi_frames),
         ])
-        self._section(left, "화면 미리보기 (F5 debug)", [
-            ("회화", lambda: self._run_f5("conversation")),
-            ("단어장", lambda: self._run_f5("vocabulary")),
-            ("숏츠 회화", lambda: self._run_f5("shorts", "conversation")),
-            ("숏츠 단어", lambda: self._run_f5("shorts", "vocabulary")),
+        self._section(left, "스튜디오 (미리보기 / 녹화)", [
+            ("회화", lambda: self._run_studio_menu("conversation")),
+            ("단어장", lambda: self._run_studio_menu("vocabulary")),
+            ("숏츠 회화", lambda: self._run_studio_menu("shorts", "conversation")),
+            ("숏츠 단어", lambda: self._run_studio_menu("shorts", "vocabulary")),
+            ("녹화 파일 경로 열기", self._open_release_folder),
         ])
 
         log_frame = ttk.LabelFrame(body, text="실행 로그")
         log_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._log = scrolledtext.ScrolledText(
             log_frame,
-            height=24,
+            height=30,
             wrap=tk.WORD,
             state=tk.DISABLED,
             font=("Consolas", 9),
@@ -109,8 +120,8 @@ class MainPanel(ttk.Frame):
 
         hint = ttk.Label(
             self,
-            text="lvpd.bat 메뉴 1·2·4·5·6~9 와 동일한 작업을 GUI에서 실행합니다. "
-            "긴 작업은 로그 창에서 진행을 확인하세요.",
+            text="lvpd.bat 메뉴 1·2·3·4·5·6~9 와 동일한 작업을 GUI에서 실행합니다. "
+            "녹화 mp4는 release\\ 폴더에 저장됩니다. 긴 작업은 로그 창에서 진행을 확인하세요.",
             foreground="#555",
             wraplength=960,
         )
@@ -249,27 +260,80 @@ class MainPanel(ttk.Frame):
                 title = f"숏츠 단어 TTS topic {raw}"
             self._run_task(argv, title=title)
 
-    def _run_f5(self, studio: str, shorts_type: str = "") -> None:
-        topic: str | None
-        if studio == "conversation":
-            topic = self._pick_preview_topic(
-                title="회화 미리보기",
-                prompt="base_sentences.topic 을 선택하세요.",
-                topics=topics_for_conversation_preview(),
-            )
-        elif studio == "vocabulary":
-            topic = self._pick_preview_topic(
-                title="단어장 미리보기",
-                prompt="vocabulary_word_rows.topic 을 선택하세요.",
-                topics=topics_for_vocabulary_preview(),
-            )
-        else:
-            topic = self._arg() or None
-
-        if topic is None:
+    def _run_studio_menu(self, studio: str, shorts_type: str = "") -> None:
+        meta = self._studio_run_meta(studio, shorts_type)
+        if meta is None:
             return
+        label, prompt, topics = meta
+        if not topics:
+            messagebox.showwarning(
+                label,
+                "topic 목록이 없습니다.\n"
+                "resource/csv 의 CSV를 확인하거나 CSV 전체 생성을 실행하세요.",
+                parent=self.winfo_toplevel(),
+            )
+            return
+        picked = StudioRunDialog.ask(
+            self.winfo_toplevel(),
+            title=label,
+            prompt=prompt,
+            topics=topics,
+            initial=self._arg(),
+        )
+        if not picked:
+            return
+        mode, topic = picked
+        self._arg_var.set(topic)
+        self._dispatch_studio(mode, studio, shorts_type, topic)
 
-        argv = ["-u", "-m", "studio.runner", "--mode", "debug"]
+    def _studio_run_meta(
+        self,
+        studio: str,
+        shorts_type: str = "",
+    ) -> tuple[str, str, list[str]] | None:
+        if studio == "conversation":
+            return (
+                "회화",
+                "base_sentences.topic 을 선택한 뒤 미리보기 또는 녹화를 고르세요.",
+                topics_for_conversation_preview(),
+            )
+        if studio == "vocabulary":
+            return (
+                "단어장",
+                "vocabulary_word_rows.topic 을 선택한 뒤 미리보기 또는 녹화를 고르세요.",
+                topics_for_vocabulary_preview(),
+            )
+        if studio == "shorts" and shorts_type == "conversation":
+            return (
+                "숏츠 회화",
+                "shorts_conversation_clips.topic 을 선택한 뒤 미리보기 또는 녹화를 고르세요.",
+                topics_for_shorts_conversation_preview(),
+            )
+        if studio == "shorts" and shorts_type == "vocabulary":
+            return (
+                "숏츠 단어",
+                "shorts_vocabulary_clips.topic 을 선택한 뒤 미리보기 또는 녹화를 고르세요.",
+                topics_for_shorts_vocabulary_preview(),
+            )
+        return None
+
+    def _dispatch_studio(
+        self,
+        mode: str,
+        studio: str,
+        shorts_type: str,
+        topic: str,
+    ) -> None:
+        argv = ["-u", "-m", "studio.runner", "--mode", mode]
+        if mode == "record":
+            max_sec = _RECORD_MAX_SEC.get((studio, shorts_type), 900)
+            argv.extend(
+                [
+                    "--record-until-content-done",
+                    "--record-max-sec",
+                    str(max_sec),
+                ]
+            )
         if studio == "shorts":
             argv.extend(["--studio", "shorts", "--shorts-type", shorts_type])
             label = f"숏츠 {'회화' if shorts_type == 'conversation' else '단어'}"
@@ -277,32 +341,20 @@ class MainPanel(ttk.Frame):
             argv.extend(["--studio", studio])
             label = "회화" if studio == "conversation" else "단어장"
         argv.extend(["--topic", topic])
-        title = f"F5 {label} ({topic})"
+        prefix = "녹화" if mode == "record" else "F5"
+        title = f"{prefix} {label} ({topic})"
         self._run_task(argv, title=title)
 
-    def _pick_preview_topic(
-        self,
-        *,
-        title: str,
-        prompt: str,
-        topics: list[str],
-    ) -> str | None:
-        initial = self._arg()
-        if not topics:
-            messagebox.showwarning(
-                title,
-                "topic 목록이 없습니다.\n"
-                "resource/csv 의 CSV를 확인하거나 CSV 전체 생성을 실행하세요.",
+    def _open_release_folder(self) -> None:
+        release = get_repo_root() / "release"
+        release.mkdir(exist_ok=True)
+        try:
+            os.startfile(str(release))
+        except OSError as ex:
+            messagebox.showerror(
+                "녹화 파일 경로",
+                f"폴더를 열 수 없습니다:\n{release}\n\n{ex}",
                 parent=self.winfo_toplevel(),
             )
-            return None
-        selected = TopicSelectDialog.ask(
-            self.winfo_toplevel(),
-            title=title,
-            prompt=prompt,
-            topics=topics,
-            initial=initial,
-        )
-        if selected:
-            self._arg_var.set(selected)
-        return selected
+            return
+        self._on_status(f"녹화 폴더: {release}")

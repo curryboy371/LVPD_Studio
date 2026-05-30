@@ -19,10 +19,12 @@ from extra.table_editor.data.fields import (
     KO_NARRATION_SETS_FIELDNAMES,
 )
 from extra.table_editor.data.workbook import ExcelWorkbookStore, normalize_id_display
+from extra.table_editor.services.global_table_cache import invalidate_global_table_cache
 from extra.table_editor.services.csv_export import (
     export_ko_narration_lines_csv,
     export_ko_narration_sets_csv,
 )
+from extra.table_editor.services.post_save_csv import export_csv_paths
 from extra.table_editor.services.search import (
     allocate_next_ko_line_id,
     allocate_next_ko_line_seq,
@@ -246,6 +248,7 @@ class TtsPanel(ttk.Frame):
         try:
             self._sets_store.save()
             self._on_child_dirty()
+            invalidate_global_table_cache(ko_sets=True)
             return True
         except OSError as ex:
             messagebox.showerror("sets 저장 실패", str(ex), parent=self)
@@ -264,16 +267,55 @@ class TtsPanel(ttk.Frame):
         try:
             self._lines_store.save()
             self._on_child_dirty()
+            invalidate_global_table_cache(ko_lines=True)
             return True
         except OSError as ex:
             messagebox.showerror("lines 저장 실패", str(ex), parent=self)
             return False
+
+    def _write_csv_paths(self) -> list[str]:
+        if self._sets_store.path is None or self._lines_store.path is None:
+            raise ValueError("sets·lines Excel 경로가 필요합니다.")
+        sets_out = export_ko_narration_sets_csv(
+            self._sets_store.path, DEFAULT_KO_NARRATION_SETS_CSV
+        )
+        lines_out = export_ko_narration_lines_csv(
+            self._lines_store.path, DEFAULT_KO_NARRATION_LINES_CSV
+        )
+        return [sets_out, lines_out]
+
+    def _export_csv(self, *, show_dialog: bool) -> bool:
+        if self._sets_store.path is None:
+            if show_dialog:
+                messagebox.showinfo(
+                    "TTS CSV",
+                    "ko_narration_sets 파일을 먼저 열거나 저장하세요.",
+                    parent=self,
+                )
+            return False
+        if self._lines_store.path is None:
+            if show_dialog:
+                messagebox.showinfo(
+                    "TTS CSV",
+                    "ko_narration_lines 파일을 먼저 열거나 저장하세요.",
+                    parent=self,
+                )
+            return False
+        return export_csv_paths(
+            self,
+            self._on_status,
+            self._write_csv_paths,
+            show_dialog=show_dialog,
+            dialog_title="TTS CSV",
+            status_prefix="저장·CSV" if not show_dialog else "CSV",
+        )
 
     def save(self) -> bool:
         ok_sets = self._save_sets()
         ok_lines = self._save_lines()
         if ok_sets and ok_lines:
             self._on_status("sets·lines 저장 완료")
+            self._export_csv(show_dialog=False)
         return ok_sets and ok_lines
 
     def _save_sets_as(self) -> bool:
@@ -290,6 +332,7 @@ class TtsPanel(ttk.Frame):
         try:
             self._sets_store.save(path)
             self._on_child_dirty()
+            invalidate_global_table_cache(ko_sets=True)
             return True
         except OSError as ex:
             messagebox.showerror("sets 저장 실패", str(ex), parent=self)
@@ -309,6 +352,7 @@ class TtsPanel(ttk.Frame):
         try:
             self._lines_store.save(path)
             self._on_child_dirty()
+            invalidate_global_table_cache(ko_lines=True)
             return True
         except OSError as ex:
             messagebox.showerror("lines 저장 실패", str(ex), parent=self)
@@ -319,6 +363,7 @@ class TtsPanel(ttk.Frame):
         ok_lines = self._save_lines_as()
         if ok_sets and ok_lines:
             self._on_status("sets·lines 다른 이름으로 저장 완료")
+            self._export_csv(show_dialog=False)
         return ok_sets and ok_lines
 
     def export_current_csv(self) -> None:
@@ -335,35 +380,8 @@ class TtsPanel(ttk.Frame):
                 return
             if not self.save():
                 return
-        if self._sets_store.path is None:
-            messagebox.showinfo(
-                "TTS CSV",
-                "ko_narration_sets 파일을 먼저 열거나 저장하세요.",
-                parent=self,
-            )
             return
-        if self._lines_store.path is None:
-            messagebox.showinfo(
-                "TTS CSV",
-                "ko_narration_lines 파일을 먼저 열거나 저장하세요.",
-                parent=self,
-            )
-            return
-        try:
-            sets_out = export_ko_narration_sets_csv(
-                self._sets_store.path, DEFAULT_KO_NARRATION_SETS_CSV
-            )
-            lines_out = export_ko_narration_lines_csv(
-                self._lines_store.path, DEFAULT_KO_NARRATION_LINES_CSV
-            )
-            messagebox.showinfo(
-                "TTS CSV",
-                f"생성 완료:\n{sets_out}\n{lines_out}",
-                parent=self,
-            )
-            self._on_status("TTS CSV 생성 완료")
-        except Exception as ex:
-            messagebox.showerror("CSV 실패", str(ex), parent=self)
+        self._export_csv(show_dialog=True)
 
     def _set_title_for(self, set_id: str) -> str:
         row = find_row_by_id(self._all_set_rows, set_id)

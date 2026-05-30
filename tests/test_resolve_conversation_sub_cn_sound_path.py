@@ -8,7 +8,7 @@ def test_resolve_stem_under_sentense_dir():
     assert resolved is not None
     assert resolved.is_file()
     assert resolved.parent == get_repo_root() / "resource" / "sound" / "sentense"
-    assert resolved.name == "你好,请给我一个叉子.mp3"
+    assert resolved.name == "你好请给我一个叉子.mp3"
 
 
 def test_resolve_full_repo_relative_path():

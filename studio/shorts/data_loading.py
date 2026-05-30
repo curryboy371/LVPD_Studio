@@ -38,8 +38,21 @@ def _resolve_path(repo: Path, raw: str) -> str:
     if not p:
         return ""
     if os.path.isabs(p):
-        return p
-    return str(repo / p.replace("\\", "/"))
+        abs_path = p
+    else:
+        abs_path = str(repo / p.replace("\\", "/"))
+    if os.path.isfile(abs_path):
+        return abs_path
+    from core.paths import resolve_repo_media_path, resolve_repo_video_path
+
+    lower = abs_path.lower()
+    if lower.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi")):
+        resolved = resolve_repo_video_path(p, repo_root=repo)
+    else:
+        resolved = resolve_repo_media_path(p, repo_root=repo)
+        if resolved is None:
+            resolved = resolve_repo_media_path(abs_path, repo_root=repo)
+    return str(resolved) if resolved is not None else abs_path
 
 
 def _resolve_conversation_video_path(
@@ -70,7 +83,7 @@ def _resolve_conversation_video_path(
 
 
 def _resolve_bg_audio_path(repo: Path, row: dict[str, str]) -> str:
-    """shorts_vocabulary_clips.bg_path — 비우거나 파일 없으면 빈 문자열(랜덤 bg)."""
+    """shorts clips.bg_path — 비우거나 파일 없으면 빈 문자열(bg_short 랜덤)."""
     path = _resolve_path(repo, row.get("bg_path") or "")
     if not path:
         return ""

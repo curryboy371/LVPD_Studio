@@ -323,6 +323,8 @@ def run(
     """
     if mode == "record":
         os.environ["SDL_VIDEODRIVER"] = "dummy"
+    elif mode == "debug":
+        os.environ["SDL_VIDEO_CENTERED"] = "1"
     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 
     import pygame

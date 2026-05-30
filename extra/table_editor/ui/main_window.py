@@ -11,24 +11,40 @@ from extra.table_editor.ui.main_panel import MainPanel
 
 if TYPE_CHECKING:
     from extra.table_editor.ui.conversation_panel import ConversationPanel
+    from extra.table_editor.ui.shorts_conversation_clips_panel import (
+        ShortsConversationClipsPanel,
+    )
+    from extra.table_editor.ui.shorts_vocabulary_clips_panel import (
+        ShortsVocabularyClipsPanel,
+    )
     from extra.table_editor.ui.tts_panel import TtsPanel
     from extra.table_editor.ui.vocabulary_panel import VocabularyPanel
     from extra.table_editor.ui.vocabulary_word_rows_panel import VocabularyWordRowsPanel
 
-Mode = Literal["main", "conversation", "vocabulary", "vocab_rows", "tts"]
+Mode = Literal[
+    "main",
+    "conversation",
+    "vocabulary",
+    "vocab_rows",
+    "shorts_conv",
+    "shorts_vocab",
+    "tts",
+]
 
 
 class MainWindow(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1100x700")
-        self.minsize(800, 500)
-        self._main_geometry = "1100x780"
-        self._vocab_geometry = "1100x700"
-        self._vocab_rows_geometry = "1100x700"
-        self._conv_geometry = "1100x920"
-        self._tts_geometry = "1100x860"
+        self.geometry("1100x800")
+        self.minsize(800, 600)
+        self._main_geometry = "1100x880"
+        self._vocab_geometry = "1100x800"
+        self._vocab_rows_geometry = "1100x800"
+        self._shorts_conv_geometry = "1100x800"
+        self._shorts_vocab_geometry = "1100x800"
+        self._conv_geometry = "1100x1020"
+        self._tts_geometry = "1100x960"
 
         bind_clipboard_on_class(self)
 
@@ -45,6 +61,8 @@ class MainWindow(tk.Tk):
         self._ui_ready = False
         self._vocab: VocabularyPanel | None = None
         self._vocab_rows: VocabularyWordRowsPanel | None = None
+        self._shorts_conv: ShortsConversationClipsPanel | None = None
+        self._shorts_vocab: ShortsVocabularyClipsPanel | None = None
         self._conv: ConversationPanel | None = None
         self._tts: TtsPanel | None = None
         self._panel_defaults_loaded: set[Mode] = set()
@@ -84,6 +102,32 @@ class MainWindow(tk.Tk):
             )
         return self._vocab_rows
 
+    def _ensure_shorts_conv(self) -> "ShortsConversationClipsPanel":
+        if self._shorts_conv is None:
+            from extra.table_editor.ui.shorts_conversation_clips_panel import (
+                ShortsConversationClipsPanel,
+            )
+
+            self._shorts_conv = ShortsConversationClipsPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._shorts_conv
+
+    def _ensure_shorts_vocab(self) -> "ShortsVocabularyClipsPanel":
+        if self._shorts_vocab is None:
+            from extra.table_editor.ui.shorts_vocabulary_clips_panel import (
+                ShortsVocabularyClipsPanel,
+            )
+
+            self._shorts_vocab = ShortsVocabularyClipsPanel(
+                self._content,
+                on_status=self._set_status,
+                on_dirty_change=self._on_panel_dirty,
+            )
+        return self._shorts_vocab
+
     def _ensure_conv(self) -> "ConversationPanel":
         if self._conv is None:
             from extra.table_editor.ui.conversation_panel import ConversationPanel
@@ -115,6 +159,16 @@ class MainWindow(tk.Tk):
             label, loader = (
                 "단어장 행",
                 self._ensure_vocab_rows().load_defaults,
+            )
+        elif mode == "shorts_conv":
+            label, loader = (
+                "숏츠 회화 클립",
+                self._ensure_shorts_conv().load_defaults,
+            )
+        elif mode == "shorts_vocab":
+            label, loader = (
+                "숏츠 단어 클립",
+                self._ensure_shorts_vocab().load_defaults,
             )
         elif mode == "conversation":
             label, loader = "회화", self._ensure_conv().load_defaults
@@ -158,45 +212,58 @@ class MainWindow(tk.Tk):
     def _build_mode_selector(self) -> None:
         frame = ttk.LabelFrame(self, text="모드")
         frame.pack(fill=tk.X, padx=8, pady=4)
-        ttk.Radiobutton(
-            frame,
-            text="메인 (빠른 작업)",
-            variable=self._mode,
-            value="main",
-            command=lambda: self._switch_mode("main"),
-        ).pack(side=tk.LEFT, padx=12, pady=4)
-        ttk.Radiobutton(
-            frame,
-            text="단어장 (words.xlsx)",
-            variable=self._mode,
-            value="vocabulary",
-            command=lambda: self._switch_mode("vocabulary"),
-        ).pack(side=tk.LEFT, padx=12, pady=4)
-        ttk.Radiobutton(
-            frame,
-            text="단어장 행 (vocabulary_word_rows.xlsx)",
-            variable=self._mode,
-            value="vocab_rows",
-            command=lambda: self._switch_mode("vocab_rows"),
-        ).pack(side=tk.LEFT, padx=12, pady=4)
-        ttk.Radiobutton(
-            frame,
-            text="회화모드 (base / sub)",
-            variable=self._mode,
-            value="conversation",
-            command=lambda: self._switch_mode("conversation"),
-        ).pack(side=tk.LEFT, padx=12, pady=4)
-        ttk.Radiobutton(
-            frame,
-            text="TTS (ko_narration sets / lines)",
-            variable=self._mode,
-            value="tts",
-            command=lambda: self._switch_mode("tts"),
-        ).pack(side=tk.LEFT, padx=12, pady=4)
+        row1 = ttk.Frame(frame)
+        row1.pack(fill=tk.X)
+        row2 = ttk.Frame(frame)
+        row2.pack(fill=tk.X)
+        row3 = ttk.Frame(frame)
+        row3.pack(fill=tk.X)
+
+        modes_row1 = [
+            ("메인 (빠른 작업)", "main"),
+            ("단어장 (words.xlsx)", "vocabulary"),
+            ("단어장 행 (vocabulary_word_rows.xlsx)", "vocab_rows"),
+            ("회화모드 (base / sub)", "conversation"),
+        ]
+        modes_row2 = [
+            ("숏츠 회화 (shorts_conversation_clips.xlsx)", "shorts_conv"),
+            ("숏츠 단어 (shorts_vocabulary_clips.xlsx)", "shorts_vocab"),
+        ]
+        modes_row3 = [
+            ("TTS (ko_narration sets / lines)", "tts"),
+        ]
+        for text, value in modes_row1:
+            ttk.Radiobutton(
+                row1,
+                text=text,
+                variable=self._mode,
+                value=value,
+                command=lambda v=value: self._switch_mode(v),  # type: ignore[arg-type]
+            ).pack(side=tk.LEFT, padx=12, pady=4)
+        for text, value in modes_row2:
+            ttk.Radiobutton(
+                row2,
+                text=text,
+                variable=self._mode,
+                value=value,
+                command=lambda v=value: self._switch_mode(v),  # type: ignore[arg-type]
+            ).pack(side=tk.LEFT, padx=12, pady=4)
+        for text, value in modes_row3:
+            ttk.Radiobutton(
+                row3,
+                text=text,
+                variable=self._mode,
+                value=value,
+                command=lambda v=value: self._switch_mode(v),  # type: ignore[arg-type]
+            ).pack(side=tk.LEFT, padx=12, pady=4)
 
     def _active_panel(
         self,
-    ) -> "MainPanel | VocabularyPanel | VocabularyWordRowsPanel | ConversationPanel | TtsPanel":
+    ) -> (
+        "MainPanel | VocabularyPanel | VocabularyWordRowsPanel | "
+        "ShortsConversationClipsPanel | ShortsVocabularyClipsPanel | "
+        "ConversationPanel | TtsPanel"
+    ):
         if not getattr(self, "_ui_ready", False):
             return self._main
         mode = self._mode.get()
@@ -208,6 +275,10 @@ class MainWindow(tk.Tk):
             return self._ensure_tts()
         if mode == "vocab_rows":
             return self._ensure_vocab_rows()
+        if mode == "shorts_conv":
+            return self._ensure_shorts_conv()
+        if mode == "shorts_vocab":
+            return self._ensure_shorts_vocab()
         return self._ensure_vocab()
 
     def _persist_visible_edits(self) -> None:
@@ -217,6 +288,10 @@ class MainWindow(tk.Tk):
             self._vocab._flush_current_sheet()
         if self._vocab_rows is not None and self._vocab_rows.winfo_ismapped():
             self._vocab_rows._flush_rows()
+        if self._shorts_conv is not None and self._shorts_conv.winfo_ismapped():
+            self._shorts_conv._flush_rows()
+        if self._shorts_vocab is not None and self._shorts_vocab.winfo_ismapped():
+            self._shorts_vocab._flush_rows()
         if self._conv is not None and self._conv.winfo_ismapped():
             self._conv.flush_all()
         if self._tts is not None and self._tts.winfo_ismapped():
@@ -247,6 +322,10 @@ class MainWindow(tk.Tk):
             self._vocab.pack_forget()
         if self._vocab_rows is not None:
             self._vocab_rows.pack_forget()
+        if self._shorts_conv is not None:
+            self._shorts_conv.pack_forget()
+        if self._shorts_vocab is not None:
+            self._shorts_vocab.pack_forget()
         if self._conv is not None:
             self._conv.pack_forget()
         if self._tts is not None:
@@ -256,24 +335,32 @@ class MainWindow(tk.Tk):
         if mode == "main":
             self._main.pack(fill=tk.BOTH, expand=True)
             self.geometry(self._main_geometry)
-            self.minsize(900, 560)
+            self.minsize(900, 660)
         elif mode == "conversation":
             self._ensure_conv().pack(fill=tk.BOTH, expand=True)
             self._export_all_btn.pack(side=tk.LEFT, padx=2)
             self.geometry(self._conv_geometry)
-            self.minsize(800, 720)
+            self.minsize(800, 820)
         elif mode == "tts":
             self._ensure_tts().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._tts_geometry)
-            self.minsize(800, 680)
+            self.minsize(800, 780)
         elif mode == "vocab_rows":
             self._ensure_vocab_rows().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._vocab_rows_geometry)
-            self.minsize(800, 500)
+            self.minsize(800, 600)
+        elif mode == "shorts_conv":
+            self._ensure_shorts_conv().pack(fill=tk.BOTH, expand=True)
+            self.geometry(self._shorts_conv_geometry)
+            self.minsize(800, 600)
+        elif mode == "shorts_vocab":
+            self._ensure_shorts_vocab().pack(fill=tk.BOTH, expand=True)
+            self.geometry(self._shorts_vocab_geometry)
+            self.minsize(800, 600)
         else:
             self._ensure_vocab().pack(fill=tk.BOTH, expand=True)
             self.geometry(self._vocab_geometry)
-            self.minsize(800, 500)
+            self.minsize(800, 600)
         if mode != "main":
             self.after(1, lambda m=mode: self._ensure_panel_defaults(m))
         self._update_path_label()
@@ -287,6 +374,10 @@ class MainWindow(tk.Tk):
             current = "tts"
         elif self._vocab_rows is not None and self._vocab_rows.winfo_ismapped():
             current = "vocab_rows"
+        elif self._shorts_conv is not None and self._shorts_conv.winfo_ismapped():
+            current = "shorts_conv"
+        elif self._shorts_vocab is not None and self._shorts_vocab.winfo_ismapped():
+            current = "shorts_vocab"
         else:
             current = "vocabulary"
         if mode == current:
@@ -313,6 +404,26 @@ class MainWindow(tk.Tk):
             return messagebox.askyesno(
                 "저장 확인",
                 "단어장 행에 저장되지 않은 변경이 있습니다. 계속할까요?",
+                parent=self,
+            )
+        if (
+            leaving == "shorts_conv"
+            and self._shorts_conv is not None
+            and self._shorts_conv.is_dirty
+        ):
+            return messagebox.askyesno(
+                "저장 확인",
+                "숏츠 회화 클립에 저장되지 않은 변경이 있습니다. 계속할까요?",
+                parent=self,
+            )
+        if (
+            leaving == "shorts_vocab"
+            and self._shorts_vocab is not None
+            and self._shorts_vocab.is_dirty
+        ):
+            return messagebox.askyesno(
+                "저장 확인",
+                "숏츠 단어 클립에 저장되지 않은 변경이 있습니다. 계속할까요?",
                 parent=self,
             )
         if leaving == "conversation" and self._conv is not None and self._conv.is_dirty:
@@ -347,6 +458,14 @@ class MainWindow(tk.Tk):
         elif mode == "vocab_rows" and self._vocab_rows is not None:
             p = self._vocab_rows.file_path
             dirty = self._vocab_rows.is_dirty
+            path_str = str(p) if p else "(파일 없음)"
+        elif mode == "shorts_conv" and self._shorts_conv is not None:
+            p = self._shorts_conv.file_path
+            dirty = self._shorts_conv.is_dirty
+            path_str = str(p) if p else "(파일 없음)"
+        elif mode == "shorts_vocab" and self._shorts_vocab is not None:
+            p = self._shorts_vocab.file_path
+            dirty = self._shorts_vocab.is_dirty
             path_str = str(p) if p else "(파일 없음)"
         elif mode == "tts" and self._tts is not None:
             dirty = self._tts.is_dirty
@@ -391,6 +510,10 @@ class MainWindow(tk.Tk):
             panel.export_csv()
         elif mode == "vocab_rows":
             panel.export_csv()
+        elif mode == "shorts_conv":
+            panel.export_csv()
+        elif mode == "shorts_vocab":
+            panel.export_csv()
         elif mode == "tts":
             panel.export_all_csv()
         else:
@@ -405,6 +528,8 @@ class MainWindow(tk.Tk):
         dirty = (
             (self._vocab is not None and self._vocab.is_dirty)
             or (self._vocab_rows is not None and self._vocab_rows.is_dirty)
+            or (self._shorts_conv is not None and self._shorts_conv.is_dirty)
+            or (self._shorts_vocab is not None and self._shorts_vocab.is_dirty)
             or (self._conv is not None and self._conv.is_dirty)
             or (self._tts is not None and self._tts.is_dirty)
         )

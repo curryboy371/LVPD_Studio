@@ -230,12 +230,23 @@ def build_sub_step_payload(
     sound_raw = str(variant.get("alt_sound_path") or "").strip()
     resolved = resolve_conversation_sub_cn_sound_path(sound_raw)
     sound_path = _resolve_path(repo, str(resolved) if resolved else sound_raw)
-    return {
+    payload: dict[str, Any] = {
         "sentence": [display] if display else [],
         "translation": [translation] if translation else [],
         "pinyin": pinyin,
         "sound_path": sound_path,
     }
+    for key in (
+        "main_word_id",
+        "main_word_img_path",
+        "main_word_hanzi",
+        "main_word_pinyin",
+        "main_word_meaning",
+    ):
+        val = variant.get(key)
+        if val:
+            payload[key] = val
+    return payload
 
 
 def _materialize_cn_steps(

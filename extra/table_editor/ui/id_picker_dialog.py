@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from extra.table_editor.ui.window_placement import center_toplevel_on_parent
+
 
 class IdPickerDialog(tk.Toplevel):
     def __init__(
@@ -52,6 +54,7 @@ class IdPickerDialog(tk.Toplevel):
 
         self.bind("<Return>", lambda _e: self._confirm())
         self.bind("<Escape>", lambda _e: self.destroy())
+        self.after_idle(lambda: center_toplevel_on_parent(self, parent))
 
     def _confirm(self) -> None:
         sel = self._listbox.curselection()

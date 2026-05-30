@@ -6,6 +6,12 @@ from pathlib import Path
 from tools.csv_gen.base_sentences_excel_to_csv import base_sentences_excel_to_csv
 from tools.csv_gen.ko_narration_lines_excel_to_csv import ko_narration_lines_excel_to_csv
 from tools.csv_gen.ko_narration_sets_excel_to_csv import ko_narration_sets_excel_to_csv
+from tools.csv_gen.shorts_conversation_clips_excel_to_csv import (
+    shorts_conversation_clips_excel_to_csv,
+)
+from tools.csv_gen.shorts_vocabulary_clips_excel_to_csv import (
+    shorts_vocabulary_clips_excel_to_csv,
+)
 from tools.csv_gen.sub_sentences_excel_to_csv import sub_sentences_excel_to_csv
 from tools.csv_gen.vocabulary_word_rows_excel_to_csv import (
     vocabulary_word_rows_excel_to_csv,
@@ -37,3 +43,11 @@ def export_ko_narration_sets_csv(excel_path: Path, csv_path: Path) -> str:
 
 def export_ko_narration_lines_csv(excel_path: Path, csv_path: Path) -> str:
     return ko_narration_lines_excel_to_csv(excel_path, csv_path)
+
+
+def export_shorts_conversation_clips_csv(excel_path: Path, csv_path: Path) -> str:
+    return shorts_conversation_clips_excel_to_csv(excel_path, csv_path)
+
+
+def export_shorts_vocabulary_clips_csv(excel_path: Path, csv_path: Path) -> str:
+    return shorts_vocabulary_clips_excel_to_csv(excel_path, csv_path)

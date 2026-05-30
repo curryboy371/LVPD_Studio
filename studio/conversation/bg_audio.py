@@ -17,9 +17,7 @@ _BG_CHANNEL_INDEX = 5
 _BG_FADE_MS = 1000
 
 
-def load_conversation_background_sounds() -> list[tuple[str, pygame.mixer.Sound]]:
-    """`resource/sound/bg` 아래 오디오 파일을 로드한다."""
-    bg_dir = get_repo_root() / "resource" / "sound" / "bg"
+def _load_background_sounds_from_dir(bg_dir: Path) -> list[tuple[str, pygame.mixer.Sound]]:
     if not bg_dir.is_dir():
         return []
     out: list[tuple[str, pygame.mixer.Sound]] = []
@@ -30,8 +28,20 @@ def load_conversation_background_sounds() -> list[tuple[str, pygame.mixer.Sound]
             _ensure_mixer()
             out.append((str(path.resolve()), pygame.mixer.Sound(str(path))))
         except Exception as ex:
-            logger.debug("회화 bg 로드 스킵 %s: %s", path, ex)
+            logger.debug("bg 로드 스킵 %s: %s", path, ex)
     return out
+
+
+def load_conversation_background_sounds() -> list[tuple[str, pygame.mixer.Sound]]:
+    """`resource/sound/bg` 아래 오디오 파일을 로드한다."""
+    return _load_background_sounds_from_dir(get_repo_root() / "resource" / "sound" / "bg")
+
+
+def load_shorts_background_sounds() -> list[tuple[str, pygame.mixer.Sound]]:
+    """`resource/sound/bg_short` 아래 오디오 파일을 로드한다."""
+    return _load_background_sounds_from_dir(
+        get_repo_root() / "resource" / "sound" / "bg_short"
+    )
 
 
 def load_background_sound_file(path: str) -> list[tuple[str, pygame.mixer.Sound]]:

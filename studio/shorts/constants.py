@@ -24,6 +24,13 @@ SHORTS_BRAND_ICON_W = 200
 SHORTS_BRAND_ICON_H = 120
 # 1080×1920 기준 하단 중앙 — 아이콘 하단 여백(해상도에 비례 스케일, 작을수록 아래)
 SHORTS_BRAND_ICON_BOTTOM_MARGIN = 50
+# 회화 conv: 영상 바로 아래 main_slot 단어 이미지·한자:뜻 (1080×1920 기준)
+SHORTS_CONV_MAIN_WORD_SCALE = 1.4
+SHORTS_CONV_MAIN_WORD_IMG_MAX = 160
+SHORTS_CONV_MAIN_WORD_BELOW_VIDEO_GAP = 12
+SHORTS_CONV_MAIN_WORD_LABEL_GAP = 10
+SHORTS_CONV_MAIN_WORD_HANZI_PINYIN_GAP = 10
+SHORTS_CONV_MAIN_WORD_LABEL_FONT_SIZE = 34
 SHORTS_BRAND_TITLE_TEXT = ""
 SHORTS_BRAND_TITLE_COLOR = (64, 64, 64)
 SHORTS_BRAND_TITLE_FONT_SIZE = 30
@@ -590,6 +597,8 @@ VOCAB_CN_LISTEN_HINT_COLOR = (46, 204, 113)
 VOCAB_CN_SPEAK_HINT_COLOR = (255, 159, 67)
 # 단어 모드: 연속 중국어 재생 사이 대기(초)
 SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC = 0.8
+# 회화 conv_script: 중국어 mp3 재생 사이·문장 간 TTS 시작 전 대기(초)
+SHORTS_CONV_CN_REPLAY_PAUSE_SEC = 0.7
 # 단어 모드: 중국어 발음 최소 재생 횟수(sound_repeat_count 와 큰 값 사용)
 SHORTS_VOCAB_CN_MIN_PLAY_COUNT = 2
 # 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
@@ -639,3 +648,35 @@ def shorts_ko_subtitle_font_size(frame_height: int) -> int:
     h = max(1, int(frame_height))
     sy = h / float(SHORTS_HEIGHT)
     return max(28, int(SHORTS_KO_SUBTITLE_FONT_SIZE * sy))
+
+
+def shorts_conv_main_word_img_max(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    scale = float(SHORTS_CONV_MAIN_WORD_SCALE)
+    return max(80, int(SHORTS_CONV_MAIN_WORD_IMG_MAX * sy * scale))
+
+
+def shorts_conv_main_word_below_video_gap(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(8, int(SHORTS_CONV_MAIN_WORD_BELOW_VIDEO_GAP * sy))
+
+
+def shorts_conv_main_word_label_gap(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(6, int(SHORTS_CONV_MAIN_WORD_LABEL_GAP * sy))
+
+
+def shorts_conv_main_word_hanzi_pinyin_gap(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(4, int(SHORTS_CONV_MAIN_WORD_HANZI_PINYIN_GAP * sy))
+
+
+def shorts_conv_main_word_label_font_size(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    scale = float(SHORTS_CONV_MAIN_WORD_SCALE)
+    return max(22, int(SHORTS_CONV_MAIN_WORD_LABEL_FONT_SIZE * sy * scale))

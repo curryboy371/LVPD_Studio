@@ -121,6 +121,88 @@ def conversation_sub_ko_mp3_path_legacy(sub_sentence_id: int) -> Path:
 
 
 _CONVERSATION_SUB_CN_AUDIO_EXTS = (".mp3", ".wav", ".ogg", ".flac", ".m4a")
+_VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
+
+def _try_media_file(path: Path) -> Path | None:
+    resolved = path.resolve()
+    return resolved if resolved.is_file() else None
+
+
+def _resolve_stem_in_dir(stem: str, base_dir: Path, exts: tuple[str, ...]) -> Path | None:
+    name = (stem or "").strip()
+    if not name:
+        return None
+    p = Path(name)
+    if p.suffix:
+        hit = _try_media_file(base_dir / p.name)
+        if hit is not None:
+            return hit
+    for ext in exts:
+        hit = _try_media_file(base_dir / f"{name}{ext}")
+        if hit is not None:
+            return hit
+    return None
+
+
+def _resolve_sanitized_stem_in_dir(stem: str, base_dir: Path, exts: tuple[str, ...]) -> Path | None:
+    from utils.media_stem import media_path_stem
+
+    clean = media_path_stem(stem)
+    if not clean or clean == Path(stem).stem:
+        return None
+    return _resolve_stem_in_dir(clean, base_dir, exts)
+
+
+def resolve_repo_media_path(
+    raw: str,
+    *,
+    repo_root: Path | None = None,
+    default_dir: Path | None = None,
+    exts: tuple[str, ...] = _CONVERSATION_SUB_CN_AUDIO_EXTS,
+) -> Path | None:
+    """repo 상대/절대/파일명 stem → 실제 미디어 파일. 매칭 시 stem 특수문자 제거 후 재시도."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    root = repo_root or _REPO_ROOT
+    normalized = value.replace("\\", "/")
+    p = Path(normalized)
+
+    if p.is_absolute():
+        hit = _try_media_file(p)
+        if hit is not None:
+            return hit
+        if p.suffix:
+            hit = _resolve_sanitized_stem_in_dir(p.stem, p.parent, (p.suffix,))
+            if hit is not None:
+                return hit
+        return None
+
+    if "/" in normalized:
+        hit = _try_media_file(root / normalized)
+        if hit is not None:
+            return hit
+        rel = Path(normalized)
+        if rel.suffix:
+            hit = _resolve_sanitized_stem_in_dir(rel.stem, root / rel.parent, (rel.suffix,))
+            if hit is not None:
+                return hit
+        elif default_dir is not None:
+            hit = _resolve_stem_in_dir(rel.name, default_dir, exts)
+            if hit is not None:
+                return hit
+            hit = _resolve_sanitized_stem_in_dir(rel.name, default_dir, exts)
+            if hit is not None:
+                return hit
+        return None
+
+    if default_dir is None:
+        return None
+    hit = _resolve_stem_in_dir(value, default_dir, exts)
+    if hit is not None:
+        return hit
+    return _resolve_sanitized_stem_in_dir(value, default_dir, exts)
 
 
 def resolve_conversation_sub_cn_sound_path(raw: str) -> Path | None:
@@ -129,24 +211,20 @@ def resolve_conversation_sub_cn_sound_path(raw: str) -> Path | None:
     - ``resource/sound/sentense/…`` 등 repo 상대 전체 경로
     - 절대 경로
     - 확장자 없는 파일명(또는 stem) → ``resource/sound/sentense/{name}.mp3`` 등 순서대로 탐색
+    - stem·파일명은 `,` `?` 공백 등 제거 후에도 재탐색
     """
-    value = (raw or "").strip()
-    if not value:
-        return None
-    normalized = value.replace("\\", "/")
-    p = Path(normalized)
-    if p.is_absolute():
-        resolved = p.resolve()
-        return resolved if resolved.is_file() else None
-    if "/" in normalized:
-        resolved = (_REPO_ROOT / normalized).resolve()
-        return resolved if resolved.is_file() else None
-    base_dir = CONVERSATION_SUB_KO_SOUND_DIR
-    if p.suffix:
-        candidate = (base_dir / p.name).resolve()
-        return candidate if candidate.is_file() else None
-    for ext in _CONVERSATION_SUB_CN_AUDIO_EXTS:
-        candidate = (base_dir / f"{value}{ext}").resolve()
-        if candidate.is_file():
-            return candidate
-    return None
+    return resolve_repo_media_path(
+        raw,
+        default_dir=CONVERSATION_SUB_KO_SOUND_DIR,
+        exts=_CONVERSATION_SUB_CN_AUDIO_EXTS,
+    )
+
+
+def resolve_repo_video_path(raw: str, *, repo_root: Path | None = None) -> Path | None:
+    """video_path·파일명 stem → 실제 비디오 파일 (stem 특수문자 제거 후 재탐색)."""
+    return resolve_repo_media_path(
+        raw,
+        repo_root=repo_root,
+        default_dir=(repo_root or _REPO_ROOT) / "resource" / "video",
+        exts=_VIDEO_EXTS,
+    )

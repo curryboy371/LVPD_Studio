@@ -18,6 +18,7 @@ from extra.table_editor.config import (
 from extra.table_editor.data.fields import BASE_FIELDNAMES, SUB_FIELDNAMES
 from extra.table_editor.data.workbook import ExcelWorkbookStore, normalize_id_display
 from extra.table_editor.services.csv_export import export_base_csv, export_sub_csv
+from extra.table_editor.services.post_save_csv import export_csv_paths
 from extra.table_editor.services.raw_sentence_slots import raw_to_display
 from extra.table_editor.services.search import (
     allocate_next_sub_row_id,
@@ -31,6 +32,7 @@ from extra.table_editor.services.search import (
     sub_row_id_exists,
     unique_topic_values,
 )
+from extra.table_editor.services.global_table_cache import invalidate_global_table_cache
 from extra.table_editor.services.sub_sentence_preview_cache import SubSentencePreviewCache
 from extra.table_editor.ui.row_editor_dialog import RowEditorDialog
 from extra.table_editor.ui.table_panel import TablePanel
@@ -243,6 +245,7 @@ class ConversationPanel(ttk.Frame):
         try:
             self._base_store.save()
             self._on_child_dirty()
+            invalidate_global_table_cache(base=True)
             return True
         except OSError as ex:
             messagebox.showerror("base 저장 실패", str(ex), parent=self)
@@ -261,16 +264,47 @@ class ConversationPanel(ttk.Frame):
         try:
             self._sub_store.save()
             self._on_child_dirty()
+            invalidate_global_table_cache(sub=True)
             return True
         except OSError as ex:
             messagebox.showerror("sub 저장 실패", str(ex), parent=self)
             return False
+
+    def _write_csv_paths(self) -> list[str]:
+        if self._base_store.path is None or self._sub_store.path is None:
+            raise ValueError("base·sub Excel 경로가 필요합니다.")
+        base_out = export_base_csv(self._base_store.path, DEFAULT_BASE_SENTENCES_CSV)
+        sub_out = export_sub_csv(self._sub_store.path, DEFAULT_SUB_SENTENCES_CSV)
+        return [base_out, sub_out]
+
+    def _export_csv(self, *, show_dialog: bool) -> bool:
+        if self._base_store.path is None:
+            if show_dialog:
+                messagebox.showinfo(
+                    "회화 CSV", "base_sentences 파일을 먼저 열거나 저장하세요.", parent=self
+                )
+            return False
+        if self._sub_store.path is None:
+            if show_dialog:
+                messagebox.showinfo(
+                    "회화 CSV", "sub_sentences 파일을 먼저 열거나 저장하세요.", parent=self
+                )
+            return False
+        return export_csv_paths(
+            self,
+            self._on_status,
+            self._write_csv_paths,
+            show_dialog=show_dialog,
+            dialog_title="회화 CSV",
+            status_prefix="저장·CSV" if not show_dialog else "CSV",
+        )
 
     def save(self) -> bool:
         ok_base = self._save_base()
         ok_sub = self._save_sub()
         if ok_base and ok_sub:
             self._on_status("base·sub 저장 완료")
+            self._export_csv(show_dialog=False)
         return ok_base and ok_sub
 
     def _save_base_as(self) -> bool:
@@ -287,6 +321,7 @@ class ConversationPanel(ttk.Frame):
         try:
             self._base_store.save(path)
             self._on_child_dirty()
+            invalidate_global_table_cache(base=True)
             return True
         except OSError as ex:
             messagebox.showerror("base 저장 실패", str(ex), parent=self)
@@ -306,6 +341,7 @@ class ConversationPanel(ttk.Frame):
         try:
             self._sub_store.save(path)
             self._on_child_dirty()
+            invalidate_global_table_cache(sub=True)
             return True
         except OSError as ex:
             messagebox.showerror("sub 저장 실패", str(ex), parent=self)
@@ -316,6 +352,7 @@ class ConversationPanel(ttk.Frame):
         ok_sub = self._save_sub_as()
         if ok_base and ok_sub:
             self._on_status("base·sub 다른 이름으로 저장 완료")
+            self._export_csv(show_dialog=False)
         return ok_base and ok_sub
 
     def export_current_csv(self) -> None:
@@ -332,27 +369,8 @@ class ConversationPanel(ttk.Frame):
                 return
             if not self.save():
                 return
-        if self._base_store.path is None:
-            messagebox.showinfo(
-                "회화 CSV", "base_sentences 파일을 먼저 열거나 저장하세요.", parent=self
-            )
             return
-        if self._sub_store.path is None:
-            messagebox.showinfo(
-                "회화 CSV", "sub_sentences 파일을 먼저 열거나 저장하세요.", parent=self
-            )
-            return
-        try:
-            base_out = export_base_csv(self._base_store.path, DEFAULT_BASE_SENTENCES_CSV)
-            sub_out = export_sub_csv(self._sub_store.path, DEFAULT_SUB_SENTENCES_CSV)
-            messagebox.showinfo(
-                "회화 CSV",
-                f"생성 완료:\n{base_out}\n{sub_out}",
-                parent=self,
-            )
-            self._on_status("회화 CSV 생성 완료")
-        except Exception as ex:
-            messagebox.showerror("CSV 실패", str(ex), parent=self)
+        self._export_csv(show_dialog=True)
 
     def _show_sub_panel(self) -> None:
         if not self._sub_visible:

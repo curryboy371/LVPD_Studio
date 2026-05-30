@@ -1,4 +1,4 @@
-"""vocabulary_word_rows.xlsx editor: topic filter, id/topic search."""
+"""shorts_vocabulary_clips.xlsx editor."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -7,13 +7,13 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 from extra.table_editor.config import (
-    DEFAULT_VOCABULARY_WORD_ROWS_CSV,
-    DEFAULT_VOCABULARY_WORD_ROWS_EXCEL,
+    DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV,
+    DEFAULT_SHORTS_VOCABULARY_CLIPS_EXCEL,
     TOPIC_FILTER_ALL,
 )
-from extra.table_editor.data.fields import VOCABULARY_WORD_ROWS_FIELDNAMES
+from extra.table_editor.data.fields import SHORTS_VOCABULARY_CLIPS_FIELDNAMES
 from extra.table_editor.data.workbook import ExcelWorkbookStore
-from extra.table_editor.services.csv_export import export_vocabulary_word_rows_csv
+from extra.table_editor.services.csv_export import export_shorts_vocabulary_clips_csv
 from extra.table_editor.services.post_save_csv import export_csv_paths
 from extra.table_editor.services.search import (
     allocate_next_row_id,
@@ -23,32 +23,47 @@ from extra.table_editor.services.search import (
     parse_search_query,
     unique_topic_values,
 )
-from extra.table_editor.services.word_lookup import (
-    clear_words_index_cache,
-    lookup_word_details,
+from extra.table_editor.services.shorts_vocab_data import parse_pipe_ids, warm_shorts_vocab_editor_cache
+from extra.table_editor.services.word_lookup import lookup_word_details
+from extra.table_editor.ui.shorts_vocabulary_clip_editor_dialog import (
+    ShortsVocabularyClipEditorDialog,
 )
-from extra.table_editor.ui.row_editor_dialog import RowEditorDialog
 from extra.table_editor.ui.table_panel import TablePanel
 
-_VOCAB_ROWS_DISPLAY_COLUMNS = [
+_DISPLAY_COLUMNS = [
     "id",
     "topic",
     "word_id",
-    "한자",
-    "뜻",
-    "시트",
-    "품사",
-    "desc",
+    "단어수",
+    "단어 미리보기",
+    "hook_title",
+    "ko_narration_id",
+    "video_path",
+    "bg_path",
 ]
 
 
-def _word_display(row: dict[str, str], field: str) -> str:
-    info = lookup_word_details(row.get("word_id", ""))
-    value = (info.get(field) or "").strip()
-    return value if value else "—"
+def _word_count(row: dict[str, str]) -> str:
+    n = len(parse_pipe_ids(row.get("word_id", "")))
+    return str(n) if n else "0"
 
 
-class VocabularyWordRowsPanel(ttk.Frame):
+def _word_preview(row: dict[str, str]) -> str:
+    parts: list[str] = []
+    for wid in parse_pipe_ids(row.get("word_id", ""))[:4]:
+        info = lookup_word_details(wid)
+        hanzi = (info.get("word") or "").strip()
+        parts.append(hanzi or wid)
+    if not parts:
+        return "—"
+    extra = len(parse_pipe_ids(row.get("word_id", ""))) - len(parts)
+    text = ", ".join(parts)
+    if extra > 0:
+        text += f" 외 {extra}개"
+    return text
+
+
+class ShortsVocabularyClipsPanel(ttk.Frame):
     def __init__(
         self,
         master: tk.Misc,
@@ -59,17 +74,17 @@ class VocabularyWordRowsPanel(ttk.Frame):
         super().__init__(master)
         self._on_status = on_status
         self._on_dirty_change = on_dirty_change
-        self._store = ExcelWorkbookStore(VOCABULARY_WORD_ROWS_FIELDNAMES)
+        self._store = ExcelWorkbookStore(SHORTS_VOCABULARY_CLIPS_FIELDNAMES)
         self._all_rows: list[dict[str, str]] = []
         self._build_ui()
 
     def load_defaults(self) -> None:
-        clear_words_index_cache()
-        if DEFAULT_VOCABULARY_WORD_ROWS_EXCEL.exists():
+        warm_shorts_vocab_editor_cache()
+        if DEFAULT_SHORTS_VOCABULARY_CLIPS_EXCEL.exists():
             try:
-                self.load_file(DEFAULT_VOCABULARY_WORD_ROWS_EXCEL)
+                self.load_file(DEFAULT_SHORTS_VOCABULARY_CLIPS_EXCEL)
             except (OSError, ValueError) as ex:
-                self._on_status(f"기본 vocabulary_word_rows 로드 실패: {ex}")
+                self._on_status(f"기본 shorts_vocabulary_clips 로드 실패: {ex}")
 
     @property
     def is_dirty(self) -> bool:
@@ -104,13 +119,11 @@ class VocabularyWordRowsPanel(ttk.Frame):
 
         self._table = TablePanel(
             self,
-            VOCABULARY_WORD_ROWS_FIELDNAMES,
-            display_columns=_VOCAB_ROWS_DISPLAY_COLUMNS,
+            SHORTS_VOCABULARY_CLIPS_FIELDNAMES,
+            display_columns=_DISPLAY_COLUMNS,
             computed_columns={
-                "한자": lambda row: _word_display(row, "word"),
-                "뜻": lambda row: _word_display(row, "meaning"),
-                "시트": lambda row: _word_display(row, "sheet"),
-                "품사": lambda row: _word_display(row, "pos"),
+                "단어수": _word_count,
+                "단어 미리보기": _word_preview,
             },
             on_double_click=self._edit_row,
         )
@@ -118,7 +131,6 @@ class VocabularyWordRowsPanel(ttk.Frame):
         self._table.bind_tree("<Delete>", self._delete_row)
 
     def load_file(self, path: Path) -> None:
-        clear_words_index_cache()
         self._store.load(path)
         self._all_rows = self._store.get_rows()
         self._update_topic_combo()
@@ -128,9 +140,9 @@ class VocabularyWordRowsPanel(ttk.Frame):
 
     def open_file_dialog(self) -> None:
         path = filedialog.askopenfilename(
-            title="vocabulary_word_rows.xlsx 열기",
+            title="shorts_vocabulary_clips.xlsx 열기",
             filetypes=[("Excel", "*.xlsx *.xls"), ("All", "*.*")],
-            initialdir=str(DEFAULT_VOCABULARY_WORD_ROWS_EXCEL.parent),
+            initialdir=str(DEFAULT_SHORTS_VOCABULARY_CLIPS_EXCEL.parent),
         )
         if path:
             self.load_file(Path(path))
@@ -138,8 +150,8 @@ class VocabularyWordRowsPanel(ttk.Frame):
     def _write_csv_paths(self) -> str:
         if self._store.path is None:
             raise ValueError("저장된 Excel 경로가 없습니다.")
-        return export_vocabulary_word_rows_csv(
-            self._store.path, DEFAULT_VOCABULARY_WORD_ROWS_CSV
+        return export_shorts_vocabulary_clips_csv(
+            self._store.path, DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV
         )
 
     def _export_csv(self, *, show_dialog: bool) -> bool:
@@ -172,11 +184,11 @@ class VocabularyWordRowsPanel(ttk.Frame):
 
     def save_as(self) -> bool:
         path = filedialog.asksaveasfilename(
-            title="vocabulary_word_rows.xlsx 저장",
+            title="shorts_vocabulary_clips.xlsx 저장",
             defaultextension=".xlsx",
             filetypes=[("Excel", "*.xlsx")],
-            initialfile="vocabulary_word_rows.xlsx",
-            initialdir=str(DEFAULT_VOCABULARY_WORD_ROWS_EXCEL.parent),
+            initialfile="shorts_vocabulary_clips.xlsx",
+            initialdir=str(DEFAULT_SHORTS_VOCABULARY_CLIPS_EXCEL.parent),
         )
         if not path:
             return False
@@ -230,7 +242,10 @@ class VocabularyWordRowsPanel(ttk.Frame):
             row = find_row_by_id(self._all_rows, value)
             if row is None:
                 matches = [
-                    r for r in self._all_rows if ids_equal(r.get("word_id", ""), value)
+                    r
+                    for r in self._all_rows
+                    if value in parse_pipe_ids(r.get("word_id", ""))
+                    or ids_equal(r.get("word_id", ""), value)
                 ]
                 if len(matches) == 1:
                     row = matches[0]
@@ -238,10 +253,9 @@ class VocabularyWordRowsPanel(ttk.Frame):
                     self._topic_var.set(TOPIC_FILTER_ALL)
                     self._apply_filter()
                     self._table.select_row_by_id(matches[0].get("id", ""))
-                    self._on_status(f"word_id {value} → id {matches[0].get('id', '')} (첫 일치)")
+                    self._on_status(f"word_id {value} 포함 (첫 일치)")
                     return
             if row is None:
-                self._on_status(f"id/word_id {value} 없음")
                 messagebox.showinfo(
                     "검색",
                     f"id 또는 word_id {value} 를 찾을 수 없습니다.",
@@ -255,7 +269,6 @@ class VocabularyWordRowsPanel(ttk.Frame):
             return
         topics = unique_topic_values(self._all_rows)
         if value not in topics:
-            self._on_status(f"topic '{value}' 없음")
             messagebox.showinfo(
                 "검색",
                 f"topic '{value}' 와 일치하는 항목이 없습니다.",
@@ -275,7 +288,7 @@ class VocabularyWordRowsPanel(ttk.Frame):
 
     def _new_row(self) -> None:
         new_id = allocate_next_row_id(self._all_rows)
-        defaults: dict[str, str] = {c: "" for c in VOCABULARY_WORD_ROWS_FIELDNAMES}
+        defaults: dict[str, str] = {c: "" for c in SHORTS_VOCABULARY_CLIPS_FIELDNAMES}
         defaults["id"] = new_id
         topic = self._topic_var.get()
         if topic and topic != TOPIC_FILTER_ALL:
@@ -290,27 +303,16 @@ class VocabularyWordRowsPanel(ttk.Frame):
             return
         rid = (row.get("id") or "").strip()
         if not rid:
-            messagebox.showinfo("삭제", "id가 없는 행은 삭제할 수 없습니다.", parent=self)
             return
         topic = (row.get("topic") or "").strip()
-        word_id = (row.get("word_id") or "").strip()
         detail = f"id={rid}"
         if topic:
             detail += f"\ntopic: {topic}"
-        if word_id:
-            detail += f"\nword_id: {word_id}"
-        if not messagebox.askyesno(
-            "행 삭제",
-            f"아래 항목을 삭제할까요?\n\n{detail}",
-            parent=self,
-        ):
+        if not messagebox.askyesno("행 삭제", f"아래 항목을 삭제할까요?\n\n{detail}", parent=self):
             return
         before = len(self._all_rows)
-        self._all_rows = [
-            r for r in self._all_rows if (r.get("id") or "").strip() != rid
-        ]
+        self._all_rows = [r for r in self._all_rows if (r.get("id") or "").strip() != rid]
         if len(self._all_rows) == before:
-            messagebox.showwarning("삭제", "데이터에서 해당 id를 찾지 못했습니다.", parent=self)
             return
         self._store.set_rows(self._all_rows)
         self._on_dirty_change(True)
@@ -322,23 +324,47 @@ class VocabularyWordRowsPanel(ttk.Frame):
         self._open_editor(dict(row), is_new=False, original_id=row.get("id", ""))
 
     def _validate_row(self, values: dict[str, str]) -> bool:
-        topic = (values.get("topic") or "").strip()
-        if not topic:
-            messagebox.showwarning("검증", "topic을 입력하세요.", parent=self)
-            return False
-        raw_wid = (values.get("word_id") or "").strip()
-        if not raw_wid:
-            messagebox.showwarning("검증", "word_id를 입력하세요.", parent=self)
-            return False
         try:
-            wid = int(float(raw_wid))
+            clip_id = int(float(values.get("id", "")))
         except (ValueError, TypeError):
-            messagebox.showwarning("검증", "word_id는 1 이상의 숫자여야 합니다.", parent=self)
+            messagebox.showwarning("검증", "id는 1 이상의 숫자여야 합니다.", parent=self)
             return False
-        if wid < 1:
-            messagebox.showwarning("검증", "word_id는 1 이상이어야 합니다.", parent=self)
+        if clip_id < 1:
+            messagebox.showwarning("검증", "id는 1 이상이어야 합니다.", parent=self)
             return False
-        values["word_id"] = str(wid)
+        values["id"] = str(clip_id)
+
+        if not (values.get("word_id") or "").strip():
+            messagebox.showwarning("검증", "word_id를 1개 이상 지정하세요.", parent=self)
+            return False
+        if not (values.get("hook_title") or "").strip():
+            messagebox.showwarning("검증", "hook_title을 입력하세요.", parent=self)
+            return False
+
+        ko_raw = (values.get("ko_narration_id") or "").strip()
+        if ko_raw:
+            try:
+                ko_id = int(float(ko_raw))
+                if ko_id < 1:
+                    raise ValueError
+                values["ko_narration_id"] = str(ko_id)
+            except (ValueError, TypeError):
+                messagebox.showwarning(
+                    "검증", "ko_narration_id는 비우거나 1 이상이어야 합니다.", parent=self
+                )
+                return False
+        else:
+            values["ko_narration_id"] = ""
+
+        last_hold = (values.get("last_hold_sec") or "").strip()
+        if last_hold:
+            try:
+                float(last_hold)
+            except (ValueError, TypeError):
+                messagebox.showwarning(
+                    "검증", "last_hold_sec는 숫자(초)여야 합니다.", parent=self
+                )
+                return False
         return True
 
     def _open_editor(
@@ -367,13 +393,14 @@ class VocabularyWordRowsPanel(ttk.Frame):
             self._on_status(f"{'추가' if new else '수정'}: id {values.get('id', '')}")
             return None
 
-        RowEditorDialog(
+        topics = unique_topic_values(self._all_rows)
+        ShortsVocabularyClipEditorDialog(
             self,
-            VOCABULARY_WORD_ROWS_FIELDNAMES,
             row,
-            title="새 단어장 행" if is_new else "단어장 행 편집",
+            title="새 숏츠 단어 클립" if is_new else "숏츠 단어 클립 편집",
             is_new=is_new,
             existing_ids=self._existing_ids(),
             original_id=original_id,
+            topic_choices=topics,
             on_save=on_save,
         )

@@ -60,6 +60,27 @@ lvpd.bat editor
 - **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키.
 - **저장** / **현재 탭 CSV**: `resource/csv/vocabulary_word_rows.csv` 생성 (`word_id` ≥ 1 행만 포함).
 
+### 숏츠 단어 (`shorts_vocabulary_clips.xlsx`)
+
+topic당 1행. `word_id`·`hook_title`·단어별 옵션은 `+/−` 행으로 `|` 순서 매칭.
+
+- **topic** 필터, **검색** (id / topic / word_id)
+- **더블클릭** / **새로 만들기**: 전용 편집 창(기본·topic 인트로 / 단어·hook / 마무리). words 콤보·한자·뜻 미리보기, `ko_narration_id`·`bg_path` 콤보
+- **캐시**: 최초 진입 시 words·ko sets 전역 캐시 (`warm_shorts_vocab_editor_cache`)
+
+### 숏츠 회화 (`shorts_conversation_clips.xlsx`)
+
+숏츠 회화 클립 정의: `base_id`, `hook_title`, `ko_narration_id`, `sub_sentence_id` 등.
+
+- **topic**: `(전체)` 또는 표에 있는 topic 값으로 필터.
+- **검색** (Enter):
+  - 숫자 → `id` 일치 행으로 이동. 없으면 `base_id` 일치 행.
+  - 문자열 → `topic` 완전 일치 시 해당 topic 필터 적용.
+- **더블클릭** / **새로 만들기**: 전용 편집 창. **멘트·sub 매칭**: `base_id`·`ko_narration_id` 기준 콤보(+/− 행), 선택 시 KO `text`·sub 완성형 문장 미리보기. `topic`·`bg_path` 콤보. **새로 만들기**는 다음 `id`·현재 topic 필터를 자동 입력.
+- **캐시**: 숏츠 회화 모드 최초 진입 시 `base`/`sub`/`ko_narration_lines`·완성문·콤보 목록을 전역 캐시에 적재(모드 전환 후에도 유지). 회화·TTS 탭에서 해당 xlsx 저장 시 캐시만 무효화.
+- **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키.
+- **저장** / **현재 탭 CSV**: `resource/csv/shorts_conversation_clips.csv` 생성.
+
 ### 회화모드
 
 - **topic**: `(전체)` 또는 base 시트의 `topic` 값으로 목록 필터.
@@ -82,6 +103,8 @@ lvpd.bat editor
 |--------|------|-----|
 | words | `resource/table/words.xlsx` | `resource/csv/words.csv` |
 | vocabulary_word_rows | `resource/table/vocabulary_word_rows.xlsx` | `resource/csv/vocabulary_word_rows.csv` |
+| shorts_conversation_clips | `resource/table/shorts_conversation_clips.xlsx` | `resource/csv/shorts_conversation_clips.csv` |
+| shorts_vocabulary_clips | `resource/table/shorts_vocabulary_clips.xlsx` | `resource/csv/shorts_vocabulary_clips.csv` |
 | base | `resource/table/base_sentences.xlsx` | `resource/csv/base_sentences.csv` |
 | sub | `resource/table/sub_sentences.xlsx` | `resource/csv/sub_sentences.csv` |
 

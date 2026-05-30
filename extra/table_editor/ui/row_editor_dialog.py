@@ -35,6 +35,7 @@ from extra.table_editor.services.sentence_media_paths import (
     is_valid_display_sentence,
 )
 from extra.table_editor.services.word_autofill import apply_hanzi_autofill
+from extra.table_editor.ui.window_placement import center_toplevel_on_parent
 
 
 class RowEditorDialog(tk.Toplevel):
@@ -88,8 +89,8 @@ class RowEditorDialog(tk.Toplevel):
             self.geometry(ROW_EDITOR_GEOMETRY_WORDS)
             self.minsize(*ROW_EDITOR_MINSIZE_WORDS)
         elif self._is_base_editor or self._is_sub_editor:
-            self.geometry("820x720")
-            self.minsize(560, 480)
+            self.geometry("820x820")
+            self.minsize(560, 580)
         else:
             self.geometry(ROW_EDITOR_GEOMETRY_DEFAULT)
             self.minsize(*ROW_EDITOR_MINSIZE_DEFAULT)
@@ -222,6 +223,7 @@ class RowEditorDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._cancel())
         self.bind("<Control-Return>", lambda _e: self._save())
         self.after_idle(_on_inner_configure)
+        self.after_idle(lambda: center_toplevel_on_parent(self, parent))
 
     def _add_media_path_autofill_bar(self, parent: ttk.Frame, *, mode: str) -> None:
         bar = ttk.Frame(parent)

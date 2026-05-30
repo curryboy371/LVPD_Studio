@@ -17,6 +17,8 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
 
 
 def _build_stem_index(base_dir: Path, *, audio_only: bool) -> dict[str, Path]:
+    from utils.media_stem import media_path_stem
+
     if not base_dir.exists():
         return {}
     out: dict[str, Path] = {}
@@ -26,25 +28,51 @@ def _build_stem_index(base_dir: Path, *, audio_only: bool) -> dict[str, Path]:
         if audio_only and fp.suffix.lower() not in _AUDIO_EXTS:
             continue
         key = fp.stem.strip()
-        if key and key not in out:
-            out[key] = fp
+        if not key:
+            continue
+        resolved = fp.resolve()
+        for alias in (key, media_path_stem(key)):
+            if alias and alias not in out:
+                out[alias] = resolved
     return out
 
 
 def _resolve_resource_path(raw: str, repo: Path, stem_index: dict[str, Path]) -> Path | None:
+    from utils.media_stem import media_path_stem
+
     value = (raw or "").strip()
     if not value:
         return None
     p = Path(value)
     if p.is_absolute():
-        return p
+        if p.is_file():
+            return p.resolve()
+        from core.paths import resolve_repo_media_path
+
+        resolved = resolve_repo_media_path(value)
+        return resolved.resolve() if resolved is not None else p
     if "/" in value or "\\" in value:
-        return (repo / value.replace("\\", "/")).resolve()
+        direct = (repo / value.replace("\\", "/")).resolve()
+        if direct.is_file():
+            return direct
+        from core.paths import resolve_repo_media_path
+
+        resolved = resolve_repo_media_path(value, repo_root=repo)
+        return resolved.resolve() if resolved is not None else direct
     if p.suffix:
-        return (repo / value).resolve()
-    hit = stem_index.get(value)
-    if hit is not None:
-        return hit.resolve()
+        direct = (repo / value).resolve()
+        if direct.is_file():
+            return direct
+        from core.paths import resolve_repo_media_path
+
+        resolved = resolve_repo_media_path(value, repo_root=repo)
+        return resolved.resolve() if resolved is not None else direct
+    for key in (value, media_path_stem(value)):
+        if not key:
+            continue
+        hit = stem_index.get(key)
+        if hit is not None:
+            return hit.resolve()
     return (repo / value).resolve()
 
 

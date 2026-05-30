@@ -45,6 +45,38 @@ def _raw_sentence_to_display(raw: str) -> str:
     return re.sub(r"\{([^}]*)\}", r"\1", raw)
 
 
+def _resolve_playback_video_path(raw: str, repo: Path) -> str:
+    """video_path 해석 — repo 상대 경로 + stem 특수문자 제거 후 재매칭."""
+    path = (raw or "").strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        path = str(repo / path.replace("\\", "/"))
+    if os.path.exists(path):
+        return path
+    from core.paths import resolve_repo_video_path
+
+    resolved = resolve_repo_video_path(raw, repo_root=repo)
+    return str(resolved) if resolved is not None else ""
+
+
+def _resolve_playback_sound_path(raw: str, repo: Path) -> str:
+    """sound_lv_path 등 해석 — repo 상대 경로 + stem 특수문자 제거 후 재매칭."""
+    path = (raw or "").strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        path = str(repo / path.replace("\\", "/"))
+    if os.path.exists(path):
+        return path
+    from core.paths import resolve_repo_media_path
+
+    resolved = resolve_repo_media_path(path, repo_root=repo)
+    if resolved is None:
+        resolved = resolve_repo_media_path(raw, repo_root=repo)
+    return str(resolved) if resolved is not None else ""
+
+
 def _raw_sentence_to_words(raw: str) -> list[str]:
     """'{苹果}{多少}{钱}？'에서 중괄호 슬롯 단어만 추출."""
     if not raw:
@@ -325,9 +357,9 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
     video_path = (row.get("video_path") or "").strip()
     if not video_path and topic:
         video_path = str(repo / "resource" / "video" / topic / f"{vid}.mp4")
-    elif video_path and not os.path.isabs(video_path):
-        video_path = str(repo / video_path.replace("\\", "/"))
-    if not os.path.exists(video_path):
+    elif video_path:
+        video_path = _resolve_playback_video_path(video_path, repo)
+    else:
         video_path = ""
 
     sen = row.get("sentence", "")
@@ -359,8 +391,7 @@ def _row_to_base_item(row: dict, index: int, repo: Path) -> dict:
         or row.get("sound_lv2_path")
         or ""
     ).strip()
-    if sound_lv and not os.path.isabs(sound_lv):
-        sound_lv = str(repo / sound_lv.replace("\\", "/"))
+    sound_lv = _resolve_playback_sound_path(sound_lv, repo)
 
     pinyin_marks = (row.get("pinyin_marks") or row.get("pinyin") or "").strip()
     pinyin_phonetic = (row.get("pinyin_phonetic") or "").strip()
@@ -491,9 +522,9 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                 video_path = (row.get("video_path") or "").strip()
                 if not video_path and topic:
                     video_path = str(repo / "resource" / "video" / topic / f"{vid}.mp4")
-                elif video_path and not os.path.isabs(video_path):
-                    video_path = str(repo / video_path.replace("\\", "/"))
-                if not os.path.exists(video_path):
+                elif video_path:
+                    video_path = _resolve_playback_video_path(video_path, repo)
+                else:
                     video_path = ""
                 sen = row.get("sentence", "[]")
                 trans = row.get("translation", "[]")
@@ -532,6 +563,7 @@ def _load_conversation_csv(csv_path: str) -> list[dict]:
                     or row.get("sound_level2_path")
                     or ""
                 ).strip()
+                sound_lv = _resolve_playback_sound_path(sound_lv, repo)
                 tip_text = str(row.get("tip") or "").strip()
                 rows.append({
                     "id": vid,
@@ -848,6 +880,35 @@ def _resolve_word_img_path(raw: str) -> str:
     return str(path) if path.is_file() else ""
 
 
+def _resolve_main_word_display_pinyin(hanzi: str, word: Any) -> str:
+    """main word 병음 — words.csv ``pinyin`` 우선, 없으면 processor·masking."""
+    hz = (hanzi or "").strip()
+    if not hz:
+        return ""
+    csv_pinyin = (getattr(word, "pinyin", None) or "").strip()
+    if csv_pinyin:
+        from utils.pinyin_masking import word_pinyin_to_marks
+
+        marks = word_pinyin_to_marks(hz, csv_pinyin).strip()
+        return marks or csv_pinyin
+    try:
+        pp = get_pinyin_processor()
+        if not pp.available:
+            return ""
+        masking = (getattr(word, "masking", None) or "").strip()
+        if masking:
+            from utils.pinyin_masking import get_masked_pinyin_marks, normalize_word_masking
+
+            marks = get_masked_pinyin_marks(
+                hz, normalize_word_masking(masking), processor=pp
+            )
+            if marks:
+                return marks
+        return (pp.full_convert(hz) or "").strip()
+    except Exception:
+        return ""
+
+
 def _attach_main_word_image_meta(
     variant_dict: dict[str, Any],
     *,
@@ -865,20 +926,30 @@ def _attach_main_word_image_meta(
     if main_wid <= 0:
         return
     variant_dict["main_word_id"] = main_wid
-    img_path = ""
     try:
         from data.table_manager import get_word
 
         word = get_word(main_wid)
-        if word is not None:
-            img_path = (word.img_path or "").strip()
+        if word is None:
+            return
+        hanzi = (word.word or "").strip()
+        if hanzi:
+            variant_dict["main_word_hanzi"] = hanzi
+        pinyin = _resolve_main_word_display_pinyin(hanzi, word)
+        if pinyin:
+            variant_dict["main_word_pinyin"] = pinyin
+        meaning_raw = (word.meaning or "").strip()
+        if meaning_raw:
+            first_meaning = meaning_raw.split("|")[0].strip()
+            if first_meaning:
+                variant_dict["main_word_meaning"] = first_meaning
+        img_path = (word.img_path or "").strip()
+        if img_path:
+            resolved = _resolve_word_img_path(img_path)
+            if resolved:
+                variant_dict["main_word_img_path"] = resolved
     except Exception:
-        img_path = ""
-    if not img_path:
         return
-    resolved = _resolve_word_img_path(img_path)
-    if resolved:
-        variant_dict["main_word_img_path"] = resolved
 
 
 def _replace_multiple_slots_in_raw_sentence(

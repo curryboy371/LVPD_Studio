@@ -17,8 +17,10 @@ def masking_for_hanzi(word: str) -> str:
 
 
 def media_path_stem_for_hanzi(word: str) -> str:
-    """img_path·sound_path 에 넣을 stem(한자와 동일)."""
-    return (word or "").strip()
+    """img_path·sound_path 에 넣을 stem(특수문자 제거)."""
+    from utils.media_stem import media_path_stem
+
+    return media_path_stem(word)
 
 
 def apply_new_word_defaults(row: dict[str, str], *, pos: str = "") -> dict[str, str]:

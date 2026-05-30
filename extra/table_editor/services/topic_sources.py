@@ -6,6 +6,8 @@ from pathlib import Path
 
 from core.paths import (
     DEFAULT_BASE_SENTENCES_CSV,
+    DEFAULT_SHORTS_CONVERSATION_CLIPS_CSV,
+    DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV,
     DEFAULT_VOCABULARY_WORD_ROWS_CSV,
 )
 
@@ -25,3 +27,11 @@ def topics_for_conversation_preview() -> list[str]:
 
 def topics_for_vocabulary_preview() -> list[str]:
     return unique_topic_values(_read_csv_rows(DEFAULT_VOCABULARY_WORD_ROWS_CSV))
+
+
+def topics_for_shorts_conversation_preview() -> list[str]:
+    return unique_topic_values(_read_csv_rows(DEFAULT_SHORTS_CONVERSATION_CLIPS_CSV))
+
+
+def topics_for_shorts_vocabulary_preview() -> list[str]:
+    return unique_topic_values(_read_csv_rows(DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV))

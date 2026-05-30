@@ -9,6 +9,12 @@ from tools.csv_gen.ko_narration_sets_excel_to_csv import (
     FIELDNAMES as KO_NARRATION_SETS_FIELDNAMES,
 )
 from tools.csv_gen.sub_sentences_excel_to_csv import FIELDNAMES as SUB_FIELDNAMES
+from tools.csv_gen.shorts_conversation_clips_excel_to_csv import (
+    FIELDNAMES as SHORTS_CONVERSATION_CLIPS_FIELDNAMES,
+)
+from tools.csv_gen.shorts_vocabulary_clips_excel_to_csv import (
+    FIELDNAMES as SHORTS_VOCABULARY_CLIPS_FIELDNAMES,
+)
 from tools.csv_gen.vocabulary_word_rows_excel_to_csv import (
     FIELDNAMES as VOCABULARY_WORD_ROWS_FIELDNAMES,
 )
@@ -19,6 +25,8 @@ __all__ = [
     "SUB_FIELDNAMES",
     "WORDS_FIELDNAMES",
     "VOCABULARY_WORD_ROWS_FIELDNAMES",
+    "SHORTS_CONVERSATION_CLIPS_FIELDNAMES",
+    "SHORTS_VOCABULARY_CLIPS_FIELDNAMES",
     "KO_NARRATION_SETS_FIELDNAMES",
     "KO_NARRATION_LINES_FIELDNAMES",
 ]

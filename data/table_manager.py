@@ -38,6 +38,8 @@ _table: list[dict[str, Any]] | None = None
 
 def _build_stem_index(base_dir: Path, pattern: str) -> dict[str, str]:
     """디렉터리 하위를 재귀 순회해 stem(확장자 제외 파일명) -> 상대경로 인덱스를 만든다."""
+    from utils.media_stem import media_path_stem
+
     if not base_dir.exists():
         return {}
 
@@ -47,12 +49,15 @@ def _build_stem_index(base_dir: Path, pattern: str) -> dict[str, str]:
         if not fp.is_file():
             continue
         key = fp.stem.strip()
-        if not key or key in index:
+        if not key:
             continue
         try:
-            index[key] = str(fp.relative_to(repo_root)).replace("\\", "/")
+            rel = str(fp.relative_to(repo_root)).replace("\\", "/")
         except ValueError:
             continue
+        for alias in (key, media_path_stem(key)):
+            if alias and alias not in index:
+                index[alias] = rel
     return index
 
 
@@ -61,19 +66,36 @@ def _resolve_media_path_from_name(
     stem_index: dict[str, str],
 ) -> str:
     """CSV 값이 파일명이면 인덱스로 실제 경로를 찾아 반환한다."""
+    from utils.media_stem import media_path_stem
+
     value = (raw_value or "").strip()
     if not value:
         return ""
     if "/" in value or "\\" in value:
-        return value.replace("\\", "/")
+        normalized = value.replace("\\", "/")
+        from core.paths import get_repo_root, resolve_repo_media_path
+
+        resolved = resolve_repo_media_path(normalized)
+        if resolved is not None:
+            return str(resolved.relative_to(get_repo_root()).as_posix())
+        return normalized
 
     as_path = Path(value)
     if as_path.suffix:
-        return value.replace("\\", "/")
+        normalized = value.replace("\\", "/")
+        from core.paths import get_repo_root, resolve_repo_media_path
 
-    hit = stem_index.get(value)
-    if hit:
-        return hit
+        resolved = resolve_repo_media_path(normalized)
+        if resolved is not None:
+            return str(resolved.relative_to(get_repo_root()).as_posix())
+        return normalized
+
+    for key in (value, media_path_stem(value)):
+        if not key:
+            continue
+        hit = stem_index.get(key)
+        if hit:
+            return hit
 
     return value
 
@@ -514,7 +536,7 @@ def clear_table() -> None:
 
 def get_loaded_content() -> LoadedContent:
     """저장된 테이블 행에서 LoadedContent를 만들어 반환한다. 테이블이 없으면 빈 LoadedContent."""
-    from core.paths import get_repo_root
+    from core.paths import get_repo_root, resolve_repo_media_path, resolve_repo_video_path
     rows = get_table()
     if not rows:
         return LoadedContent()
@@ -528,11 +550,11 @@ def get_loaded_content() -> LoadedContent:
         row_id = str(row.get("id") or "").strip()
         if not topic and not row_id:
             continue
-        vpath = str(row.get("video_path") or "").strip()
-        if not vpath:
-            vpath = str(Path("resource", "video", topic, f"{row_id}.mp4"))
-        if not Path(vpath).is_absolute():
-            vpath = str(repo / vpath)
+        vpath_raw = str(row.get("video_path") or "").strip()
+        if not vpath_raw:
+            vpath_raw = str(Path("resource", "video", topic, f"{row_id}.mp4"))
+        resolved_video = resolve_repo_video_path(vpath_raw, repo_root=repo)
+        vpath = str(resolved_video) if resolved_video is not None else str(repo / vpath_raw)
         start_sec = _to_float(row.get("start_ms"), 0.0)
         if start_sec > 1000:
             start_sec /= 1000.0
@@ -576,8 +598,16 @@ def get_loaded_content() -> LoadedContent:
             or ""
         ).strip()
         if sound_lv:
-            if not Path(sound_lv).is_absolute():
-                sound_lv = str(repo / sound_lv)
+            resolved_sound = resolve_repo_media_path(sound_lv, repo_root=repo)
+            if resolved_sound is None and not Path(sound_lv).is_absolute():
+                resolved_sound = resolve_repo_media_path(
+                    str(repo / sound_lv.replace("\\", "/")),
+                    repo_root=repo,
+                )
+            if resolved_sound is not None:
+                sound_lv = str(resolved_sound)
+            elif not Path(sound_lv).is_absolute():
+                sound_lv = str(repo / sound_lv.replace("\\", "/"))
             audio_tracks.append(AudioTrack(sound_path=sound_lv, fade_in_sec=0.0, fade_out_sec=0.0))
 
     return LoadedContent(

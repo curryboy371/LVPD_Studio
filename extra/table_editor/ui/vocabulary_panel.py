@@ -14,6 +14,8 @@ from extra.table_editor.config import (
 from extra.table_editor.data.fields import WORDS_FIELDNAMES
 from extra.table_editor.data.workbook import MultiSheetWorkbookStore
 from extra.table_editor.services.csv_export import export_words_csv
+from extra.table_editor.services.post_save_csv import export_csv_paths
+from extra.table_editor.services.global_table_cache import invalidate_global_table_cache
 from extra.table_editor.services.search import (
     allocate_next_word_id,
     filter_rows_by_pos,
@@ -120,6 +122,25 @@ class VocabularyPanel(ttk.Frame):
         if path:
             self.load_file(Path(path))
 
+    def _write_csv_paths(self) -> str:
+        if self._store.path is None:
+            raise ValueError("저장된 Excel 경로가 없습니다.")
+        return export_words_csv(self._store.path, DEFAULT_WORDS_TABLE_CSV)
+
+    def _export_csv(self, *, show_dialog: bool) -> bool:
+        if self._store.path is None:
+            if show_dialog:
+                messagebox.showinfo("CSV", "먼저 파일을 저장하세요.", parent=self)
+            return False
+        return export_csv_paths(
+            self,
+            self._on_status,
+            self._write_csv_paths,
+            show_dialog=show_dialog,
+            dialog_title="CSV 보내기",
+            status_prefix="저장·CSV" if not show_dialog else "CSV",
+        )
+
     def save(self) -> bool:
         if self._store.path is None:
             return self.save_as()
@@ -127,7 +148,9 @@ class VocabularyPanel(ttk.Frame):
         try:
             self._store.save()
             self._on_dirty_change(False)
+            invalidate_global_table_cache(words=True)
             self._on_status(f"저장: {self._store.path}")
+            self._export_csv(show_dialog=False)
             return True
         except OSError as ex:
             messagebox.showerror("저장 실패", str(ex), parent=self)
@@ -147,7 +170,9 @@ class VocabularyPanel(ttk.Frame):
         try:
             self._store.save(path)
             self._on_dirty_change(False)
+            invalidate_global_table_cache(words=True)
             self._on_status(f"저장: {path}")
+            self._export_csv(show_dialog=False)
             return True
         except OSError as ex:
             messagebox.showerror("저장 실패", str(ex), parent=self)
@@ -166,12 +191,8 @@ class VocabularyPanel(ttk.Frame):
                 return
             if not self.save():
                 return
-        try:
-            out = export_words_csv(self._store.path, DEFAULT_WORDS_TABLE_CSV)
-            messagebox.showinfo("CSV 보내기", f"생성 완료:\n{out}", parent=self)
-            self._on_status(f"CSV: {out}")
-        except Exception as ex:
-            messagebox.showerror("CSV 실패", str(ex), parent=self)
+            return
+        self._export_csv(show_dialog=True)
 
     def _flush_current_sheet(self) -> None:
         if self._current_sheet:

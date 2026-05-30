@@ -1,19 +1,15 @@
 """완성형 중국어 문장 → resource/video·sound 경로 (테이블 편집기 자동 입력)."""
 from __future__ import annotations
 
-import re
+from utils.media_stem import media_path_stem
 
 VIDEO_PATH_PREFIX = "resource/video/"
 SOUND_SENTENCE_PREFIX = "resource/sound/sentense/"
-_STRIP_FOR_STEM_RE = re.compile(r"[,，\?\？\s]+")
 
 
 def display_sentence_stem(display: str) -> str:
     """경로 파일명 stem: 완성형 문장에서 `,` 공백 `?` `？` 제거."""
-    text = (display or "").strip()
-    if not text:
-        return ""
-    return _STRIP_FOR_STEM_RE.sub("", text)
+    return media_path_stem(display)
 
 
 def is_valid_display_sentence(display: str) -> bool:

@@ -171,6 +171,9 @@ class ShortsStudio(IStudio):
                 self._draw_empty(screen, ctx)
             else:
                 self._scene.draw(screen, ctx)
+                draw_overlay = getattr(self._scene, "draw_conv_main_word_overlay", None)
+                if callable(draw_overlay):
+                    draw_overlay(screen)
         finally:
             from studio.shorts.brand_icon import draw_brand_icon
 

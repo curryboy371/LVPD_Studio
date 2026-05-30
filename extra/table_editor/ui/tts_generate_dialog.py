@@ -8,6 +8,7 @@ from extra.table_editor.services.topic_sources import (
     topics_for_conversation_preview,
     topics_for_vocabulary_preview,
 )
+from extra.table_editor.ui.window_placement import center_toplevel_on_parent
 
 TTS_KINDS: tuple[tuple[str, str], ...] = (
     ("conv", "회화 sub KO TTS"),
@@ -64,6 +65,7 @@ class TtsGenerateDialog(tk.Toplevel):
         self.bind("<Return>", lambda _e: self._confirm())
         self.bind("<Escape>", lambda _e: self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.after_idle(lambda: center_toplevel_on_parent(self, parent))
 
     def _current_kind(self) -> str:
         return _KIND_BY_LABEL.get(self._kind_var.get(), "conv")
