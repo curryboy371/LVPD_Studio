@@ -18,6 +18,7 @@ from studio.shorts.constants import (
     SHORTS_BG_PRACTICE_MIN_SEC,
     SHORTS_NATIVE_LISTEN_LABEL,
     SHORTS_CONV_CN_REPLAY_PAUSE_SEC,
+    SHORTS_CONV_SUB_STEP_PAUSE_SEC,
     SHORTS_VOCAB_CN_MIN_PLAY_COUNT,
     SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC,
     SHORTS_VIDEO_AFTER_ALPHA,
@@ -167,6 +168,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
+        self._situation_subtitle_color_elapsed = 0.0
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -205,6 +207,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
+        self._situation_subtitle_color_elapsed = 0.0
 
     @property
     def stage(self) -> ClipStage:
@@ -618,13 +621,14 @@ class ClipScene:
     def _advance_conv_script_step(self) -> None:
         self._stop_voice()
         self._script_index += 1
-        self._script_phase = ""
         next_kind = self._conv_script_step_kind_at(self._script_index)
         prev_kind = self._conv_script_step_kind_at(self._script_index - 1)
         if next_kind == "ko" and prev_kind in ("base", "sub"):
+            # 다음 sub: cn 화면(main word·문장) 유지한 채 0.5초 후 KO 진행
             self._conv_script_step_pause = True
             self._learn_elapsed = 0.0
             return
+        self._script_phase = ""
         self._run_conv_script_step()
 
     def _run_conv_script_step(self) -> None:
@@ -1190,6 +1194,8 @@ class ClipScene:
     def update(self, dt_sec: float) -> None:
         self._drawer.tick_fade(dt_sec)
         self._timer += max(0.0, float(dt_sec))
+        if self._situation_subtitle_for_bottom():
+            self._situation_subtitle_color_elapsed += max(0.0, float(dt_sec))
 
         if self._stage == ClipStage.VIDEO_PLAY:
             self._try_start_deferred_ko_narration()
@@ -1277,7 +1283,7 @@ class ClipScene:
         if self._stage == ClipStage.CONV_SCRIPT:
             if self._conv_script_step_pause:
                 self._learn_elapsed += max(0.0, float(dt_sec))
-                if self._learn_elapsed >= float(SHORTS_CONV_CN_REPLAY_PAUSE_SEC):
+                if self._learn_elapsed >= float(SHORTS_CONV_SUB_STEP_PAUSE_SEC):
                     self._conv_script_step_pause = False
                     self._learn_elapsed = 0.0
                     self._run_conv_script_step()
@@ -2117,6 +2123,29 @@ class ClipScene:
             return ""
         return str(self._clip.get("situation_subtitle") or "").strip()
 
+    def _draw_situation_bottom_zone(
+        self,
+        screen: pygame.Surface,
+        *,
+        zones: ShortsLayoutZones,
+        situation: str,
+    ) -> None:
+        if not situation:
+            return
+        try:
+            color_seed = int(self._clip.get("clip_id") or 0)
+        except (TypeError, ValueError):
+            color_seed = 0
+        self._drawer.draw_bottom_zone(
+            screen,
+            zones=zones,
+            situation_subtitle=situation,
+            channel=_CHANNEL_BOTTOM,
+            conversation_situation=self._is_conversation_clip(),
+            color_phase_sec=self._situation_subtitle_color_elapsed,
+            color_seed=color_seed,
+        )
+
     def _should_show_learn_karaoke(self) -> bool:
         stages = (
             ClipStage.VOCAB_MEANING_KO,
@@ -2518,11 +2547,10 @@ class ClipScene:
             self._draw_ko_subtitle_if_any(screen, zones)
             situation = self._situation_subtitle_for_bottom()
             if not self._overlay_subtitle_text():
-                self._drawer.draw_bottom_zone(
+                self._draw_situation_bottom_zone(
                     screen,
                     zones=zones,
-                    situation_subtitle=situation,
-                    channel=_CHANNEL_BOTTOM,
+                    situation=situation,
                 )
             return
         show_karaoke = self._should_show_learn_karaoke()
@@ -2606,11 +2634,10 @@ class ClipScene:
         self._draw_last_hold_if_any(screen, zones)
         if show_bottom:
             situation = self._situation_subtitle_for_bottom()
-            self._drawer.draw_bottom_zone(
+            self._draw_situation_bottom_zone(
                 screen,
                 zones=zones,
-                situation_subtitle=situation,
-                channel=_CHANNEL_BOTTOM,
+                situation=situation,
             )
 
         screen.set_clip(None)

@@ -45,7 +45,18 @@ SHORTS_HOOK_TITLE_Y = 250
 SHORTS_HOOK_TITLE_Y_OFFSET = SHORTS_HOOK_TITLE_Y
 SHORTS_HOOK_TITLE_LINE_GAP = 0
 # 훅 타이틀 2줄: 윗줄(첫 줄) / 아랫줄(\n 이후)
-HOOK_TITLE_LINE1_COLOR = (255, 110, 175)
+# 윗줄 색 팔레트 — ShortsDrawer 생성(숏츠 실행)마다 random.choice
+SHORTS_HOOK_TITLE_LINE1_COLORS: tuple[tuple[int, int, int], ...] = (
+    (255, 110, 175),  # 연한 분홍
+    (130, 228, 148),  # 연두
+    (120, 200, 255),  # 하늘색
+    (255, 210, 120),  # 연한 골드
+    (190, 165, 255),  # 연한 라벤더
+    (255, 175, 130),  # 연한 피치
+    (110, 235, 215),  # 민트
+    (255, 145, 145),  # 연한 코랄
+)
+HOOK_TITLE_LINE1_COLOR = SHORTS_HOOK_TITLE_LINE1_COLORS[0]
 HOOK_TITLE_LINE2_COLOR = (255, 255, 255)
 # 1080×1920 기준 — 중앙 노래방 문장 y 보정(양수 = 아래)
 SHORTS_MIDDLE_Y_OFFSET = 72
@@ -551,6 +562,13 @@ def shorts_hook_title_line_gap(frame_height: int) -> int:
     return max(0, int(SHORTS_HOOK_TITLE_LINE_GAP * sy))
 
 
+def pick_shorts_hook_title_line1_color() -> tuple[int, int, int]:
+    """훅 타이틀 윗줄 색 — SHORTS_HOOK_TITLE_LINE1_COLORS에서 무작위."""
+    import random
+
+    return random.choice(SHORTS_HOOK_TITLE_LINE1_COLORS)
+
+
 def shorts_brand_title_font_size(frame_height: int) -> int:
     """프레임 높이에 맞춘 하단 브랜드 타이틀 폰트 크기."""
     h = max(1, int(frame_height))
@@ -601,8 +619,10 @@ VOCAB_CN_LISTEN_HINT_COLOR = (46, 204, 113)
 VOCAB_CN_SPEAK_HINT_COLOR = (255, 159, 67)
 # 단어 모드: 연속 중국어 재생 사이 대기(초)
 SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC = 0.8
-# 회화 conv_script: 중국어 mp3 재생 사이·문장 간 TTS 시작 전 대기(초)
+# 회화 conv_script: 같은 sub 중국어 mp3 연속 재생 사이 대기(초)
 SHORTS_CONV_CN_REPLAY_PAUSE_SEC = 0.7
+# 회화 conv_script: sub 문장 CN 종료 → 다음 sub KO 시작 전 화면 유지 대기(초)
+SHORTS_CONV_SUB_STEP_PAUSE_SEC = 0.5
 # 단어 모드: 중국어 발음 최소 재생 횟수(sound_repeat_count 와 큰 값 사용)
 SHORTS_VOCAB_CN_MIN_PLAY_COUNT = 2
 # 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
@@ -697,3 +717,53 @@ def shorts_conv_main_word_meaning_font_pt(label_pt: int) -> int:
         16,
         int(int(label_pt) * float(SHORTS_CONV_MAIN_WORD_MEANING_FONT_RATIO)),
     )
+
+
+# 회화 하단 situation_subtitle (CTA 문구)
+SHORTS_CONV_SITUATION_FONT_PT = 40
+SHORTS_CONV_SITUATION_COLOR_SEGMENT_SEC = 3.8
+SHORTS_CONV_SITUATION_HUE_COUNT = 5
+SHORTS_CONV_SITUATION_SATURATION = 0.44
+SHORTS_CONV_SITUATION_VALUE = 0.96
+
+
+def shorts_conv_situation_font_pt(frame_height: int) -> int:
+    h = max(1, int(frame_height))
+    sy = h / float(SHORTS_HEIGHT)
+    return max(34, int(SHORTS_CONV_SITUATION_FONT_PT * sy))
+
+
+def _smoothstep01(t: float) -> float:
+    t = max(0.0, min(1.0, float(t)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def shorts_conv_situation_subtitle_color(phase_sec: float, seed: int) -> tuple[int, int, int]:
+    """회화 situation_subtitle — 밝·중채도 hue만 서서히 변화 (가독성 유지)."""
+    import colorsys
+    import random
+
+    rng = random.Random(int(seed) ^ 0x5A17_0001)
+    n = max(2, int(SHORTS_CONV_SITUATION_HUE_COUNT))
+    hues = [rng.random() for _ in range(n)]
+    seg = max(0.8, float(SHORTS_CONV_SITUATION_COLOR_SEGMENT_SEC))
+    total = seg * (n - 1)
+    if total <= 1e-6:
+        h = hues[0]
+    else:
+        t = float(phase_sec) % total
+        idx = min(int(t / seg), n - 2)
+        local = _smoothstep01((t - idx * seg) / seg)
+        h0, h1 = hues[idx], hues[idx + 1]
+        dh = h1 - h0
+        if dh > 0.5:
+            dh -= 1.0
+        elif dh < -0.5:
+            dh += 1.0
+        h = (h0 + dh * local) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(
+        h,
+        float(SHORTS_CONV_SITUATION_SATURATION),
+        float(SHORTS_CONV_SITUATION_VALUE),
+    )
+    return int(r * 255), int(g * 255), int(b * 255)

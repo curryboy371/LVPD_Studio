@@ -26,8 +26,8 @@ from studio.shorts.constants import (
     shorts_vocab_tip_line_gap,
     parse_vocab_tip_lines,
     parse_last_hold_lines,
-    HOOK_TITLE_LINE1_COLOR,
     HOOK_TITLE_LINE2_COLOR,
+    pick_shorts_hook_title_line1_color,
     KO_KARAOKE_ACTIVE,
     KO_KARAOKE_INACTIVE,
     KO_SUBTITLE_BG_PAD_X,
@@ -68,7 +68,10 @@ class ShortsDrawer:
         self._fade = FadeController()
         self._karaoke = KaraokeRenderer(drawer=self._drawer)
         size = int(font_sizes.hook_title)
-        self._hook_font = load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="bold")
+        self._hook_title_line1_color = pick_shorts_hook_title_line1_color()
+        self._hook_font = load_font_korean(
+            size, self._hook_title_line1_color, weight="bold"
+        )
         bottom_pt = int(font_sizes.bottom_kr)
         self._bottom_font = load_font_kr_chinese(bottom_pt, WHITE) or load_font_korean(
             bottom_pt, WHITE
@@ -79,6 +82,8 @@ class ShortsDrawer:
         self._tip_font_pt = 0
         self._tip_font_kr: Any = None
         self._tip_font_cn: Any = None
+        self._conv_situation_font_pt = 0
+        self._conv_situation_font: Any = None
 
     @property
     def fade(self) -> FadeController:
@@ -275,7 +280,7 @@ class ShortsDrawer:
         size = int(self._font_sizes.hook_title)
         for font in (
             self._hook_font,
-            load_font_korean(size, HOOK_TITLE_LINE1_COLOR, weight="regular"),
+            load_font_korean(size, self._hook_title_line1_color, weight="regular"),
         ):
             if font is not None:
                 return font
@@ -317,7 +322,7 @@ class ShortsDrawer:
 
         rows: list[pygame.Surface] = []
         if line1:
-            surf = self._render_hook_title_line(font, line1, HOOK_TITLE_LINE1_COLOR)
+            surf = self._render_hook_title_line(font, line1, self._hook_title_line1_color)
             if surf is not None:
                 rows.append(surf)
         if line2:
@@ -1078,6 +1083,14 @@ class ShortsDrawer:
                 fade_alpha=fade_alpha,
             )
 
+    def _conv_situation_subtitle_font(self, pt: int) -> Any:
+        if pt != self._conv_situation_font_pt or self._conv_situation_font is None:
+            self._conv_situation_font_pt = pt
+            self._conv_situation_font = load_font_kr_chinese(
+                pt, WHITE, weight="bold"
+            ) or load_font_korean(pt, WHITE, weight="bold")
+        return self._conv_situation_font
+
     def draw_bottom_zone(
         self,
         screen: pygame.Surface,
@@ -1086,6 +1099,9 @@ class ShortsDrawer:
         situation_subtitle: str,
         channel: str,
         subtitle_progress: Optional[float] = None,
+        conversation_situation: bool = False,
+        color_phase_sec: float = 0.0,
+        color_seed: int = 0,
     ) -> None:
         alpha = self.fade_alpha(channel)
         if alpha <= 0:
@@ -1096,11 +1112,22 @@ class ShortsDrawer:
         lines = parse_vocab_tip_lines(situation_subtitle)
         if not lines:
             return
-        sub_color = (220, 225, 235)
+        fh = max(1, int(screen.get_height()))
+        if conversation_situation:
+            from studio.shorts.constants import (
+                shorts_conv_situation_font_pt,
+                shorts_conv_situation_subtitle_color,
+            )
+
+            font = self._conv_situation_subtitle_font(shorts_conv_situation_font_pt(fh))
+            sub_color = shorts_conv_situation_subtitle_color(color_phase_sec, color_seed)
+        else:
+            font = self._bottom_font
+            sub_color = (220, 225, 235)
         draw_alpha = max(0, min(255, int(alpha)))
-        line_gap = shorts_vocab_tip_line_gap(max(1, int(screen.get_height())))
+        line_gap = shorts_vocab_tip_line_gap(fh)
         for i, line in enumerate(lines):
-            surf = self._bottom_font.render(line, True, sub_color)
+            surf = font.render(line, True, sub_color)
             if surf is None:
                 continue
             if draw_alpha < 255:
