@@ -19,7 +19,7 @@ from studio.shorts.constants import (
     SHORTS_NATIVE_LISTEN_LABEL,
     SHORTS_CONV_CN_REPLAY_PAUSE_SEC,
     SHORTS_CONV_SUB_STEP_PAUSE_SEC,
-    SHORTS_VOCAB_CN_MIN_PLAY_COUNT,
+    SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC,
     SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
@@ -479,6 +479,23 @@ class ClipScene:
     def _conv_script_next_step_is_ko(self) -> bool:
         return self._conv_script_step_kind_at(self._script_index + 1) == "ko"
 
+    def _ko_cue_seq_trim_sec(self, duration_sec: float) -> float:
+        """연속 seq(ko→ko)일 때만 TTS 꼬리를 잘라낼 길이(초)."""
+        if self._stage != ClipStage.CONV_SCRIPT or not self._conv_script_next_step_is_ko():
+            return 0.0
+        dur = max(0.0, float(duration_sec))
+        return min(
+            SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC,
+            max(0.0, dur - 0.04),
+        )
+
+    def _ko_cue_effective_duration_sec(self) -> float:
+        dur = max(0.0, float(self._ko_cue_duration))
+        if dur <= 1e-6:
+            return 0.5
+        trim = self._ko_cue_seq_trim_sec(dur)
+        return max(0.04, dur - trim)
+
     def _prefetch_live_video_frame(self) -> None:
         """녹화 첫 프레임부터 비디오가 보이도록 OpenCV 첫 프레임을 미리 디코드."""
         if not self._video_player.has_source():
@@ -658,6 +675,8 @@ class ClipScene:
             self._conv_main_word_meta = {}
             self._script_phase = "cn"
             self._ko_finished = True
+            self._conv_cn_play_count = 0
+            self._conv_cn_subphase = ""
             self._prepare_conv_script_video_for_cn()
             self._restore_base_cn_fields()
             self._play_conv_script_cn(str(self._clip.get("sound_path") or ""))
@@ -796,11 +815,13 @@ class ClipScene:
         return True
 
     def _begin_conv_script_cn_after_sub_ko(self) -> None:
-        """sub_ko 종료(+비디오 fade) → 중국어 발음 1·2회차."""
+        """sub_ko 종료(+비디오 fade) → 중국어 발음(sound_repeat_count)."""
         self._stop_voice()
         self._ko_finished = True
         self._ko_started = False
         self._ko_current_text = ""
+        self._conv_cn_play_count = 0
+        self._conv_cn_subphase = ""
         self._prepare_conv_script_video_for_cn()
         self._script_phase = "cn"
         self._play_conv_script_cn(self._conv_cn_sound_path)
@@ -976,19 +997,34 @@ class ClipScene:
             ClipStage.TRANSITION_OUT,
         )
 
+    def _word_video_at_end(self, *, end_sec: float | None = None) -> bool:
+        if end_sec is None:
+            try:
+                end_sec = float(self._word_video_player.get_effective_end_sec())
+            except Exception:
+                end_sec = 0.0
+        if self._word_video_clock >= float(end_sec) - 1e-3:
+            return True
+        try:
+            return bool(self._word_video_player.is_paused())
+        except Exception:
+            return False
+
     def _freeze_word_video_frame(self) -> None:
         if self._word_video_frozen_frame is not None:
             if self._word_video_player.has_source():
                 self._word_video_player.close()
             return
-        iw, ih = self._word_video_inner_size
-        if iw <= 0 or ih <= 0:
-            iw, ih = self._vocab_word_media_inner_size()
-        frame = None
-        if self._word_video_player.has_source():
-            frame = self._word_video_player.get_frame(iw, ih, contain=True)
-        if frame is None and self._word_video_last_live_frame is not None:
-            frame = self._word_video_last_live_frame
+        frame = self._word_video_last_live_frame
+        at_end = self._word_video_at_end()
+        if frame is None and self._word_video_player.has_source() and not at_end:
+            iw, ih = self._word_video_inner_size
+            if iw <= 0 or ih <= 0:
+                iw, ih = self._vocab_word_media_inner_size()
+            try:
+                frame = self._word_video_player.get_frame(iw, ih, contain=True)
+            except Exception:
+                frame = None
         if frame is not None:
             self._word_video_frozen_frame = frame.copy()
         self._stop_word_video_audio()
@@ -1001,11 +1037,11 @@ class ClipScene:
             return
         if not self._word_video_player.has_source():
             return
-        self._word_video_clock += max(0.0, float(dt_sec))
+        # 매 프레임 seek_to(CAP_PROP_POS_MSEC)는 일부 mp4에서 블로킹 — tick으로 PTS만 진행.
+        self._word_video_player.tick(max(0.0, float(dt_sec)))
+        self._word_video_clock = float(self._word_video_player.get_pts())
         end_sec = float(self._word_video_player.get_effective_end_sec())
-        t = min(self._word_video_clock, end_sec)
-        self._word_video_player.seek_to(t)
-        if t >= end_sec - 1e-3:
+        if self._word_video_at_end(end_sec=end_sec):
             self._freeze_word_video_frame()
 
     def _vocab_word_media_inner_size(self) -> tuple[int, int]:
@@ -1094,20 +1130,28 @@ class ClipScene:
         player = None if frozen is not None else self._word_video_player
         if frozen is None and not (player and player.has_source()):
             return
-        self._draw_video_in_vocab_media_slot(
-            screen,
-            zones,
-            player=player,
-            frozen_frame=frozen,
-            track_inner="word",
-        )
-        inner = self._word_video_inner_size
-        if frozen is not None:
+        slot, inner = self._vocab_word_media_slot(zones)
+        self._word_video_inner_size = inner
+        live_frame = frozen
+        if live_frame is None and player is not None and player.has_source():
+            try:
+                live_frame = player.get_frame(inner[0], inner[1], contain=True)
+            except Exception:
+                live_frame = None
+            if live_frame is not None:
+                self._word_video_last_live_frame = live_frame.copy()
+        elif frozen is not None:
             self._word_video_last_live_frame = frozen
-        elif player is not None and player.has_source():
-            live = player.get_frame(inner[0], inner[1], contain=True)
-            if live is not None:
-                self._word_video_last_live_frame = live.copy()
+        if live_frame is None:
+            return
+        self._drawer.draw_center_video(
+            screen,
+            player,
+            slot,
+            pad=0,
+            frozen_frame=live_frame,
+            frame_inner_size=inner,
+        )
 
     def _enter_post_video_intro(self) -> None:
         """인트로 비디오·KO 내레이션 후 — 단어: 뜻 TTS, 회화: 번역 TTS → 학습."""
@@ -1625,20 +1669,15 @@ class ClipScene:
         except Exception:
             pass
     def _vocab_sound_repeat_target(self) -> int:
-        """CSV sound_repeat_count 와 최소 재생 횟수 중 큰 값."""
+        """shorts_vocabulary_clips.sound_repeat_count (기본 1)."""
         try:
-            csv_n = max(1, int(self._clip.get("sound_repeat_count") or 1))
+            return max(1, int(self._clip.get("sound_repeat_count") or 1))
         except (TypeError, ValueError):
-            csv_n = 1
-        return max(int(SHORTS_VOCAB_CN_MIN_PLAY_COUNT), csv_n)
+            return 1
 
     def _vocab_needs_more_cn_sound(self) -> bool:
-        """최소 재생 횟수 미달 또는 word 비디오가 아직 재생 중이면 True."""
-        if self._vocab_cn_play_count < self._vocab_sound_repeat_target():
-            return True
-        if self._has_word_video() and self._is_word_video_still_playing():
-            return True
-        return False
+        """sound_repeat_count 미달이면 True (word 비디오 길이와 무관)."""
+        return self._vocab_cn_play_count < self._vocab_sound_repeat_target()
 
     def _vocab_after_sound_delay_sec(self) -> float:
         try:
@@ -1659,6 +1698,8 @@ class ClipScene:
         if self._word_video_frozen_frame is not None:
             return False
         if not self._word_video_player.has_source():
+            return False
+        if self._word_video_at_end():
             return False
         return True
 
@@ -1698,12 +1739,13 @@ class ClipScene:
             self._vocab_learn_subphase = ""
             self._finish_learn_sequence()
             return
-        if self._learn_round == 1 and self._sound_play_count < (
+        repeat_target = (
             self._conv_sound_repeat_target()
             if self._is_conversation_clip()
             else max(1, int(SHORTS_SOUND_PLAY_COUNT))
-        ):
-            self._start_sentence_play(play_index=2)
+        )
+        if self._sound_play_count < repeat_target:
+            self._start_sentence_play(play_index=self._sound_play_count + 1)
         else:
             self._finish_learn_sequence()
 
@@ -1758,6 +1800,9 @@ class ClipScene:
         if not self._ko_started or self._ko_finished or self._conv_video_fade_active:
             return
         self._ko_cue_elapsed += max(0.0, float(dt_sec))
+        if self._ko_cue_seq_trim_sec(self._ko_cue_duration) > 0:
+            if self._ko_cue_elapsed >= self._ko_cue_effective_duration_sec():
+                self._stop_voice()
         if self._is_ko_cue_voice_finished():
             self._advance_ko_cue()
 
@@ -1881,10 +1926,8 @@ class ClipScene:
         if dur <= 1e-6:
             return self._ko_cue_elapsed >= 0.5
         if self._stage == ClipStage.CONV_SCRIPT and self._conv_script_next_step_is_ko():
-            # 연속 seq(1→2): 1이 끝나면 텀 없이 2 시작
-            if self._recording_mode():
-                return self._ko_cue_elapsed >= dur
-            return True
+            # 연속 seq(1→2): 꼬리를 잘라 텀 없이 2 시작
+            return self._ko_cue_elapsed >= self._ko_cue_effective_duration_sec()
         return self._ko_cue_elapsed >= dur + 0.1
 
     def _active_ko_subtitle(self) -> str:

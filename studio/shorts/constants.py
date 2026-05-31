@@ -623,8 +623,6 @@ SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC = 0.8
 SHORTS_CONV_CN_REPLAY_PAUSE_SEC = 0.7
 # 회화 conv_script: sub 문장 CN 종료 → 다음 sub KO 시작 전 화면 유지 대기(초)
 SHORTS_CONV_SUB_STEP_PAUSE_SEC = 0.5
-# 단어 모드: 중국어 발음 최소 재생 횟수(sound_repeat_count 와 큰 값 사용)
-SHORTS_VOCAB_CN_MIN_PLAY_COUNT = 2
 # 4단계 BG: 노래방은 sound_path 길이 + 이 값(초) 만큼 더 느리게 진행
 SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC = 1.5
 SHORTS_BG_PRACTICE_MIN_SEC = 4.0
@@ -637,6 +635,8 @@ SHORTS_VIDEO_AFTER_ALPHA = 30
 SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER = 1.2
 # 회화 conv: 같은 멘트 내 연속 seq(ko→ko) 끝난 뒤 다음 cue까지 대기(초)
 SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC = 0.02
+# 회화 conv: 연속 seq(ko→ko) 전환 시 현재 TTS 끝에서 잘라낼 길이(초)
+SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC = 1.3
 
 # 노래방 색상 (좌→우 진행 채움: inactive=미재생, active=재생됨)
 KARAOKE_ACTIVE_HANZI = (255, 230, 120)

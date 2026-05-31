@@ -89,6 +89,26 @@ def _resolve_bg_audio_path(repo: Path, row: dict[str, str]) -> str:
         return ""
     if os.path.isfile(path):
         return path
+    logger.warning("shorts bg_path 파일 없음: %s", path)
+    return ""
+
+
+def _resolve_vocab_bg_audio_path(repo: Path, row: dict[str, str]) -> str:
+    """숏츠 단어 bg_path — resource/sound/bg_short 아래만 허용."""
+    raw = (row.get("bg_path") or "").strip()
+    if not raw:
+        return ""
+    if not raw.replace("\\", "/").lower().startswith("resource/sound/bg_short"):
+        logger.warning(
+            "shorts vocabulary bg_path는 bg_short 만 허용 — 무시: %s",
+            raw,
+        )
+        return ""
+    path = _resolve_path(repo, raw)
+    if not path:
+        return ""
+    if os.path.isfile(path):
+        return path
     logger.warning("shorts vocabulary bg_path 파일 없음: %s", path)
     return ""
 
@@ -402,13 +422,9 @@ def build_shorts_conversation_clip_list(
             logger.warning("shorts conversation clip id=%s: script 단계 없음", clip_id)
             continue
         sub_ids = parse_sub_sentence_ids(row)
-        repeat_counts = parse_vocab_int_list_field(
-            row.get("sound_repeat_count") or "",
-            max(1, len(sub_ids)),
-            default=1,
-            minimum=1,
-        )
-        clip["sound_repeat_count"] = repeat_counts[0] if repeat_counts else 1
+        topic_repeat = parse_topic_sound_repeat_count(row.get("sound_repeat_count") or "")
+        repeat_counts = [topic_repeat] * max(1, len(sub_ids))
+        clip["sound_repeat_count"] = topic_repeat
         clip["sound_repeat_counts"] = repeat_counts
         sub_i = 0
         for step in steps:
@@ -440,6 +456,18 @@ def build_shorts_conversation_clip_list(
 def _split_pipe_field(raw: str) -> list[str]:
     """CSV `|` 구분 (쉼표 대체 `，` 허용)."""
     return [p.strip() for p in str(raw or "").replace("，", "|").split("|") if p.strip()]
+
+
+def parse_topic_sound_repeat_count(raw: str, *, default: int = 1) -> int:
+    """topic/클립 공통 중국어 mp3 반복 횟수. `|` 가 있어도 첫 값만 사용."""
+    parts = _split_pipe_field(raw)
+    token = parts[0] if parts else ""
+    if not token:
+        return max(1, int(default))
+    try:
+        return max(1, int(float(token)))
+    except (TypeError, ValueError):
+        return max(1, int(default))
 
 
 def parse_vocab_word_ids_field(raw: str) -> list[int]:
@@ -543,18 +571,27 @@ def parse_vocab_float_list_field(
     return vals[:word_count]
 
 
+def parse_topic_read_meaning_ko(raw: str, *, default: bool = True) -> bool:
+    """topic 공통 read_meaning_ko. legacy `|` per-word 는 첫 값만."""
+    parts = _split_pipe_field(raw)
+    token = parts[0] if parts else ""
+    return _parse_bool_token(token, default=default)
+
+
+def parse_topic_hook_title(raw: str) -> str:
+    """topic 공통 hook_title. legacy `|` per-word 는 첫 값만, `\\n` 줄바꿈 허용."""
+    parts = [p.replace("\\n", "\n") for p in _split_pipe_field(raw)]
+    return parts[0].strip() if parts else ""
+
+
 def parse_vocab_hook_titles_field(raw: str, word_count: int) -> list[str]:
-    """hook_title 셀: 1개면 모든 단어 동일, 여러 개면 word_id 순서와 짝."""
+    """hook_title 셀 — topic 공통 1개를 모든 단어에 적용."""
     if word_count < 1:
         return []
-    parts = [p.replace("\\n", "\n") for p in _split_pipe_field(raw)]
-    if not parts:
+    hook = parse_topic_hook_title(raw)
+    if not hook:
         return [""] * word_count
-    if len(parts) == 1:
-        return parts * word_count
-    if len(parts) < word_count:
-        parts.extend([parts[-1]] * (word_count - len(parts)))
-    return parts[:word_count]
+    return [hook] * word_count
 
 
 def _vocab_word_clip_id(topic_row_id: int, word_index: int) -> int:
@@ -583,7 +620,7 @@ def _topic_intro_from_row(
         "video_path": _resolve_vocabulary_video_path(
             row, clip_id=max(1, int(clip_id)), topic=topic, repo=repo
         ),
-        "bg_path": _resolve_bg_audio_path(repo, row),
+        "bg_path": _resolve_vocab_bg_audio_path(repo, row),
     }
 
 
@@ -625,8 +662,7 @@ def build_shorts_vocabulary_clip_list(
 ) -> list[dict[str, Any]]:
     """shorts_vocabulary_clips.csv + words 조인.
 
-  topic당 CSV 행 1개(id). word_id·hook_title는 `|` 로 복수 지정.
-  hook_title 1개만 있으면 모든 단어에 동일 적용.
+  topic당 CSV 행 1개(id). word_id는 `|` 로 복수. hook_title·sound_repeat_count는 topic 공통.
     """
     path = Path(csv_path) if csv_path else DEFAULT_SHORTS_VOCABULARY_CLIPS_CSV
     repo = _REPO_ROOT
@@ -670,22 +706,17 @@ def build_shorts_vocabulary_clip_list(
         topic_intros[topic_key] = _topic_intro_from_row(
             row, clip_id=topic_row_id, topic=topic, repo=repo
         )
-        sound_repeat_counts = parse_vocab_int_list_field(
-            row.get("sound_repeat_count") or "",
-            len(word_ids),
-            default=1,
-            minimum=1,
-        )
+        topic_repeat = parse_topic_sound_repeat_count(row.get("sound_repeat_count") or "")
+        sound_repeat_counts = [topic_repeat] * len(word_ids)
         after_sound_delays = parse_vocab_float_list_field(
             row.get("after_sound_delay_sec") or "",
             len(word_ids),
             default=0.0,
         )
-        read_meaning_ko_flags = parse_vocab_bool_list_field(
-            row.get("read_meaning_ko") or "",
-            len(word_ids),
-            default=True,
+        read_meaning_ko_flag = parse_topic_read_meaning_ko(
+            row.get("read_meaning_ko") or "", default=True
         )
+        read_meaning_ko_flags = [read_meaning_ko_flag] * len(word_ids)
         use_word_video_audio_flags = parse_vocab_bool_list_field(
             row.get("use_word_video_audio") or "",
             len(word_ids),

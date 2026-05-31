@@ -9,6 +9,16 @@ from extra.table_editor.services.global_table_cache import GlobalTableCache
 _BG_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 BG_PATH_RANDOM_LABEL = "(랜덤 — 비움)"
 _bg_path_choices_cache: list[str] | None = None
+_BG_SHORT_REL_PREFIX = "resource/sound/bg_short/"
+
+
+def is_bg_short_rel_path(stored: str) -> bool:
+    """repo 상대 경로가 resource/sound/bg_short 아래인지."""
+    norm = (stored or "").strip().replace("\\", "/")
+    if not norm:
+        return True
+    lower = norm.lower()
+    return lower.startswith(_BG_SHORT_REL_PREFIX) or lower == "resource/sound/bg_short"
 
 
 def _normalize_set_id(value: str) -> str:
@@ -56,6 +66,24 @@ def bg_path_for_combo(stored: str) -> str:
     if not (stored or "").strip():
         return BG_PATH_RANDOM_LABEL
     return stored.strip()
+
+
+def bg_path_for_vocab_combo(stored: str) -> str:
+    """숏츠 단어 — bg_short 만 선택 가능, 그 외는 랜덤."""
+    text = (stored or "").strip()
+    if not text:
+        return BG_PATH_RANDOM_LABEL
+    if is_bg_short_rel_path(text):
+        return text
+    return BG_PATH_RANDOM_LABEL
+
+
+def normalize_vocab_bg_path(stored: str) -> str:
+    """숏츠 단어 저장용 — bg_short 경로만 유지."""
+    text = (stored or "").strip()
+    if not text or not is_bg_short_rel_path(text):
+        return ""
+    return text
 
 
 def bg_path_from_combo(selected: str) -> str:

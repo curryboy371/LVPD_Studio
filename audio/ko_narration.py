@@ -731,10 +731,6 @@ def batch_build_shorts_ko_narration(
 
     load_ko_narration_tables()
     shorts_clip_type = normalize_clip_type(shorts_mode)
-    if int(set_id) > 0:
-        clear_ko_set_sound_output(int(set_id))
-    else:
-        clear_ko_shorts_sound_output()
     target_ids = collect_ko_narration_set_ids_from_shorts_csv(
         shorts_mode=shorts_mode,
         csv_path=csv_path,
@@ -742,6 +738,13 @@ def batch_build_shorts_ko_narration(
         clip_id=clip_id,
         set_id=set_id,
     )
+    if int(set_id) > 0:
+        clear_ko_set_sound_output(int(set_id))
+    elif session_topics or clip_id:
+        for sid in target_ids:
+            clear_ko_set_sound_output(sid)
+    else:
+        clear_ko_shorts_sound_output()
     ok = skip = fail = 0
     if not target_ids:
         logger.warning(

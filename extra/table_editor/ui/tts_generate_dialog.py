@@ -7,6 +7,7 @@ from tkinter import messagebox, ttk
 from extra.table_editor.services.topic_sources import (
     topics_for_conversation_preview,
     topics_for_shorts_conversation_preview,
+    topics_for_shorts_vocabulary_preview,
     topics_for_vocabulary_preview,
 )
 from extra.table_editor.ui.window_placement import center_toplevel_on_parent
@@ -92,16 +93,9 @@ class TtsGenerateDialog(tk.Toplevel):
             topics = topics_for_shorts_conversation_preview()
             prompt = "shorts_conversation_clips.topic"
         elif kind == "shorts_vocab":
-            ttk.Label(row, text="입력:", width=8).pack(side=tk.LEFT)
-            ttk.Label(
-                row,
-                text="topic 또는 clips id(숫자)",
-                foreground="#666",
-            ).pack(side=tk.LEFT, padx=(0, 8))
-            entry = ttk.Entry(row, textvariable=self._input_var, width=28)
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self._input_widget = entry
-            return
+            ttk.Label(row, text="topic:", width=8).pack(side=tk.LEFT)
+            topics = topics_for_shorts_vocabulary_preview()
+            prompt = "shorts_vocabulary_clips.topic"
         else:
             return
 

@@ -198,10 +198,6 @@ class MainWindow(tk.Tk):
         )
         self._save_as_btn.pack(side=tk.LEFT, padx=2)
         ttk.Separator(bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-        self._export_csv_btn = ttk.Button(
-            bar, text="현재 탭 CSV", command=self._export_current_csv
-        )
-        self._export_csv_btn.pack(side=tk.LEFT, padx=2)
         self._export_all_btn = ttk.Button(
             bar, text="회화 전체 CSV", command=self._export_all_csv
         )
@@ -303,8 +299,6 @@ class MainWindow(tk.Tk):
             self._save_btn.pack_forget()
             self._save_as_btn.pack_forget()
             self._export_all_btn.pack_forget()
-            if not self._export_csv_btn.winfo_ismapped():
-                self._export_csv_btn.pack(side=tk.LEFT, padx=2)
         else:
             if not self._open_btn.winfo_ismapped():
                 self._open_btn.pack(side=tk.LEFT, padx=2)
@@ -312,8 +306,6 @@ class MainWindow(tk.Tk):
                 self._save_btn.pack(side=tk.LEFT, padx=2)
             if not self._save_as_btn.winfo_ismapped():
                 self._save_as_btn.pack(side=tk.LEFT, padx=2)
-            if not self._export_csv_btn.winfo_ismapped():
-                self._export_csv_btn.pack(side=tk.LEFT, padx=2)
 
     def _show_mode(self, mode: Mode) -> None:
         self._persist_visible_edits()
@@ -499,25 +491,6 @@ class MainWindow(tk.Tk):
             return
         self._active_panel().save_as()
         self._update_path_label()
-
-    def _export_current_csv(self) -> None:
-        mode = self._mode.get()
-        if mode == "main":
-            self._main.export_current_csv()
-            return
-        panel = self._active_panel()
-        if mode == "vocabulary":
-            panel.export_csv()
-        elif mode == "vocab_rows":
-            panel.export_csv()
-        elif mode == "shorts_conv":
-            panel.export_csv()
-        elif mode == "shorts_vocab":
-            panel.export_csv()
-        elif mode == "tts":
-            panel.export_all_csv()
-        else:
-            panel.export_current_csv()
 
     def _export_all_csv(self) -> None:
         if self._conv is not None:

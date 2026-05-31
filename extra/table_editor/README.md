@@ -62,7 +62,7 @@ lvpd.bat editor
 
 ### 숏츠 단어 (`shorts_vocabulary_clips.xlsx`)
 
-topic당 1행. `word_id`·`hook_title`·단어별 옵션은 `+/−` 행으로 `|` 순서 매칭.
+topic당 1행. `word_id`·단어별 옵션은 `+/−` 행. `hook_title`·`repeat`·`read_meaning_ko`는 topic 공통.
 
 - **topic** 필터, **검색** (id / topic / word_id)
 - **더블클릭** / **새로 만들기**: 전용 편집 창(기본·topic 인트로 / 단어·hook / 마무리). words 콤보·한자·뜻 미리보기, `ko_narration_id`·`bg_path` 콤보

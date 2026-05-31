@@ -6,9 +6,9 @@
   resource/sound/shorts/ko_word_{word_id}_timeline.json
 
 입력:
-  --id N       shorts_vocabulary_clips.csv 행 id → word_id 목록
-  --topic      topic 필터 (id·word-id 없을 때)
-  --word-id    words.csv id 직접 (30123 또는 30123|30124)
+  --id N       shorts_vocabulary_clips.csv 행 id → word_id 뜻 TTS + ko_narration_id 인트로 TTS
+  --topic      topic → word_id 뜻 TTS + ko_narration_id 인트로 TTS
+  --word-id    words.csv id 직접 (30123 또는 30123|30124, 뜻 TTS만)
 
 TTS 엔진: words.csv `tts_type`(edge|gtts), `tts_voice`(Edge 목소리).
   비어 있으면 --tts / --tts-voice CLI 기본값.
@@ -25,9 +25,9 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from audio.vocab_meaning_ko import (
-    batch_build_vocab_meaning_ko_for_clip_row_id,
+    batch_build_shorts_vocabulary_tts_for_clip_row_id,
+    batch_build_shorts_vocabulary_tts_for_topic,
     batch_build_vocab_meaning_ko_for_studio_topic,
-    batch_build_vocab_meaning_ko_for_topic,
     batch_build_vocab_meaning_ko_for_word_ids,
     parse_word_id_list_field,
 )
@@ -91,7 +91,7 @@ def main() -> int:
         )
         label = f"word_id={args.word_id.strip()}"
     elif int(args.id) > 0:
-        ok, skip, fail = batch_build_vocab_meaning_ko_for_clip_row_id(
+        ok, skip, fail = batch_build_shorts_vocabulary_tts_for_clip_row_id(
             int(args.id),
             csv_path=csv_path,
             tts=args.tts,
@@ -100,7 +100,7 @@ def main() -> int:
         )
         label = f"shorts_vocabulary_clips id={args.id}"
     elif (args.topic or "").strip():
-        ok, skip, fail = batch_build_vocab_meaning_ko_for_topic(
+        ok, skip, fail = batch_build_shorts_vocabulary_tts_for_topic(
             args.topic.strip(),
             csv_path=csv_path,
             tts=args.tts,

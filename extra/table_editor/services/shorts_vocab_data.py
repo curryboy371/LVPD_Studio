@@ -9,6 +9,18 @@ from extra.table_editor.services.global_table_cache import (
 from extra.table_editor.services.shorts_moment_data import parse_pipe_ids
 
 
+def normalize_word_id(value: str) -> str:
+    """words.id — 1 이상 정수 문자열."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        n = int(float(raw))
+        return str(n) if n >= 1 else ""
+    except (TypeError, ValueError):
+        return ""
+
+
 def parse_pipe_tokens(raw: str) -> list[str]:
     """`| ` 구분 토큰 (빈 칸 유지)."""
     text = (raw or "").strip().replace("，", "|")
@@ -22,6 +34,52 @@ def join_pipe_tokens(tokens: list[str]) -> str:
     while out and not out[-1].strip():
         out.pop()
     return "|".join(out)
+
+
+def topic_sound_repeat_for_editor(raw: str, *, default: str = "1") -> str:
+    """편집기 표시용 — topic 공통 repeat (pipe 첫 값)."""
+    parts = parse_pipe_tokens(raw)
+    token = parts[0].strip() if parts else ""
+    if not token:
+        return default
+    try:
+        return str(max(1, int(float(token))))
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_topic_sound_repeat(raw: str, *, default: str = "1") -> str:
+    """저장용 — 단일 정수 문자열."""
+    return topic_sound_repeat_for_editor(raw, default=default)
+
+
+def topic_bool_for_editor(raw: str, *, default: str = "true") -> str:
+    """편집기 표시용 — topic 공통 bool (pipe 첫 값)."""
+    parts = parse_pipe_tokens(raw)
+    token = (parts[0] if parts else str(raw or "")).strip().lower()
+    if token in ("", "1", "true", "yes", "y", "on", "t"):
+        return "true"
+    if token in ("0", "false", "no", "n", "off", "f"):
+        return "false"
+    return default if default in ("true", "false") else "true"
+
+
+def normalize_topic_bool(raw: str, *, default: str = "true") -> str:
+    """저장용 — true/false 단일 값."""
+    return topic_bool_for_editor(raw, default=default)
+
+
+def topic_hook_title_for_editor(raw: str) -> str:
+    """편집기 표시용 — topic 공통 hook (legacy `|` per-word 는 첫 값만)."""
+    from extra.table_editor.ui.multiline_lines_editor import normalize_multiline_input
+
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    parts = parse_pipe_tokens(text)
+    if len(parts) > 1:
+        text = parts[0]
+    return normalize_multiline_input(text)
 
 
 def list_word_options() -> list[SelectOption]:
@@ -82,6 +140,7 @@ def label_for_id(
 
 
 __all__ = [
+    "normalize_word_id",
     "parse_pipe_ids",
     "parse_pipe_tokens",
     "join_pipe_tokens",

@@ -290,6 +290,8 @@ class ShortsVocabularyClipsPanel(ttk.Frame):
         new_id = allocate_next_row_id(self._all_rows)
         defaults: dict[str, str] = {c: "" for c in SHORTS_VOCABULARY_CLIPS_FIELDNAMES}
         defaults["id"] = new_id
+        defaults["sound_repeat_count"] = "1"
+        defaults["read_meaning_ko"] = "true"
         topic = self._topic_var.get()
         if topic and topic != TOPIC_FILTER_ALL:
             defaults["topic"] = topic

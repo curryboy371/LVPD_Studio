@@ -17,6 +17,10 @@ from extra.table_editor.services.shorts_editor_choices import (
     list_bg_path_choices,
     list_ko_narration_set_choices,
 )
+from extra.table_editor.services.shorts_vocab_data import (
+    normalize_topic_sound_repeat,
+    topic_sound_repeat_for_editor,
+)
 from extra.table_editor.services.shorts_moment_data import (
     id_from_combo_label,
     label_for_id,
@@ -48,9 +52,9 @@ _FIELD_SPECS: list[tuple[str, str, str, str]] = [
     ),
     (
         "sound_repeat_count",
-        "sound_repeat_count (중국어 재생 횟수)",
+        "repeat (중국어 재생 횟수)",
         "entry",
-        "sub 문장 mp3 반복. 1 또는 1|2|1 (sub 순). 비우면 1",
+        "topic 전체 sub 공통. 비우면 1",
     ),
     (
         "last_hold_sec",
@@ -163,6 +167,8 @@ class ShortsConversationClipEditorDialog(tk.Toplevel):
             right.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
             value = row.get(field, "")
+            if field == "sound_repeat_count":
+                value = topic_sound_repeat_for_editor(value)
             if field == "sound_repeat_count" and not str(value).strip():
                 value = "1"
             if kind == "multiline":
@@ -354,8 +360,8 @@ class ShortsConversationClipEditorDialog(tk.Toplevel):
             ko_pipe, sub_pipe = self._moment_pairs.get_pipe_values()
             out["ko_narration_line_id"] = ko_pipe
             out["sub_sentence_id"] = sub_pipe
-        repeat = (out.get("sound_repeat_count") or "").strip()
-        out["sound_repeat_count"] = repeat if repeat else "1"
+        repeat = normalize_topic_sound_repeat(out.get("sound_repeat_count", ""))
+        out["sound_repeat_count"] = repeat
         return out
 
     def _id_exists(self, row_id: str) -> bool:

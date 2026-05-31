@@ -9,16 +9,27 @@ from extra.table_editor.data.fields import SHORTS_VOCABULARY_CLIPS_FIELDNAMES
 from extra.table_editor.services.search import ids_equal
 from extra.table_editor.services.shorts_editor_choices import (
     BG_PATH_RANDOM_LABEL,
-    bg_path_for_combo,
+    bg_path_for_vocab_combo,
     bg_path_from_combo,
     ko_narration_id_for_combo,
     ko_narration_id_from_combo,
     ko_narration_label_maps,
     list_bg_path_choices,
     list_ko_narration_set_choices,
+    normalize_vocab_bg_path,
+)
+from extra.table_editor.services.shorts_vocab_data import (
+    normalize_topic_bool,
+    normalize_topic_sound_repeat,
+    topic_bool_for_editor,
+    topic_hook_title_for_editor,
+    topic_sound_repeat_for_editor,
 )
 from extra.table_editor.services.topic_sources import topics_for_vocabulary_preview
-from extra.table_editor.ui.multiline_lines_editor import normalize_multiline_input
+from extra.table_editor.ui.multiline_lines_editor import (
+    MultilineLinesEditor,
+    normalize_multiline_input,
+)
 from extra.table_editor.ui.shorts_bg_path_preview import attach_bg_path_preview
 from extra.table_editor.ui.shorts_vocabulary_word_rows_editor import (
     ShortsVocabularyWordRowsEditor,
@@ -36,6 +47,24 @@ _FIELD_SPECS: list[tuple[str, str, str, str]] = [
     ),
     ("video_path", "video_path", "entry", "topic 인트로 mp4 (repo 상대 경로)"),
     (
+        "hook_title",
+        "hook_title (후킹)",
+        "multiline_lines",
+        "topic 전체 단어 공통. +/− 로 줄 추가 (저장 시 \\n)",
+    ),
+    (
+        "sound_repeat_count",
+        "repeat (중국어 재생 횟수)",
+        "entry",
+        "topic 전체 단어 공통. 비우면 1",
+    ),
+    (
+        "read_meaning_ko",
+        "뜻 KO TTS",
+        "bool",
+        "topic 전체 단어 공통. false면 뜻 나레이션 없이 중국어 mp3만",
+    ),
+    (
         "last_hold_text",
         "last_hold_text (CTA)",
         "multiline",
@@ -47,7 +76,7 @@ _FIELD_SPECS: list[tuple[str, str, str, str]] = [
         "entry",
         "CTA 대기(초). 비우면 2.5",
     ),
-    ("bg_path", "bg_path", "bg_path", "따라해보세요 구간 배경음. 비우면 bg_short 랜덤"),
+    ("bg_path", "bg_path", "bg_path", "resource/sound/bg_short 만 선택. 비우면 bg_short 랜덤"),
 ]
 
 
@@ -68,8 +97,8 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
         self.title(title)
         self.transient(parent)
         self.grab_set()
-        self.geometry("780x960")
-        self.minsize(640, 780)
+        self.geometry("920x960")
+        self.minsize(760, 780)
 
         self._is_new = is_new
         self._existing_ids = existing_ids or set()
@@ -111,8 +140,12 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
 
         basic = ttk.LabelFrame(inner, text="기본 · topic 인트로")
         basic.pack(fill=tk.X, padx=10, pady=6)
-        words_section = ttk.LabelFrame(inner, text="단어 · hook · 단어별 옵션")
-        words_section.pack(fill=tk.X, padx=10, pady=6)
+        screen = ttk.LabelFrame(inner, text="화면 · hook")
+        screen.pack(fill=tk.X, padx=10, pady=6)
+        play = ttk.LabelFrame(inner, text="재생")
+        play.pack(fill=tk.X, padx=10, pady=6)
+        words_section = ttk.LabelFrame(inner, text="단어 · 단어별 옵션")
+        words_section.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
         tail = ttk.LabelFrame(inner, text="마무리 · 배경음")
         tail.pack(fill=tk.X, padx=10, pady=6)
 
@@ -121,6 +154,9 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
             "topic": basic,
             "ko_narration_id": basic,
             "video_path": basic,
+            "hook_title": screen,
+            "sound_repeat_count": play,
+            "read_meaning_ko": play,
             "last_hold_text": tail,
             "last_hold_sec": tail,
             "bg_path": tail,
@@ -134,7 +170,30 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
             right = ttk.Frame(block)
             right.pack(side=tk.LEFT, fill=tk.X, expand=True)
             value = row.get(field, "")
-            if kind == "multiline":
+            if field == "sound_repeat_count":
+                value = topic_sound_repeat_for_editor(value)
+            if field == "hook_title":
+                value = topic_hook_title_for_editor(value)
+            if field == "read_meaning_ko":
+                value = topic_bool_for_editor(value, default="true")
+            if kind == "multiline_lines":
+                editor = MultilineLinesEditor(
+                    right,
+                    label="",
+                    initial_value=value,
+                    label_on_top=False,
+                )
+                editor.pack(fill=tk.X, expand=True)
+                self._widgets[field] = editor
+                if hint:
+                    ttk.Label(
+                        right,
+                        text=hint,
+                        foreground="#666666",
+                        wraplength=420,
+                        font=("", 8),
+                    ).pack(anchor="w", pady=(2, 0))
+            elif kind == "multiline":
                 text = tk.Text(right, height=3, width=48, wrap=tk.WORD)
                 text.insert("1.0", normalize_multiline_input(value))
                 text.pack(fill=tk.X, expand=True)
@@ -166,11 +225,19 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
                 combo.pack(fill=tk.X, expand=True)
                 self._widgets[field] = combo
                 self._ko_empty_label = empty_label
+            elif kind == "bool":
+                current = topic_bool_for_editor(value, default="true")
+                combo = ttk.Combobox(
+                    right, values=("true", "false"), width=46, state="readonly"
+                )
+                combo.set(current)
+                combo.pack(fill=tk.X, expand=True)
+                self._widgets[field] = combo
             elif kind == "bg_path":
                 values = [BG_PATH_RANDOM_LABEL, *list_bg_path_choices()]
-                current = bg_path_for_combo(value)
+                current = bg_path_for_vocab_combo(value)
                 if current not in values:
-                    values = [current, *values]
+                    current = BG_PATH_RANDOM_LABEL
                 combo_row = ttk.Frame(right)
                 combo_row.pack(fill=tk.X, expand=True)
                 combo = ttk.Combobox(
@@ -187,7 +254,7 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
                 self._widgets[field] = entry
                 if field == "id" and not is_new:
                     entry.configure(state="readonly")
-            if hint:
+            if hint and kind != "multiline_lines":
                 ttk.Label(
                     right,
                     text=hint,
@@ -199,13 +266,10 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
         self._word_rows = ShortsVocabularyWordRowsEditor(
             words_section,
             word_ids=row.get("word_id", ""),
-            hook_titles=row.get("hook_title", ""),
-            sound_repeat=row.get("sound_repeat_count", ""),
             after_delay=row.get("after_sound_delay_sec", ""),
-            read_meaning_ko=row.get("read_meaning_ko", ""),
             use_word_video_audio=row.get("use_word_video_audio", ""),
         )
-        self._word_rows.pack(fill=tk.X, padx=8, pady=6)
+        self._word_rows.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -241,12 +305,16 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
         out: dict[str, str] = {c: "" for c in SHORTS_VOCABULARY_CLIPS_FIELDNAMES}
         for field, _label, kind, _hint in _FIELD_SPECS:
             w = self._widgets[field]
-            if isinstance(w, tk.Text):
+            if isinstance(w, MultilineLinesEditor):
+                out[field] = w.get_value()
+            elif isinstance(w, tk.Text):
                 out[field] = w.get("1.0", tk.END).strip()
             elif isinstance(w, ttk.Combobox):
                 selected = (w.get() or "").strip()
                 if field == "bg_path":
-                    out[field] = bg_path_from_combo(selected)
+                    out[field] = normalize_vocab_bg_path(
+                        bg_path_from_combo(selected)
+                    )
                 elif field == "ko_narration_id":
                     if selected == getattr(self, "_ko_empty_label", "(없음)"):
                         out[field] = ""
@@ -259,6 +327,12 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
             else:
                 out[field] = w.get().strip()
         out.update(self._word_rows.get_pipe_values())
+        out["sound_repeat_count"] = normalize_topic_sound_repeat(
+            out.get("sound_repeat_count", "")
+        )
+        out["read_meaning_ko"] = normalize_topic_bool(
+            out.get("read_meaning_ko", ""), default="true"
+        )
         return out
 
     def _save(self) -> None:

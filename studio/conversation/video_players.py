@@ -44,6 +44,23 @@ class SimpleVideoPlayer:
         return self._end_time if self._end_time >= 0 else self._duration_sec
 
     @staticmethod
+    def _probe_duration_sec(cap: Any, frame_count: float, fps: float) -> float:
+        """컨테이너 길이(초). frame_count 메타가 없으면 재생 위치로 추정."""
+        if frame_count > 0 and fps > 0:
+            return frame_count / fps
+        try:
+            import cv2
+
+            cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1.0)
+            ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0)
+            cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+            if ms > 100.0:
+                return ms / 1000.0
+        except Exception:
+            pass
+        return 3600.0
+
+    @staticmethod
     def _normalize_capture_fps(cap: Any, frame_count: float) -> float:
         """컨테이너 FPS 메타가 비정상일 때 길이·프레임 수로 보정."""
         fallback = float(STUDIO_VIDEO_FALLBACK_FPS)
@@ -157,7 +174,7 @@ class SimpleVideoPlayer:
         self._cap = cap
         fc = max(0.0, float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
         self._fps = self._normalize_capture_fps(cap, fc)
-        self._duration_sec = fc / self._fps if fc > 0 and self._fps > 0 else 3600.0
+        self._duration_sec = self._probe_duration_sec(cap, fc, self._fps)
         try:
             cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000.0)
         except Exception:

@@ -480,6 +480,116 @@ def batch_build_vocab_meaning_ko_for_topic(
     )
 
 
+def _batch_build_shorts_vocab_ko_narration(
+    *,
+    csv_path: str | Path | None = None,
+    session_topics: list[str] | None = None,
+    clip_id: int = 0,
+    tts: str = "edge",
+    tts_voice: str = "ko-KR-SunHiNeural",
+    force_tts: bool = False,
+) -> tuple[int, int, int]:
+    """shorts_vocabulary_clips.ko_narration_id → topic 인트로 TTS 배치."""
+    from audio.ko_narration import (
+        batch_build_shorts_ko_narration,
+        collect_ko_narration_set_ids_from_shorts_csv,
+    )
+    from data.ko_narration_loader import load_ko_narration_tables
+
+    load_ko_narration_tables()
+    set_ids = collect_ko_narration_set_ids_from_shorts_csv(
+        shorts_mode="vocabulary",
+        csv_path=csv_path,
+        session_topics=session_topics,
+        clip_id=int(clip_id or 0),
+    )
+    if not set_ids:
+        if session_topics:
+            scope = f"topic={session_topics[0]}"
+        elif clip_id:
+            scope = f"clips id={clip_id}"
+        else:
+            scope = "shorts_vocabulary_clips"
+        logger.info("ko_narration_id 없음 — topic 인트로 TTS 스킵 (%s)", scope)
+        return 0, 0, 0
+
+    try:
+        from studio.shorts.follow_along_tts import ensure_follow_along_mp3
+
+        ensure_follow_along_mp3()
+    except Exception as ex:
+        logger.warning("follow_along TTS 생성 실패: %s", ex)
+
+    return batch_build_shorts_ko_narration(
+        shorts_mode="vocabulary",
+        csv_path=csv_path,
+        session_topics=session_topics,
+        clip_id=int(clip_id or 0),
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+
+
+def _merge_batch_counts(
+    first: tuple[int, int, int],
+    second: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    return first[0] + second[0], first[1] + second[1], first[2] + second[2]
+
+
+def batch_build_shorts_vocabulary_tts_for_clip_row_id(
+    clip_row_id: int,
+    *,
+    csv_path: str | Path | None = None,
+    tts: str = "edge",
+    tts_voice: str = "ko-KR-SunHiNeural",
+    force_tts: bool = False,
+) -> tuple[int, int, int]:
+    """shorts_vocabulary_clips 행 id → word 뜻 TTS + ko_narration_id 인트로 TTS."""
+    meaning = batch_build_vocab_meaning_ko_for_clip_row_id(
+        clip_row_id,
+        csv_path=csv_path,
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+    narration = _batch_build_shorts_vocab_ko_narration(
+        csv_path=csv_path,
+        clip_id=int(clip_row_id),
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+    return _merge_batch_counts(meaning, narration)
+
+
+def batch_build_shorts_vocabulary_tts_for_topic(
+    topic: str,
+    *,
+    csv_path: str | Path | None = None,
+    tts: str = "edge",
+    tts_voice: str = "ko-KR-SunHiNeural",
+    force_tts: bool = False,
+) -> tuple[int, int, int]:
+    """topic 숏츠 단어 → word 뜻 TTS + ko_narration_id 인트로 TTS."""
+    meaning = batch_build_vocab_meaning_ko_for_topic(
+        topic,
+        csv_path=csv_path,
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+    narration = _batch_build_shorts_vocab_ko_narration(
+        csv_path=csv_path,
+        session_topics=[topic.strip()],
+        tts=tts,
+        tts_voice=tts_voice,
+        force_tts=force_tts,
+    )
+    return _merge_batch_counts(meaning, narration)
+
+
 def ensure_vocab_meaning_plan_for_clip(
     clip: dict[str, Any],
     *,

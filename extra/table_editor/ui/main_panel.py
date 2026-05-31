@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import re
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 from typing import Callable
@@ -17,8 +16,6 @@ from extra.table_editor.services.topic_sources import (
 )
 from extra.table_editor.ui.studio_run_dialog import StudioRunDialog
 from extra.table_editor.ui.tts_generate_dialog import TtsGenerateDialog
-
-_NUMERIC = re.compile(r"^\d+$")
 
 _RECORD_MAX_SEC: dict[tuple[str, str], int] = {
     ("conversation", ""): 900,
@@ -244,13 +241,15 @@ class MainPanel(ttk.Frame):
             )
             return
         if kind == "shorts_vocab":
-            if _NUMERIC.match(raw):
-                argv = ["-m", "tools.tts_gen.build_vocab_meaning_ko", "--id", raw]
-                title = f"숏츠 단어 TTS id {raw}"
-            else:
-                argv = ["-m", "tools.tts_gen.build_vocab_meaning_ko", "--topic", raw]
-                title = f"숏츠 단어 TTS topic {raw}"
-            self._run_task(argv, title=title)
+            self._run_task(
+                [
+                    "-m",
+                    "tools.tts_gen.build_vocab_meaning_ko",
+                    "--topic",
+                    raw,
+                ],
+                title=f"숏츠 단어 TTS topic {raw}",
+            )
 
     def _run_studio_menu(self, studio: str, shorts_type: str = "") -> None:
         meta = self._studio_run_meta(studio, shorts_type)

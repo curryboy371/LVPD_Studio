@@ -15,6 +15,7 @@ class WordSearchPanel(ttk.LabelFrame):
         *,
         on_pick: Callable[[str], None],
         hint: str = "word id 입력란에 포커스 후 검색·선택",
+        pick_button_text: str = "슬롯에 넣기",
     ) -> None:
         super().__init__(master, text="단어 검색")
         self._on_pick = on_pick
@@ -74,7 +75,7 @@ class WordSearchPanel(ttk.LabelFrame):
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill=tk.X, padx=8, pady=(0, 8))
-        ttk.Button(btn_row, text="슬롯에 넣기", command=self._pick_selected).pack(
+        ttk.Button(btn_row, text=pick_button_text, command=self._pick_selected).pack(
             side=tk.LEFT
         )
 
