@@ -635,8 +635,8 @@ SHORTS_VIDEO_AFTER_ALPHA = 30
 SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER = 1.2
 # 회화 conv: 같은 멘트 내 연속 seq(ko→ko) 끝난 뒤 다음 cue까지 대기(초)
 SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC = 0.02
-# 회화 conv: 연속 seq(ko→ko) 전환 시 현재 TTS 끝에서 잘라낼 길이(초)
-SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC = 1.3
+# 숏츠 KO TTS: 연속 seq(cue→cue) 전환 시 현재 TTS 끝에서 잘라낼 길이(초) — 회화·단어·토픽 내레이션
+SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC = 0.7
 
 # 노래방 색상 (좌→우 진행 채움: inactive=미재생, active=재생됨)
 KARAOKE_ACTIVE_HANZI = (255, 230, 120)

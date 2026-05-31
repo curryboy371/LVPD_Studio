@@ -479,9 +479,21 @@ class ClipScene:
     def _conv_script_next_step_is_ko(self) -> bool:
         return self._conv_script_step_kind_at(self._script_index + 1) == "ko"
 
+    def _ko_narration_has_next_seq_cue(self) -> bool:
+        """다음 cue/seq TTS가 이어질 때 True (꼬리 trim 대상)."""
+        if self._stage == ClipStage.CONV_SCRIPT:
+            return self._script_phase == "ko" and self._conv_script_next_step_is_ko()
+        if not self._ko_started or self._ko_finished:
+            return False
+        plan = self._active_ko_plan()
+        if plan is None:
+            return False
+        cues = list(getattr(plan, "cues", None) or [])
+        return self._ko_cue_index + 1 < len(cues)
+
     def _ko_cue_seq_trim_sec(self, duration_sec: float) -> float:
-        """연속 seq(ko→ko)일 때만 TTS 꼬리를 잘라낼 길이(초)."""
-        if self._stage != ClipStage.CONV_SCRIPT or not self._conv_script_next_step_is_ko():
+        """연속 seq(cue→cue)일 때만 TTS 꼬리를 잘라낼 길이(초)."""
+        if not self._ko_narration_has_next_seq_cue():
             return 0.0
         dur = max(0.0, float(duration_sec))
         return min(
@@ -1925,8 +1937,7 @@ class ClipScene:
         dur = max(0.0, float(self._ko_cue_duration))
         if dur <= 1e-6:
             return self._ko_cue_elapsed >= 0.5
-        if self._stage == ClipStage.CONV_SCRIPT and self._conv_script_next_step_is_ko():
-            # 연속 seq(1→2): 꼬리를 잘라 텀 없이 2 시작
+        if self._ko_narration_has_next_seq_cue():
             return self._ko_cue_elapsed >= self._ko_cue_effective_duration_sec()
         return self._ko_cue_elapsed >= dur + 0.1
 
