@@ -20,7 +20,9 @@ from studio.shorts.constants import (
     SHORTS_CONV_CN_REPLAY_PAUSE_SEC,
     SHORTS_CONV_SUB_STEP_PAUSE_SEC,
     SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC,
+    SHORTS_CONVERSATION_KO_SEQ_LAST_TRIM_SEC,
     SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC,
+    SHORTS_VOCAB_NO_SOUND_GAP_SEC,
     SHORTS_VIDEO_AFTER_ALPHA,
     SHORTS_VIDEO_END_HOLD_SEC,
     SHORTS_SOUND_PLAY_COUNT,
@@ -168,7 +170,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
-        self._situation_subtitle_color_anim: Optional[Any] = None
+        self._cta_text_color_anim: Optional[Any] = None
 
     def reset_playback_state(self) -> None:
         """녹화 시작 직전: init()에서 쌓인 FSM·오디오 상태 초기화."""
@@ -207,7 +209,7 @@ class ClipScene:
         self._conv_video_fade_active = False
         self._conv_video_fade_timer = 0.0
         self._conv_video_fade_resume = ""
-        self._situation_subtitle_color_anim: Optional[Any] = None
+        self._cta_text_color_anim: Optional[Any] = None
 
     @property
     def stage(self) -> ClipStage:
@@ -417,7 +419,7 @@ class ClipScene:
         self._vocab_meaning_entered = False
         self._conv_translation_plan = None
         self._conv_translation_entered = False
-        self._situation_subtitle_color_anim = None
+        self._cta_text_color_anim = None
         self._vocab_after_video_action = ""
         self._ensure_ko_plan()
         self._ensure_vocab_meaning_plan()
@@ -491,15 +493,30 @@ class ClipScene:
         cues = list(getattr(plan, "cues", None) or [])
         return self._ko_cue_index + 1 < len(cues)
 
+    def _ko_narration_is_last_seq_cue(self) -> bool:
+        """현재 cue/seq가 이어지는 TTS의 마지막일 때 True."""
+        if self._stage == ClipStage.CONV_SCRIPT:
+            return self._script_phase == "ko" and not self._conv_script_next_step_is_ko()
+        if not self._ko_started or self._ko_finished:
+            return False
+        plan = self._active_ko_plan()
+        if plan is None:
+            return False
+        cues = list(getattr(plan, "cues", None) or [])
+        return bool(cues) and self._ko_cue_index + 1 >= len(cues)
+
     def _ko_cue_seq_trim_sec(self, duration_sec: float) -> float:
-        """연속 seq(cue→cue)일 때만 TTS 꼬리를 잘라낼 길이(초)."""
-        if not self._ko_narration_has_next_seq_cue():
-            return 0.0
+        """연속 seq 또는 멘트 마지막 seq일 때 TTS 꼬리를 잘라낼 길이(초)."""
         dur = max(0.0, float(duration_sec))
-        return min(
-            SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC,
-            max(0.0, dur - 0.04),
-        )
+
+        def _cap(trim_sec: float) -> float:
+            return min(trim_sec, max(0.0, dur - 0.04))
+
+        if self._ko_narration_has_next_seq_cue():
+            return _cap(SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC)
+        if self._ko_narration_is_last_seq_cue():
+            return _cap(SHORTS_CONVERSATION_KO_SEQ_LAST_TRIM_SEC)
+        return 0.0
 
     def _ko_cue_effective_duration_sec(self) -> float:
         dur = max(0.0, float(self._ko_cue_duration))
@@ -854,6 +871,18 @@ class ClipScene:
 
     def _use_word_video_audio(self) -> bool:
         v = self._clip.get("use_word_video_audio")
+        if isinstance(v, bool):
+            return v
+        s = str(v or "").strip().lower()
+        if s in ("1", "true", "yes", "y", "on", "t"):
+            return True
+        if s in ("0", "false", "no", "n", "off", "f"):
+            return False
+        return False
+
+    def _skip_word_video_tail(self) -> bool:
+        """shorts_vocabulary_clips.skip_word_video_tail — mp3 종료 후 word_video 남은 구간 스킵."""
+        v = self._clip.get("skip_word_video_tail")
         if isinstance(v, bool):
             return v
         s = str(v or "").strip().lower()
@@ -1251,8 +1280,8 @@ class ClipScene:
     def update(self, dt_sec: float) -> None:
         self._drawer.tick_fade(dt_sec)
         self._timer += max(0.0, float(dt_sec))
-        if self._situation_subtitle_for_bottom():
-            self._tick_situation_subtitle_color(dt_sec)
+        if self._should_tick_cta_text_color():
+            self._tick_cta_text_color(dt_sec)
 
         if self._stage == ClipStage.VIDEO_PLAY:
             self._try_start_deferred_ko_narration()
@@ -1398,7 +1427,11 @@ class ClipScene:
             return
 
         if self._stage == ClipStage.VOCAB_GAP:
+            if self._is_word_video_still_playing():
+                self._sync_word_video_timeline(dt_sec)
             if self._timer >= self._vocab_gap_sec:
+                if self._is_word_video_still_playing():
+                    self._freeze_word_video_frame()
                 self._finish_clip()
             return
 
@@ -1693,9 +1726,14 @@ class ClipScene:
 
     def _vocab_after_sound_delay_sec(self) -> float:
         try:
-            return max(0.0, float(self._clip.get("after_sound_delay_sec") or 0))
+            delay = max(0.0, float(self._clip.get("after_sound_delay_sec") or 0))
         except (TypeError, ValueError):
-            return 0.0
+            delay = 0.0
+        if delay > 1e-6:
+            return delay
+        if not str(self._clip.get("sound_path") or "").strip():
+            return float(SHORTS_VOCAB_NO_SOUND_GAP_SEC)
+        return 0.0
 
     def _enter_vocab_gap(self) -> None:
         self._stop_learn_audio()
@@ -1727,12 +1765,20 @@ class ClipScene:
 
     def _try_enter_vocab_wait_word_video(self, *, next_action: str) -> None:
         """발음·TTS 종료 후 word 비디오가 남아 있으면 끝까지 재생한 뒤 다음 단계."""
+        self._vocab_after_video_action = next_action
         if not self._is_word_video_still_playing():
-            self._vocab_after_video_action = next_action
+            self._proceed_vocab_after_sounds()
+            return
+        if self._skip_word_video_tail():
+            self._stop_learn_audio()
+            if next_action == "gap" and self._vocab_after_sound_delay_sec() > 1e-6:
+                self._vocab_after_video_action = ""
+                self._enter_vocab_gap()
+                return
+            self._freeze_word_video_frame()
             self._proceed_vocab_after_sounds()
             return
         self._stop_learn_audio()
-        self._vocab_after_video_action = next_action
         self._stage = ClipStage.VOCAB_WAIT_VIDEO
         self._timer = 0.0
 
@@ -1937,7 +1983,7 @@ class ClipScene:
         dur = max(0.0, float(self._ko_cue_duration))
         if dur <= 1e-6:
             return self._ko_cue_elapsed >= 0.5
-        if self._ko_narration_has_next_seq_cue():
+        if self._ko_cue_seq_trim_sec(dur) > 0:
             return self._ko_cue_elapsed >= self._ko_cue_effective_duration_sec()
         return self._ko_cue_elapsed >= dur + 0.1
 
@@ -2178,26 +2224,37 @@ class ClipScene:
             return ""
         return str(self._clip.get("situation_subtitle") or "").strip()
 
-    def _situation_subtitle_color_seed(self) -> int:
+    def _should_tick_cta_text_color(self) -> bool:
+        if self._situation_subtitle_for_bottom():
+            return True
+        if (
+            self._is_vocabulary_clip()
+            and self._stage == ClipStage.CTA_HOLD
+            and self._last_hold_text()
+        ):
+            return True
+        return False
+
+    def _cta_text_color_seed(self) -> int:
         try:
             return int(self._clip.get("clip_id") or 0)
         except (TypeError, ValueError):
             return 0
 
-    def _ensure_situation_subtitle_color_anim(self) -> Any:
-        from studio.shorts.constants import SituationSubtitleColorAnimator
+    def _ensure_cta_text_color_anim(self) -> Any:
+        from studio.shorts.constants import CtaTextColorAnimator
 
-        if self._situation_subtitle_color_anim is None:
-            self._situation_subtitle_color_anim = SituationSubtitleColorAnimator(
-                seed=self._situation_subtitle_color_seed()
+        if self._cta_text_color_anim is None:
+            self._cta_text_color_anim = CtaTextColorAnimator(
+                seed=self._cta_text_color_seed()
             )
-        return self._situation_subtitle_color_anim
+        return self._cta_text_color_anim
 
-    def _tick_situation_subtitle_color(self, dt_sec: float) -> None:
-        self._ensure_situation_subtitle_color_anim().tick(dt_sec)
+    def _tick_cta_text_color(self, dt_sec: float) -> None:
+        self._ensure_cta_text_color_anim().tick(dt_sec)
 
-    def _situation_subtitle_color_now(self) -> tuple[int, int, int]:
-        return self._ensure_situation_subtitle_color_anim().current_color()
+    def _cta_text_color_now(self) -> tuple[int, int, int]:
+        return self._ensure_cta_text_color_anim().current_color()
 
     def _draw_situation_bottom_zone(
         self,
@@ -2214,8 +2271,8 @@ class ClipScene:
             situation_subtitle=situation,
             channel=_CHANNEL_BOTTOM,
             conversation_situation=self._is_conversation_clip(),
-            subtitle_color=(
-                self._situation_subtitle_color_now()
+            text_color=(
+                self._cta_text_color_now()
                 if self._is_conversation_clip()
                 else None
             ),
@@ -2530,6 +2587,7 @@ class ClipScene:
             text=text,
             fade_alpha=self._drawer.fade_alpha(_CHANNEL_BOTTOM),
             frame_height=fh,
+            text_color=self._cta_text_color_now(),
         )
 
     def _should_draw_pinned_video(self) -> bool:

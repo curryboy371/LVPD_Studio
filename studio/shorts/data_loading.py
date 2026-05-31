@@ -578,6 +578,13 @@ def parse_topic_read_meaning_ko(raw: str, *, default: bool = True) -> bool:
     return _parse_bool_token(token, default=default)
 
 
+def parse_topic_skip_word_video_tail(raw: str, *, default: bool = False) -> bool:
+    """topic 공통 skip_word_video_tail. legacy `|` per-word 는 첫 값만."""
+    parts = _split_pipe_field(raw)
+    token = parts[0] if parts else ""
+    return _parse_bool_token(token, default=default)
+
+
 def parse_topic_hook_title(raw: str) -> str:
     """topic 공통 hook_title. legacy `|` per-word 는 첫 값만, `\\n` 줄바꿈 허용."""
     parts = [p.replace("\\n", "\n") for p in _split_pipe_field(raw)]
@@ -722,6 +729,10 @@ def build_shorts_vocabulary_clip_list(
             len(word_ids),
             default=False,
         )
+        skip_word_video_tail_flag = parse_topic_skip_word_video_tail(
+            row.get("skip_word_video_tail") or "", default=False
+        )
+        skip_word_video_tail_flags = [skip_word_video_tail_flag] * len(word_ids)
         last_hold_text = _normalize_multiline_field(row.get("last_hold_text") or "")
         last_hold_sec = parse_last_hold_sec_field(row.get("last_hold_sec"))
 
@@ -760,6 +771,7 @@ def build_shorts_vocabulary_clip_list(
             clip["after_sound_delay_sec"] = after_sound_delays[wi - 1]
             clip["read_meaning_ko"] = read_meaning_ko_flags[wi - 1]
             clip["use_word_video_audio"] = use_word_video_audio_flags[wi - 1]
+            clip["skip_word_video_tail"] = skip_word_video_tail_flags[wi - 1]
             clip["last_hold_text"] = last_hold_text
             clip["last_hold_sec"] = last_hold_sec
             word = get_word(word_id)
@@ -855,6 +867,7 @@ def _build_vocab_clips_from_vocabulary_word_rows(
             continue
         clip["topic_intro"] = {}
         clip["read_meaning_ko"] = True
+        clip["skip_word_video_tail"] = False
         out.append(clip)
     return out
 

@@ -568,6 +568,7 @@ class ShortsDrawer:
         text: str,
         fade_alpha: int = 255,
         frame_height: int = 0,
+        text_color: Optional[tuple[int, int, int]] = None,
     ) -> None:
         """CTA_HOLD(2.5초) — tip 아래 마무리 문구. `\\n` 줄바꿈."""
         lines = parse_last_hold_lines(text)
@@ -577,7 +578,7 @@ class ShortsDrawer:
 
         fh = max(1, int(frame_height) or screen.get_height())
         pt = shorts_vocab_tip_font_pt(ko_subtitle_pt=int(self._font_sizes.ko_subtitle_kr))
-        color = (220, 225, 235)
+        color = text_color or (220, 225, 235)
         if not hasattr(self, "_last_hold_font_pt") or self._last_hold_font_pt != pt:
             self._last_hold_font_pt = pt
             self._last_hold_font_kr = load_font_korean(pt, color)
@@ -1100,7 +1101,7 @@ class ShortsDrawer:
         channel: str,
         subtitle_progress: Optional[float] = None,
         conversation_situation: bool = False,
-        subtitle_color: Optional[tuple[int, int, int]] = None,
+        text_color: Optional[tuple[int, int, int]] = None,
     ) -> None:
         alpha = self.fade_alpha(channel)
         if alpha <= 0:
@@ -1116,7 +1117,7 @@ class ShortsDrawer:
             from studio.shorts.constants import shorts_conv_situation_font_pt
 
             font = self._conv_situation_subtitle_font(shorts_conv_situation_font_pt(fh))
-            sub_color = subtitle_color or (220, 225, 235)
+            sub_color = text_color or (220, 225, 235)
         else:
             font = self._bottom_font
             sub_color = (220, 225, 235)

@@ -292,6 +292,7 @@ class ShortsVocabularyClipsPanel(ttk.Frame):
         defaults["id"] = new_id
         defaults["sound_repeat_count"] = "1"
         defaults["read_meaning_ko"] = "true"
+        defaults["skip_word_video_tail"] = "false"
         topic = self._topic_var.get()
         if topic and topic != TOPIC_FILTER_ALL:
             defaults["topic"] = topic

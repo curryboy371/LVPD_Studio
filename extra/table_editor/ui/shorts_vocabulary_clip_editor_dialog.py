@@ -65,6 +65,12 @@ _FIELD_SPECS: list[tuple[str, str, str, str]] = [
         "topic 전체 단어 공통. false면 뜻 나레이션 없이 중국어 mp3만",
     ),
     (
+        "skip_word_video_tail",
+        "word_video 남은 시간",
+        "bool",
+        "true면 mp3 종료 후 word_video 남은 구간 대기 없이 다음으로. false면 끝까지 재생",
+    ),
+    (
         "last_hold_text",
         "last_hold_text (CTA)",
         "multiline",
@@ -157,6 +163,7 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
             "hook_title": screen,
             "sound_repeat_count": play,
             "read_meaning_ko": play,
+            "skip_word_video_tail": play,
             "last_hold_text": tail,
             "last_hold_sec": tail,
             "bg_path": tail,
@@ -176,6 +183,8 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
                 value = topic_hook_title_for_editor(value)
             if field == "read_meaning_ko":
                 value = topic_bool_for_editor(value, default="true")
+            if field == "skip_word_video_tail":
+                value = topic_bool_for_editor(value, default="false")
             if kind == "multiline_lines":
                 editor = MultilineLinesEditor(
                     right,
@@ -332,6 +341,9 @@ class ShortsVocabularyClipEditorDialog(tk.Toplevel):
         )
         out["read_meaning_ko"] = normalize_topic_bool(
             out.get("read_meaning_ko", ""), default="true"
+        )
+        out["skip_word_video_tail"] = normalize_topic_bool(
+            out.get("skip_word_video_tail", ""), default="false"
         )
         return out
 

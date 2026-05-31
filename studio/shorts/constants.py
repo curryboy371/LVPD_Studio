@@ -619,6 +619,8 @@ VOCAB_CN_LISTEN_HINT_COLOR = (46, 204, 113)
 VOCAB_CN_SPEAK_HINT_COLOR = (255, 159, 67)
 # 단어 모드: 연속 중국어 재생 사이 대기(초)
 SHORTS_VOCAB_CN_REPLAY_PAUSE_SEC = 0.8
+# 단어 모드: sound_path 없을 때 다음 단어까지 대기(초) — after_sound_delay_sec 비었을 때
+SHORTS_VOCAB_NO_SOUND_GAP_SEC = 1.0
 # 회화 conv_script: 같은 sub 중국어 mp3 연속 재생 사이 대기(초)
 SHORTS_CONV_CN_REPLAY_PAUSE_SEC = 0.7
 # 회화 conv_script: sub 문장 CN 종료 → 다음 sub KO 시작 전 화면 유지 대기(초)
@@ -637,6 +639,8 @@ SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER = 1.2
 SHORTS_CONVERSATION_KO_SEQ_TAIL_SEC = 0.02
 # 숏츠 KO TTS: 연속 seq(cue→cue) 전환 시 현재 TTS 끝에서 잘라낼 길이(초) — 회화·단어·토픽 내레이션
 SHORTS_CONVERSATION_KO_SEQ_TRIM_SEC = 0.7
+# 숏츠 KO TTS: 멘트 마지막 seq일 때 TTS 꼬리를 잘라낼 길이(초)
+SHORTS_CONVERSATION_KO_SEQ_LAST_TRIM_SEC = 0.5
 
 # 노래방 색상 (좌→우 진행 채움: inactive=미재생, active=재생됨)
 KARAOKE_ACTIVE_HANZI = (255, 230, 120)
@@ -719,11 +723,13 @@ def shorts_conv_main_word_meaning_font_pt(label_pt: int) -> int:
     )
 
 
-# 회화 하단 situation_subtitle (CTA 문구)
+# CTA 문구 색상 전환 (회화 situation_subtitle · 단어 last_hold_text 공통)
+SHORTS_CTA_TEXT_COLORS: tuple[tuple[int, int, int], ...] = SHORTS_HOOK_TITLE_LINE1_COLORS
+SHORTS_CTA_TEXT_COLOR_TRANSITION_SEC = 0.55
+SHORTS_CTA_TEXT_MIN_CONTRAST_SQ = 18000
+
+# 회화 하단 situation_subtitle
 SHORTS_CONV_SITUATION_FONT_PT = 40
-SHORTS_CONV_SITUATION_COLORS: tuple[tuple[int, int, int], ...] = SHORTS_HOOK_TITLE_LINE1_COLORS
-SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC = 0.55
-SHORTS_CONV_SITUATION_MIN_CONTRAST_SQ = 18000
 
 
 def shorts_conv_situation_font_pt(frame_height: int) -> int:
@@ -753,10 +759,10 @@ def _lerp_rgb(
     )
 
 
-def pick_random_situation_subtitle_color(rng: Any) -> tuple[int, int, int]:
+def pick_random_cta_text_color(rng: Any) -> tuple[int, int, int]:
     import random
 
-    pool = SHORTS_CONV_SITUATION_COLORS
+    pool = SHORTS_CTA_TEXT_COLORS
     if not pool:
         return (255, 110, 175)
     if isinstance(rng, random.Random):
@@ -764,16 +770,16 @@ def pick_random_situation_subtitle_color(rng: Any) -> tuple[int, int, int]:
     return pool[0]
 
 
-def pick_contrasting_situation_subtitle_color(
+def pick_contrasting_cta_text_color(
     rng: Any,
     current: tuple[int, int, int],
 ) -> tuple[int, int, int]:
     """팔레트에서 current 와 RGB 거리가 큰 색을 무작위 선택."""
-    palette = [c for c in SHORTS_CONV_SITUATION_COLORS if c != current]
+    palette = [c for c in SHORTS_CTA_TEXT_COLORS if c != current]
     if not palette:
-        return pick_random_situation_subtitle_color(rng)
+        return pick_random_cta_text_color(rng)
     ranked = sorted(palette, key=lambda c: _rgb_dist_sq(c, current), reverse=True)
-    min_sq = int(SHORTS_CONV_SITUATION_MIN_CONTRAST_SQ)
+    min_sq = int(SHORTS_CTA_TEXT_MIN_CONTRAST_SQ)
     strong = [c for c in ranked if _rgb_dist_sq(c, current) >= min_sq]
     pool = strong if len(strong) >= 2 else ranked[: max(3, len(ranked) // 2)]
     import random
@@ -783,8 +789,8 @@ def pick_contrasting_situation_subtitle_color(
     return pool[0]
 
 
-class SituationSubtitleColorAnimator:
-    """situation_subtitle: 랜덤 시작 → 대비색으로 빠르게 전환 → 도달 시 새 대비색, 반복."""
+class CtaTextColorAnimator:
+    """CTA 문구: 랜덤 시작 → 대비색으로 빠르게 전환 → 도달 시 새 대비색, 반복."""
 
     __slots__ = ("_from", "_rng", "_seg_elapsed", "_to")
 
@@ -792,27 +798,27 @@ class SituationSubtitleColorAnimator:
         import random
 
         self._rng = random.Random(int(seed) ^ 0x5A17_0001)
-        self._from = pick_random_situation_subtitle_color(self._rng)
-        self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+        self._from = pick_random_cta_text_color(self._rng)
+        self._to = pick_contrasting_cta_text_color(self._rng, self._from)
         self._seg_elapsed = 0.0
 
     def reset(self, *, seed: int = 0) -> None:
         import random
 
         self._rng = random.Random(int(seed) ^ 0x5A17_0001)
-        self._from = pick_random_situation_subtitle_color(self._rng)
-        self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+        self._from = pick_random_cta_text_color(self._rng)
+        self._to = pick_contrasting_cta_text_color(self._rng, self._from)
         self._seg_elapsed = 0.0
 
     def tick(self, dt_sec: float) -> None:
-        dur = max(1e-6, float(SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC))
+        dur = max(1e-6, float(SHORTS_CTA_TEXT_COLOR_TRANSITION_SEC))
         self._seg_elapsed += max(0.0, float(dt_sec))
         while self._seg_elapsed >= dur:
             self._seg_elapsed -= dur
             self._from = self._to
-            self._to = pick_contrasting_situation_subtitle_color(self._rng, self._from)
+            self._to = pick_contrasting_cta_text_color(self._rng, self._from)
 
     def current_color(self) -> tuple[int, int, int]:
-        dur = max(1e-6, float(SHORTS_CONV_SITUATION_COLOR_TRANSITION_SEC))
+        dur = max(1e-6, float(SHORTS_CTA_TEXT_COLOR_TRANSITION_SEC))
         t = min(1.0, self._seg_elapsed / dur)
         return _lerp_rgb(self._from, self._to, t)
