@@ -9,9 +9,9 @@ from typing import Any, Literal
 from core.paths import SHORTS_HEIGHT, SHORTS_WIDTH, get_repo_root
 
 LAYOUT_VERSION = 1
-# 편집기 가이드 기본 (숏츠 ZONE 상 6% · 하 24%)
-DEFAULT_MARGIN_TOP_RATIO = 0.30 * 0.20
-DEFAULT_MARGIN_BOTTOM_RATIO = 0.30 * 0.80
+# 편집기 가이드 기본 — resource/table/word_memorize_layouts/요일.json 과 동일
+DEFAULT_MARGIN_TOP_RATIO = 0.1125
+DEFAULT_MARGIN_BOTTOM_RATIO = 0.13177083333333334
 DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_layouts"
 
 BackgroundType = Literal["color", "image"]
