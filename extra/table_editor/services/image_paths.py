@@ -4,23 +4,42 @@ from __future__ import annotations
 from pathlib import Path
 
 _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+WORD_IMAGE_REL = "resource/image/word"
+
+
+def word_image_dir(repo_root: Path) -> Path:
+    """단어 이미지 기본 저장 디렉터리 (resource/image/word)."""
+    return (repo_root.resolve() / "resource" / "image" / "word").resolve()
 
 
 def build_image_stem_index(repo_root: Path) -> dict[str, Path]:
-    """resource/image 하위 stem → 절대 경로."""
+    """resource/image 하위 stem → 절대 경로 (word/ 하위가 동일 stem이면 우선)."""
     base = repo_root / "resource" / "image"
     if not base.exists():
         return {}
     out: dict[str, Path] = {}
-    for fp in base.rglob("*"):
+    for fp in sorted(base.rglob("*"), key=lambda p: p.as_posix()):
         if not fp.is_file():
             continue
         if fp.suffix.lower() not in _IMAGE_SUFFIXES:
             continue
         key = fp.stem.strip()
-        if key and key not in out:
-            out[key] = fp.resolve()
+        if not key:
+            continue
+        resolved = fp.resolve()
+        prev = out.get(key)
+        if prev is None:
+            out[key] = resolved
+            continue
+        prev_is_word = WORD_IMAGE_REL in prev.as_posix()
+        new_is_word = WORD_IMAGE_REL in resolved.as_posix()
+        if new_is_word and not prev_is_word:
+            out[key] = resolved
     return out
+
+
+def _default_word_image_path(repo_root: Path, stem: str) -> Path:
+    return (word_image_dir(repo_root) / f"{stem}.png").resolve()
 
 
 def resolve_image_absolute(
@@ -43,19 +62,19 @@ def resolve_image_absolute(
         hit = index.get(raw)
         if hit is not None:
             return hit
-        return (repo_root / "resource" / "image" / f"{raw}.png").resolve()
+        return _default_word_image_path(repo_root, raw)
 
     wid = (word_id or "").strip()
     if wid:
-        return (repo_root / "resource" / "image" / f"{wid}.png").resolve()
+        return _default_word_image_path(repo_root, wid)
     w = (word or "").strip()
     if w:
-        return (repo_root / "resource" / "image" / f"{w}.png").resolve()
-    return (repo_root / "resource" / "image" / "clipboard_new.png").resolve()
+        return _default_word_image_path(repo_root, w)
+    return _default_word_image_path(repo_root, "clipboard_new")
 
 
 def img_path_value_for_table(repo_root: Path, target: Path) -> str:
-    """CSV/엑셀에 넣을 img_path 문자열 (기존 stem 관례 유지)."""
+    """CSV/엑셀에 넣을 img_path 문자열 (resource/image/word/ 는 stem만 저장)."""
     target = target.resolve()
     repo_root = repo_root.resolve()
     try:
@@ -63,7 +82,10 @@ def img_path_value_for_table(repo_root: Path, target: Path) -> str:
     except ValueError:
         return target.as_posix()
     rel_posix = rel.as_posix()
-    if rel_posix.startswith("resource/image/") and target.suffix.lower() in _IMAGE_SUFFIXES:
+    if (
+        rel_posix.startswith(f"{WORD_IMAGE_REL}/")
+        or rel_posix.startswith("resource/image/")
+    ) and target.suffix.lower() in _IMAGE_SUFFIXES:
         return target.stem
     return rel_posix
 

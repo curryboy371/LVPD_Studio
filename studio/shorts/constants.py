@@ -630,8 +630,8 @@ SHORTS_BG_KARAOKE_SLOW_EXTRA_SEC = 1.5
 SHORTS_BG_PRACTICE_MIN_SEC = 4.0
 SHORTS_VIDEO_END_HOLD_SEC = 0.6
 SHORTS_VIDEO_FADE_OUT_SEC = 0.8
-# 페이드 후에도 비디오가 남도록 최소 알파(0=완전 숨김, 255=그대로)
-SHORTS_VIDEO_AFTER_ALPHA = 30
+# 페이드 후 비디오 알파(0=숨김, 255=100%). 0.9 → 약 90% 밝기 유지
+SHORTS_VIDEO_AFTER_ALPHA = int(255 * 0.9)
 
 # 숏츠 회화 모드 ko_narration TTS 합성 속도 (1.0=기본, edge-tts rate / gtts 근사)
 SHORTS_CONVERSATION_KO_TTS_RATE_MULTIPLIER = 1.2

@@ -15,8 +15,11 @@ from extra.table_editor.services.image_clipboard import (
     commit_staged_image,
     discard_staged_image,
     stage_clipboard_image_to_tmp,
+    stage_image_file_to_tmp,
 )
+from extra.table_editor.ui.file_drop import bind_file_drop
 from extra.table_editor.services.image_paths import (
+    _IMAGE_SUFFIXES,
     img_path_value_for_table,
     preview_image_path,
     resolve_image_absolute,
@@ -71,8 +74,12 @@ class ImgPathEditor(ttk.Frame):
         )
         self._clipboard_btn.pack(fill=tk.X, pady=(4, 0))
 
-        preview_outer = ttk.LabelFrame(self, text="이미지 미리보기")
+        preview_outer = ttk.LabelFrame(
+            self,
+            text="이미지 미리보기 (파일 드래그 앤 드롭 가능)",
+        )
         preview_outer.pack(fill=tk.X, pady=4)
+        self._preview_outer = preview_outer
         self._preview_label = ttk.Label(
             preview_outer,
             text="(이미지 없음)",
@@ -90,6 +97,8 @@ class ImgPathEditor(ttk.Frame):
         ).pack(fill=tk.X, padx=8, pady=(0, 8))
 
         self._apply_use_state(initial=True)
+        bind_file_drop(self._preview_outer, self._on_files_dropped)
+        bind_file_drop(self._preview_label, self._on_files_dropped)
 
     def is_image_enabled(self) -> bool:
         return bool(self._use_image.get())
@@ -204,6 +213,25 @@ class ImgPathEditor(ttk.Frame):
             self._photo = None
             self._preview_label.configure(image="", text=f"(미리보기 실패)\n{ex}")
 
+    def _apply_staged_tmp(self, tmp: Path, *, source_label: str) -> None:
+        if self._pending_tmp is not None:
+            discard_staged_image(self._pending_tmp)
+
+        word_id, word = self._word_context()
+        target = resolve_image_absolute(
+            self._repo_root,
+            self._path_var.get(),
+            word_id=word_id,
+            word=word,
+        )
+        self._pending_tmp = tmp
+        self._commit_target = target
+        self._status_var.set(
+            f"{source_label}가 임시 저장되었습니다.\n"
+            f"「저장」을 누르면 아래 경로의 파일이 교체됩니다:\n{target}"
+        )
+        self._refresh_preview()
+
     def _use_clipboard(self) -> None:
         if not self.is_image_enabled():
             return
@@ -218,24 +246,39 @@ class ImgPathEditor(ttk.Frame):
         except OSError as ex:
             messagebox.showerror("클립보드", f"임시 저장 실패:\n{ex}", parent=self)
             return
+        self._apply_staged_tmp(tmp, source_label="클립보드 이미지")
 
-        if self._pending_tmp is not None:
-            discard_staged_image(self._pending_tmp)
-
-        word_id, word = self._word_context()
-        target = resolve_image_absolute(
-            self._repo_root,
-            self._path_var.get(),
-            word_id=word_id,
-            word=word,
-        )
-        self._pending_tmp = tmp
-        self._commit_target = target
-        self._status_var.set(
-            "클립보드 이미지가 임시 저장되었습니다.\n"
-            f"「저장」을 누르면 아래 경로의 파일이 교체됩니다:\n{target}"
-        )
-        self._refresh_preview()
+    def _on_files_dropped(self, paths: list[Path]) -> None:
+        if not self.is_image_enabled():
+            return
+        image_path: Path | None = None
+        for path in paths:
+            if path.suffix.lower() in _IMAGE_SUFFIXES:
+                image_path = path
+                break
+        if image_path is None:
+            messagebox.showinfo(
+                "드래그 앤 드롭",
+                "이미지 파일(.png, .jpg, .webp 등)을 놓아 주세요.",
+                parent=self,
+            )
+            return
+        try:
+            tmp = stage_image_file_to_tmp(image_path)
+        except ImportError as ex:
+            messagebox.showerror("드래그 앤 드롭", str(ex), parent=self)
+            return
+        except ValueError as ex:
+            messagebox.showinfo("드래그 앤 드롭", str(ex), parent=self)
+            return
+        except OSError as ex:
+            messagebox.showerror(
+                "드래그 앤 드롭",
+                f"임시 저장 실패:\n{ex}",
+                parent=self,
+            )
+            return
+        self._apply_staged_tmp(tmp, source_label="드롭한 이미지")
 
     def commit_on_save(self, values: dict[str, str]) -> dict[str, str]:
         out = dict(values)

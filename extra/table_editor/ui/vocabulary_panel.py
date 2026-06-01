@@ -100,6 +100,11 @@ class VocabularyPanel(ttk.Frame):
         )
         self._table.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
         self._table.bind_tree("<Delete>", self._delete_row)
+        self._table.bind_row_context_copy(
+            lambda row: (row.get("word") or "").strip(),
+            label="한자 복사",
+            on_status=self._on_status,
+        )
 
     def load_file(self, path: Path) -> None:
         self._store.load(path)

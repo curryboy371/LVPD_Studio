@@ -211,3 +211,21 @@ class TablePanel(ttk.Frame):
 
     def bind_tree(self, sequence: str, callback: Callable[[], None]) -> None:
         self._tree.bind(sequence, lambda _e: callback())
+
+    def bind_row_context_copy(
+        self,
+        get_copy_text: Callable[[dict[str, str]], str],
+        *,
+        label: str = "완성형 문장 복사",
+        on_status: Callable[[str], None] | None = None,
+    ) -> None:
+        from extra.table_editor.ui.table_row_context_menu import attach_tree_row_copy_menu
+
+        attach_tree_row_copy_menu(
+            self._tree,
+            self.get_selected_row,
+            get_copy_text,
+            label=label,
+            parent=self,
+            on_status=on_status,
+        )

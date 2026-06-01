@@ -121,6 +121,10 @@ class ConversationPanel(ttk.Frame):
             on_select=self._on_base_selected,
         )
         self._base_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._base_table.bind_row_context_copy(
+            lambda row: raw_to_display(row.get("raw_sentence", "")),
+            on_status=self._on_status,
+        )
 
         self._sub_frame = ttk.LabelFrame(self._paned, text="sub_sentences")
         self._sub_table = TablePanel(
@@ -141,6 +145,10 @@ class ConversationPanel(ttk.Frame):
             on_double_click=self._edit_sub_row,
         )
         self._sub_table.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._sub_table.bind_row_context_copy(
+            self._sub_display_for_table_row,
+            on_status=self._on_status,
+        )
         self._sub_visible = False
 
     def load_defaults(self) -> None:

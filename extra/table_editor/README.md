@@ -45,7 +45,7 @@ lvpd.bat editor
 - **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키. 확인 후 현재 시트에서 제거(저장 전까지 메모리만 변경).
 - **tts_type** / **tts_voice**: 드롭다운 선택 (`edge` \| `gtts`, Edge 목소리 `ko-KR-SunHiNeural` \| `ko-KR-InJoonNeural`). `gtts`일 때 voice는 비움.
 - **tip**: 줄마다 `[입력] [+] [-]` 한 줄. `+` 는 아래 줄 추가, `-` 는 해당 줄 삭제. 저장 시 `\\n` 으로 합침.
-- **img_path**: **이미지 사용** / **이미지 미사용** — 미사용 시 `none`·입력·클립보드 비활성. 사용 시 `word`와 동일 stem·입력 가능. **클립보드 사용**은 임시 저장 후 **저장** 시 파일 반영.
+- **img_path**: **이미지 사용** / **이미지 미사용** — 미사용 시 `none`·입력·클립보드 비활성. 사용 시 `word`와 동일 stem·입력 가능. **클립보드 사용** 또는 미리보기 영역에 이미지 파일 **드래그 앤 드롭** 시 [rembg](https://github.com/danielgatis/rembg)로 배경 제거 → 1:1 정사각형(중앙·최대 cover)·투명 PNG 임시 저장 후 **저장** 시 `resource/image/word/{stem}.png` 반영 (Windows 드롭: `windnd`). 의존성: `pip install -r extra/table_editor/requirements.txt` (최초 실행 시 모델 다운로드로 시간이 걸릴 수 있음). 이미 투명 채널이 있는 PNG는 rembg를 건너뜀.
 
 ### 단어장 행 (`vocabulary_word_rows.xlsx`)
 
