@@ -61,6 +61,20 @@ FONT_TIP_CN_FILENAMES = (
     "NotoSerifSC-Regular.ttf",
     "NotoSerifSC-Medium.ttf",
 )
+# 단어 외우기·병음: Noto Sans CJK SC (간체 고딕, 가독성 우선)
+FONT_NOTO_SANS_CJK_SC_FILENAMES = (
+    "NotoSansSC-Regular.otf",
+    "NotoSansSC-Regular.ttf",
+    "NotoSansCJKsc-Regular.otf",
+    "NotoSansCJKsc-Regular.ttf",
+    "NotoSansCJK-Regular.otf",
+)
+FONT_NOTO_SANS_CJK_SC_BOLD_FILENAMES = (
+    "NotoSansSC-Bold.otf",
+    "NotoSansSC-Bold.ttf",
+    "NotoSansCJKsc-Bold.otf",
+    "NotoSansCJKsc-Bold.ttf",
+)
 
 # 스튜디오 CLI / record_output_select_mode.bat combo에서 topic 생략·엔터 시 기본값과 동일하게 유지
 DEFAULT_STUDIO_TOPIC = "fruit_store"
@@ -96,6 +110,8 @@ STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN = 0.4
 
 # 숏츠(bg_short) 배경음 선형 볼륨 — 일반 회화·단어장 practice bg(0.4)와 별도.
 STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN = 0.6
+# 단어 외우기: 숏츠 bg_short 대비 20% 낮춤 (재생·녹화 mux 동일).
+STUDIO_WORD_MEMORIZE_BG_AUDIO_LINEAR_GAIN = STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN * 0.6
 
 # 회화 삽입 음성(pygame ch1): 중국어 mp3·기타
 STUDIO_CONVERSATION_INSERT_VOICE_LINEAR_GAIN = 1.0

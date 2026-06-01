@@ -371,18 +371,16 @@ def allocate_next_ko_line_id(
 def allocate_next_word_id(
     sheet_rows: list[dict[str, str]],
     all_sheet_rows: dict[str, list[dict[str, str]]] | None = None,
+    *,
+    sheet_name: str = "",
 ) -> str:
-    """다음 단어 id: 현재 시트 max+1. 시트가 비어 있으면 통합 문서 max+1."""
-    sheet_ids = collect_numeric_ids(sheet_rows)
-    if sheet_ids:
-        return str(max(sheet_ids) + 1)
+    """다음 단어 id: 시트 구간 내 빈 번호(전역 미사용·최소값)."""
+    from extra.table_editor.services.word_sheet_id_ranges import (
+        allocate_next_word_id as _allocate,
+    )
 
-    global_max = 0
-    if all_sheet_rows:
-        for rows in all_sheet_rows.values():
-            ids = collect_numeric_ids(rows)
-            if ids:
-                global_max = max(global_max, max(ids))
-    if global_max > 0:
-        return str(global_max + 1)
-    return "1000"
+    return _allocate(
+        sheet_rows,
+        all_sheet_rows,
+        sheet_name=sheet_name,
+    )

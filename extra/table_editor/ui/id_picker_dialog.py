@@ -40,8 +40,11 @@ class IdPickerDialog(tk.Toplevel):
             rid = row.get("id", "")
             word = row.get("word", "")
             meaning = row.get("meaning", "")
+            en = (row.get("en_meaning") or "").strip()
             pos = row.get("pos", "")
             label = f"id={rid}  {word}  [{pos}]  {meaning}"
+            if en:
+                label += f"  ({en})"
             self._listbox.insert(tk.END, label)
 
         self._listbox.bind("<Double-Button-1>", lambda _e: self._confirm())

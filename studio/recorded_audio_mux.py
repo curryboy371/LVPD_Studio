@@ -14,6 +14,7 @@ from core.paths import (
     STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN,
     STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN,
     STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN,
+    get_repo_root,
 )
 from studio.recording_events import (
     InsertSound,
@@ -72,8 +73,31 @@ def _insert_sound_mux_role(path: str) -> str:
     return "voice"
 
 
-def _mux_volume_prefix(role: str) -> str:
+def _resolve_insert_sound_path(path: str) -> str:
+    """InsertSound.path(상대·절대)를 mux용 절대 경로로 해석."""
+    raw = (path or "").strip()
+    if not raw:
+        return raw
+    p = Path(raw)
+    if p.is_file():
+        return str(p.resolve())
+    rel = raw.replace("\\", "/").lstrip("/")
+    candidate = get_repo_root() / rel
+    if candidate.is_file():
+        return str(candidate.resolve())
+    return raw
+
+
+def _mux_volume_prefix(
+    role: str,
+    *,
+    shorts_bg_linear_gain: float | None = None,
+    linear_gain_override: float | None = None,
+) -> str:
     """녹화 mux용 역할별 선형 볼륨 필터 prefix."""
+    if linear_gain_override is not None:
+        g = max(0.0, min(2.0, float(linear_gain_override)))
+        return f"volume={g},"
     if role == "embedded":
         g = max(0.0, min(2.0, float(STUDIO_MUX_EMBEDDED_AUDIO_LINEAR_GAIN)))
         return f"volume={g},"
@@ -81,7 +105,12 @@ def _mux_volume_prefix(role: str) -> str:
         g = max(0.0, min(2.0, float(STUDIO_PRACTICE_BG_AUDIO_LINEAR_GAIN)))
         return f"volume={g},"
     if role == "bg_insert_shorts":
-        g = max(0.0, min(2.0, float(STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN)))
+        base = (
+            float(shorts_bg_linear_gain)
+            if shorts_bg_linear_gain is not None
+            else float(STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN)
+        )
+        g = max(0.0, min(2.0, base))
         return f"volume={g},"
     if role == "voice_ko":
         g = max(0.0, min(2.0, float(STUDIO_CONVERSATION_KO_TTS_LINEAR_GAIN)))
@@ -166,6 +195,8 @@ def build_audio_and_mux(
     recording_events: List[RecordingEvent],
     fps: float,
     duration_sec: float,
+    *,
+    shorts_bg_linear_gain: float | None = None,
 ) -> None:
     """이벤트 로그로 오디오 트랙을 만들고 video_path와 합쳐 최종 MP4로 저장.
     video_path는 갱신되지 않고, 오디오가 추가된 새 파일을 video_path와 같은 디렉터리에 저장한다.
@@ -184,7 +215,12 @@ def build_audio_and_mux(
         tmp_path = Path(tmp)
         audio_wav = tmp_path / "audio.wav"
         _build_audio_from_events(
-            recording_events, duration_sec, fps, audio_wav, ffmpeg_cmd=FFMPEG_CMD
+            recording_events,
+            duration_sec,
+            fps,
+            audio_wav,
+            ffmpeg_cmd=FFMPEG_CMD,
+            shorts_bg_linear_gain=shorts_bg_linear_gain,
         )
         if not audio_wav.exists():
             return
@@ -206,6 +242,8 @@ def _build_audio_from_events(
     fps: float,
     output_wav: Path,
     ffmpeg_cmd: str = "ffmpeg",
+    *,
+    shorts_bg_linear_gain: float | None = None,
 ) -> None:
     """이벤트 리스트를 해석해 비디오 오디오 구간 추출 + 삽입 사운드 믹싱 → 단일 WAV."""
     import subprocess
@@ -236,8 +274,8 @@ def _build_audio_from_events(
     # - 그 다음 amerge/amix로 타임라인에 맞춰 합성. 더 단순하게: concat demuxer로 여러 조각을 이어붙이기.
     # 더 단순: 무음 위에 adelay+volume으로 각 소스를 올린 뒤 amix. adelay는 밀리초 단위.
     # adelay=delay_ms|delay_ms (stereo)
-    # (path, output_start_sec, duration_sec, source_start_sec, audio_role)
-    segments_to_mix: List[tuple[str, float, float, float, str]] = []
+    # (path, output_start_sec, duration_sec, source_start_sec, audio_role, linear_gain)
+    segments_to_mix: List[tuple[str, float, float, float, str, float | None]] = []
     current_video_path: str | None = None
     current_video_start_pts: float = 0.0
     segment_start_timeline: float = 0.0
@@ -258,13 +296,24 @@ def _build_audio_from_events(
                             dur,
                             current_video_start_pts,
                             _mux_segment_audio_role(current_video_path),
+                            None,
                         )
                     )
             current_video_path = None
         elif isinstance(ev, InsertSound):
-            if os.path.exists(ev.path) and ev.duration_sec > 0:
-                role = _insert_sound_mux_role(ev.path)
-                segments_to_mix.append((ev.path, ev.timeline_sec, ev.duration_sec, 0.0, role))
+            resolved = _resolve_insert_sound_path(ev.path)
+            if os.path.exists(resolved) and ev.duration_sec > 0:
+                role = _insert_sound_mux_role(resolved)
+                segments_to_mix.append(
+                    (
+                        resolved,
+                        ev.timeline_sec,
+                        ev.duration_sec,
+                        0.0,
+                        role,
+                        ev.linear_gain,
+                    )
+                )
 
     # 마지막 세그먼트: 녹화 끝까지 재생 중이었으면
     if current_video_path and os.path.exists(current_video_path):
@@ -277,6 +326,7 @@ def _build_audio_from_events(
                     dur,
                     current_video_start_pts,
                     _mux_segment_audio_role(current_video_path),
+                    None,
                 )
             )
 
@@ -292,15 +342,15 @@ def _build_audio_from_events(
         return
 
     # 내장 영상 오디오: 필터에서 AAC+atrim 대신 구간 PCM으로 선추출(디코드·리샘플 품질)
-    resolved: List[tuple[str, float, float, float, str]] = []
+    resolved: List[tuple[str, float, float, float, str, float | None]] = []
     for idx, row in enumerate(segments_to_mix):
-        path, start_sec, dur, src_start, role = row
+        path, start_sec, dur, src_start, role, linear_gain = row
         if _is_embedded_video_audio_path(path):
             seg_wav = output_wav.parent / f"preseg_{idx}.wav"
             if _preextract_embedded_audio_to_wav(
                 ffmpeg_cmd, path, src_start, dur, seg_wav, sr, creationflags
             ):
-                resolved.append((str(seg_wav), start_sec, dur, 0.0, "embedded"))
+                resolved.append((str(seg_wav), start_sec, dur, 0.0, "embedded", None))
             else:
                 resolved.append(row)
         else:
@@ -316,12 +366,18 @@ def _build_audio_from_events(
     inputs = ["-i", str(base_silence)]
     filter_parts = []
     whole_len = max(1, int(round(duration_sec * sr)))
-    for idx, (path, start_sec, dur, src_start, role) in enumerate(segments_to_mix):
+    for idx, (path, start_sec, dur, src_start, role, linear_gain) in enumerate(
+        segments_to_mix
+    ):
         inputs.extend(["-i", path])
         delay_ms = int(start_sec * 1000)
         # 선추출 WAV는 이미 구간만 담음 → atrim=0:dur. 컨테이너 직입력은 src_start~
         atrim = f"atrim={src_start}:{src_start + dur}"
-        gain = _mux_volume_prefix(role)
+        gain = _mux_volume_prefix(
+            role,
+            shorts_bg_linear_gain=shorts_bg_linear_gain,
+            linear_gain_override=linear_gain,
+        )
         fade = ""
         loop = ""
         if role in ("bg_insert", "bg_insert_shorts"):

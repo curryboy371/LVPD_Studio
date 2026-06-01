@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "resource/image/bg/2.png"
+  },
+  "bg_music_path": "resource/sound/bg_short/쇼츠-밝음.mp3",
+  "boxes": [
+    {
+      "word_id": "20019",
+      "order": 1,
+      "x": 40,
+      "y": 232,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "20020",
+      "order": 2,
+      "x": 378,
+      "y": 232,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_2"
+    },
+    {
+      "word_id": "20021",
+      "order": 3,
+      "x": 716,
+      "y": 232,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "20022",
+      "order": 4,
+      "x": 40,
+      "y": 710,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "20023",
+      "order": 5,
+      "x": 378,
+      "y": 710,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_5"
+    },
+    {
+      "word_id": "20024",
+      "order": 6,
+      "x": 716,
+      "y": 710,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "20025",
+      "order": 7,
+      "x": 40,
+      "y": 1188,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "20026",
+      "order": 8,
+      "x": 378,
+      "y": 1188,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "20027",
+      "order": 9,
+      "x": 716,
+      "y": 1188,
+      "w": 322,
+      "h": 462,
+      "box_key": "box_9"
+    }
+  ],
+  "holding_word_ids": [
+    "20028"
+  ],
+  "margin_top_ratio": 0.1125,
+  "margin_bottom_ratio": 0.13177083333333334
+}

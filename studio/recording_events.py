@@ -29,6 +29,8 @@ class InsertSound:
     timeline_sec: float
     path: str
     duration_sec: float
+    # mux 선형 게인(1.0=원본). None이면 역할·스튜디오 기본값.
+    linear_gain: float | None = None
 
 
 RecordingEvent = Union[VideoSegmentStart, VideoSegmentEnd, InsertSound]

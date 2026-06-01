@@ -114,8 +114,12 @@ def _load_details_from_excel(path: Path) -> dict[str, dict[str, str]]:
                 continue
             index[wid] = {
                 "word": (row.get("word") or "").strip(),
+                "pinyin": (row.get("pinyin") or "").strip(),
+                "masking": (row.get("masking") or "").strip(),
                 "meaning": (row.get("meaning") or "").strip(),
+                "en_meaning": (row.get("en_meaning") or "").strip(),
                 "pos": (row.get("pos") or "").strip(),
+                "img_path": (row.get("img_path") or "").strip(),
                 "sheet": sheet,
             }
     return index
@@ -130,8 +134,12 @@ def _load_details_from_csv(path: Path) -> dict[str, dict[str, str]]:
                 continue
             index[wid] = {
                 "word": (row.get("word") or "").strip(),
+                "pinyin": (row.get("pinyin") or "").strip(),
+                "masking": (row.get("masking") or "").strip(),
                 "meaning": (row.get("meaning") or "").strip(),
+                "en_meaning": (row.get("en_meaning") or "").strip(),
                 "pos": (row.get("pos") or "").strip(),
+                "img_path": (row.get("img_path") or "").strip(),
                 "sheet": "",
             }
     return index
@@ -153,7 +161,16 @@ def get_word_details_by_id() -> dict[str, dict[str, str]]:
 def lookup_word_details(word_id: str) -> dict[str, str]:
     """words.id → 한자·뜻·품사·시트(엑셀 시트명)."""
     target = _normalize_id(word_id)
-    empty = {"word": "", "meaning": "", "pos": "", "sheet": ""}
+    empty = {
+        "word": "",
+        "pinyin": "",
+        "masking": "",
+        "meaning": "",
+        "en_meaning": "",
+        "pos": "",
+        "img_path": "",
+        "sheet": "",
+    }
     if not target:
         return empty
     return dict(get_word_details_by_id().get(target, empty))
@@ -170,6 +187,7 @@ def _word_search_row(word_id: str) -> dict[str, str]:
         "id": _normalize_id(word_id),
         "word": details.get("word", ""),
         "meaning": details.get("meaning", ""),
+        "en_meaning": details.get("en_meaning", ""),
         "pos": details.get("pos", ""),
         "sheet": details.get("sheet", ""),
     }

@@ -218,18 +218,109 @@ def find_chinese_font_paths_in_dir(font_dir: Path) -> list[Path]:
                 continue
             if any(x in stem for x in _CHINESE_FONT_HINTS):
                 candidates.append(p)
-    # Noto*SC*, Noto*CJK*sc 우선 정렬
+    # Noto Sans SC(고딕) → Serif SC → Source Han Sans SC
     def order_key(path: Path) -> tuple[int, str]:
-        s = path.stem.lower()
-        if "notosanssc" in s or "notosans cjk sc" in s:
-            return 0, s
-        if "notoserifsc" in s:
-            return 1, s
-        if "sourcehan" in s and "sc" in s:
-            return 2, s
-        return 3, s
+        s = path.stem.lower().replace(" ", "").replace("-", "")
+        if "serif" in s:
+            return 3, path.stem.lower()
+        if "notosanssc" in s or "notosanscjksc" in s:
+            return 0, path.stem.lower()
+        if "notosans" in s and "sc" in s:
+            return 1, path.stem.lower()
+        if "sourcehan" in s and "sans" in s and "sc" in s:
+            return 2, path.stem.lower()
+        return 4, path.stem.lower()
     candidates.sort(key=order_key)
     return candidates
+
+
+def find_noto_sans_cjk_sc_paths(font_dir: Path) -> list[Path]:
+    """Noto Sans CJK SC(및 동급 간체 Sans)만 — Serif·한글·번체 제외."""
+    if not font_dir.is_dir():
+        return []
+    out: list[Path] = []
+    for path in find_chinese_font_paths_in_dir(font_dir):
+        stem = path.stem.lower().replace(" ", "").replace("-", "")
+        if "serif" in stem:
+            continue
+        if "notosanssc" in stem or "notosanscjksc" in stem:
+            out.append(path)
+        elif "notosans" in stem and "sc" in stem and "kr" not in stem and "jp" not in stem:
+            out.append(path)
+        elif "sourcehan" in stem and "sans" in stem and "sc" in stem:
+            out.append(path)
+    return out
+
+
+def load_font_noto_sans_cjk_sc(
+    size: int,
+    fgcolor: Tuple[int, int, int],
+    *,
+    weight: str = "regular",
+) -> "Optional[pygame.font.Font]":
+    """Noto Sans CJK SC 우선 (병음·한자). resource/font 또는 시스템 폰트."""
+    from core.paths import (
+        DEFAULT_FONT_DIR,
+        FONT_NOTO_SANS_CJK_SC_BOLD_FILENAMES,
+        FONT_NOTO_SANS_CJK_SC_FILENAMES,
+    )
+
+    if pygame is None:
+        return None
+
+    want_bold = WEIGHT_PREFERRED.get((weight or "regular").strip().lower(), DEFAULT_WEIGHT) >= 5
+    names = (
+        FONT_NOTO_SANS_CJK_SC_BOLD_FILENAMES
+        if want_bold
+        else FONT_NOTO_SANS_CJK_SC_FILENAMES
+    )
+    for name in names:
+        font = _load_font_at(DEFAULT_FONT_DIR / name, size)
+        if font is not None:
+            return attach_font_fgcolor(font, fgcolor)
+
+    path = find_font_path_in_dir(
+        DEFAULT_FONT_DIR, weight=weight, lang_hint="chn"
+    )
+    if path is not None:
+        stem = path.stem.lower()
+        if "serif" not in stem and (
+            "notosanssc" in stem.replace(" ", "")
+            or ("sans" in stem and "sc" in stem)
+        ):
+            font = _load_font_at(path, size)
+            if font is not None:
+                return attach_font_fgcolor(font, fgcolor)
+
+    for path in find_noto_sans_cjk_sc_paths(DEFAULT_FONT_DIR):
+        if want_bold and WEIGHT_PREFERRED.get((weight or "").lower(), 2) >= 5:
+            if _weight_from_stem(path.stem) < 5:
+                continue
+        font = _load_font_at(path, size)
+        if font is not None:
+            logger.info("Noto Sans CJK SC: %s (size=%d)", path.name, size)
+            return attach_font_fgcolor(font, fgcolor)
+
+    for sys_name in (
+        "noto sans sc",
+        "noto sans cjk sc",
+        "notosanssc",
+        "microsoft yahei",
+        "simhei",
+    ):
+        try:
+            font = pygame.font.SysFont(sys_name, size)
+            if font is not None:
+                logger.info("Noto Sans CJK SC(시스템): %s (size=%d)", sys_name, size)
+                return attach_font_fgcolor(font, fgcolor)
+        except Exception:
+            continue
+
+    logger.warning(
+        "Noto Sans CJK SC 없음. resource/font 에 NotoSansSC-Regular.otf 를 넣거나 "
+        "https://fonts.google.com/noto/specimen/Noto+Sans+SC 에서 설치하세요."
+    )
+    return load_font_chinese(size, fgcolor, weight=weight)
 
 
 def load_font_chinese_freetype(size: int, fgcolor: Tuple[int, int, int]):

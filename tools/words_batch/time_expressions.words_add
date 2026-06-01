@@ -1,0 +1,17 @@
+@sheet 명사
+@pos 명사
+
+# meaning	en_meaning	word	pinyin
+어제	Yesterday	昨天	zuótiān
+지난주	Last week	上周	shàngzhōu
+이번 주	This week	这周	zhèzhōu
+다음 주	Next week	下周	xiàzhōu
+작년	Last year	去年	qùnián
+올해	This year	今年	jīnnián
+내년	Next year	明年	míngnián
+그저께	The day before yesterday	前天	qiántiān
+모레	The day after tomorrow	后天	hòutiān
+지난달	Last month	上个月	shànggeyuè
+이번 달	This month	这个月	zhègeyuè
+다음 달	Next month	下个月	xiàgeyuè
+매일	Every day	每天	měitiān

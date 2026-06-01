@@ -605,7 +605,9 @@ def _run_record(
     duration_sec = frames_written / config.fps if frames_written > 0 else 0.0
     if video_path is not None and recording_events and duration_sec > 0:
         print("[audio] 녹화 오디오 분리: 이벤트", len(recording_events), "개 -> WAV 생성 후 mux")
-        _mux_recorded_audio(video_path, recording_events, config.fps, duration_sec)
+        _mux_recorded_audio(
+            video_path, recording_events, config.fps, duration_sec, studio=studio
+        )
     elif video_path is not None and not recording_events:
         print("[!] 녹화 오디오 mux 건너뜀: 오디오 이벤트 없음 (스튜디오에서 이벤트 로그 필요)")
     if video_path is not None and _is_shorts_studio(studio):
@@ -619,11 +621,34 @@ def _mux_recorded_audio(
     recording_events: list,
     fps: int,
     duration_sec: float,
+    *,
+    studio: Any = None,
 ) -> None:
     """녹화 이벤트 로그로 오디오 WAV 생성 후 비디오와 mux. 실패 시 경고만 출력."""
     try:
+        from core.paths import (
+            STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN,
+            STUDIO_WORD_MEMORIZE_BG_AUDIO_LINEAR_GAIN,
+        )
         from studio.recorded_audio_mux import build_audio_and_mux
-        build_audio_and_mux(video_path, recording_events, float(fps), duration_sec)
+
+        shorts_bg_gain = STUDIO_SHORTS_BG_AUDIO_LINEAR_GAIN
+        if studio is not None:
+            fn = getattr(studio, "recording_shorts_bg_linear_gain", None)
+            if callable(fn):
+                try:
+                    override = fn()
+                    if override is not None:
+                        shorts_bg_gain = float(override)
+                except Exception:
+                    pass
+        build_audio_and_mux(
+            video_path,
+            recording_events,
+            float(fps),
+            duration_sec,
+            shorts_bg_linear_gain=shorts_bg_gain,
+        )
     except Exception as e:
         print("[!] 녹화 오디오 mux 건너뜀:", e)
 
@@ -691,6 +716,13 @@ def _create_studio(
             clips_csv_path=clips_csv_path,
             **kw,
         )
+    if name == "word_memorize":
+        from studio.studios.word_memorize import WordMemorizeStudio
+
+        layout_path = str(kw.pop("layout_path", "") or "").strip()
+        if not layout_path:
+            raise ValueError("word_memorize 스튜디오에는 layout_path가 필요합니다.")
+        return WordMemorizeStudio(layout_path=layout_path)
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
 
@@ -701,8 +733,25 @@ def main() -> None:
         "--studio",
         type=str,
         default="conversation",
-        choices=("conversation", "conversation_then_words", "vocabulary", "shorts"),
-        help="실행할 스튜디오 (기본: conversation). conversation_then_words=회화 후 집계 단어, shorts=9:16 숏츠",
+        choices=(
+            "conversation",
+            "conversation_then_words",
+            "vocabulary",
+            "shorts",
+            "word_memorize",
+        ),
+        help=(
+            "실행할 스튜디오 (기본: conversation). "
+            "conversation_then_words=회화 후 집계 단어, shorts=9:16 숏츠, "
+            "word_memorize=단어 외우기 배치 JSON"
+        ),
+    )
+    parser.add_argument(
+        "--layout",
+        type=str,
+        default="",
+        metavar="PATH",
+        help="word_memorize: resource/table/word_memorize_layouts/*.json 경로",
     )
     parser.add_argument(
         "--csv",
@@ -820,6 +869,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+    elif args.studio == "word_memorize":
+        load_words_table_from_csv(DEFAULT_WORDS_TABLE_CSV)
+        content = None
     else:
         content = None
 
@@ -828,6 +880,20 @@ def main() -> None:
     studio_kw: dict[str, Any] = {}
     if session_topics:
         studio_kw["session_topics"] = session_topics
+
+    if args.studio == "word_memorize":
+        layout_raw = (getattr(args, "layout", "") or "").strip()
+        if not layout_raw:
+            print(
+                "word_memorize 스튜디오에는 --layout 이 필요합니다.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        layout_file = Path(layout_raw)
+        if not layout_file.is_file():
+            print(f"배치 JSON을 찾을 수 없습니다: {layout_file}", file=sys.stderr)
+            sys.exit(1)
+        studio_kw["layout_path"] = str(layout_file.resolve())
 
     if args.studio == "shorts":
         from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY, normalize_clip_type
@@ -858,7 +924,11 @@ def main() -> None:
         content=content,
         **studio_kw,
     )
-    viewport = (SHORTS_WIDTH, SHORTS_HEIGHT) if args.studio == "shorts" else None
+    viewport = (
+        (SHORTS_WIDTH, SHORTS_HEIGHT)
+        if args.studio in ("shorts", "word_memorize")
+        else None
+    )
     run(
         studio,
         mode=args.mode,

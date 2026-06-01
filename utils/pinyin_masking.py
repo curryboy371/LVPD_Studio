@@ -94,19 +94,22 @@ def _mark_syllable_to_lexical(marked: str, fallback: str, pp: PinyinProcessor) -
     return f"{base}{int(tone)}" if tone > 0 else base
 
 
+_TONED_VOWEL = r"[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]"
+_PINYIN_SYLLABLE_RE = re.compile(
+    rf"[bpmfdtnlgkhjqxzcsrwy]?(?:[a-z]*{_TONED_VOWEL})(?:ng|n|r)?",
+    re.IGNORECASE,
+)
+
+
 def _split_pinyin_display_tokens(pinyin_text: str, syllable_count: int) -> list[str]:
-    """공백 구분 또는 붙여 쓴 성조 병음(예: kělè)을 음절 토큰으로 분리."""
+    """공백 구분 또는 붙여 쓴 성조 병음(예: kělè, xīngqīyī)을 음절 토큰으로 분리."""
     text = (pinyin_text or "").strip()
     if not text:
         return []
     tokens = [t.strip() for t in re.split(r"\s+", text) if t.strip()]
     if len(tokens) > 1 or syllable_count <= 1:
         return tokens
-    parts = re.findall(
-        r"[bpmfdtnlgkhjqxzcsrwy]?(?:[a-z]*[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ])",
-        text,
-        flags=re.IGNORECASE,
-    )
+    parts = _PINYIN_SYLLABLE_RE.findall(text)
     if len(parts) == syllable_count:
         return parts
     return tokens
@@ -127,7 +130,10 @@ def word_pinyin_to_lexical_syllables(
     fallbacks: list[str] = []
     if pp.available and hz:
         fallbacks = pp.get_lexical_pinyin(hz) or []
-    tokens = _split_pinyin_display_tokens(text, len(fallbacks) or len(hz) or 1)
+    expected = len(fallbacks) or len(hz) or 1
+    tokens = _split_pinyin_display_tokens(text, expected)
+    if fallbacks and len(tokens) != len(fallbacks):
+        return list(fallbacks)
     if not tokens:
         return []
     out: list[str] = []
@@ -150,7 +156,28 @@ def word_pinyin_to_marks(
     syllables = word_pinyin_to_lexical_syllables(hanzi, pinyin_text, processor=pp)
     if not syllables:
         return (pinyin_text or "").strip()
-    return " ".join(pp.tone3_to_mark(s) for s in syllables).strip()
+    raw = (pinyin_text or "").strip()
+    sep = " " if re.search(r"\s", raw) else ""
+    return sep.join(pp.tone3_to_mark(s) for s in syllables).strip()
+
+
+def word_pinyin_to_marks_spaced(
+    hanzi: str,
+    pinyin_text: str,
+    *,
+    processor: Optional[PinyinProcessor] = None,
+) -> str:
+    """성조 병음을 한자 음절마다 공백으로 구분 (단어 카드·xīng qī yī 형태)."""
+    pp = processor or get_pinyin_processor()
+    if not pp.available:
+        return (pinyin_text or "").strip()
+    syllables = word_pinyin_to_lexical_syllables(hanzi, pinyin_text, processor=pp)
+    if not syllables:
+        return (pinyin_text or "").strip()
+    marked = [pp.tone3_to_mark(s) for s in syllables]
+    if len(marked) <= 1:
+        return marked[0] if marked else ""
+    return " ".join(marked).strip()
 
 
 def normalize_word_masking(raw: str) -> str:

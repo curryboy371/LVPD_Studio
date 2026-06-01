@@ -214,6 +214,8 @@ class MainWindow(tk.Tk):
         row2.pack(fill=tk.X)
         row3 = ttk.Frame(frame)
         row3.pack(fill=tk.X)
+        row4 = ttk.Frame(frame)
+        row4.pack(fill=tk.X)
 
         modes_row1 = [
             ("메인 (빠른 작업)", "main"),
@@ -252,6 +254,19 @@ class MainWindow(tk.Tk):
                 value=value,
                 command=lambda v=value: self._switch_mode(v),  # type: ignore[arg-type]
             ).pack(side=tk.LEFT, padx=12, pady=4)
+
+        ttk.Button(
+            row4,
+            text="단어 외우기 배치…",
+            command=self._open_word_memorize_layout_editor,
+        ).pack(side=tk.LEFT, padx=12, pady=4)
+
+    def _open_word_memorize_layout_editor(self) -> None:
+        from extra.table_editor.ui.word_memorize_layout_editor import (
+            open_word_memorize_layout_editor,
+        )
+
+        open_word_memorize_layout_editor(self)
 
     def _active_panel(
         self,

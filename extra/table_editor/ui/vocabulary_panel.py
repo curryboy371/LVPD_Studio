@@ -287,6 +287,7 @@ class VocabularyPanel(ttk.Frame):
         new_id = allocate_next_word_id(
             self._all_rows,
             self._all_sheet_rows_snapshot(),
+            sheet_name=self._current_sheet,
         )
         defaults: dict[str, str] = {c: "" for c in WORDS_FIELDNAMES}
         defaults["id"] = new_id

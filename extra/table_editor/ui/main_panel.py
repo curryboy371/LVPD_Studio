@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, scrolledtext, ttk
 from typing import Callable
 
@@ -14,14 +15,24 @@ from extra.table_editor.services.topic_sources import (
     topics_for_shorts_vocabulary_preview,
     topics_for_vocabulary_preview,
 )
+from extra.table_editor.services.word_memorize_layouts import (
+    list_layout_files,
+    normalize_layout_filename,
+)
 from extra.table_editor.ui.studio_run_dialog import StudioRunDialog
+from extra.table_editor.services.tts_voice_options import (
+    TtsLangOptions,
+    WordMemorizeTtsOptions,
+)
 from extra.table_editor.ui.tts_generate_dialog import TtsGenerateDialog
+from extra.table_editor.ui.word_memorize_run_dialog import WordMemorizeRunDialog
 
 _RECORD_MAX_SEC: dict[tuple[str, str], int] = {
     ("conversation", ""): 900,
     ("vocabulary", ""): 1800,
     ("shorts", "conversation"): 900,
     ("shorts", "vocabulary"): 900,
+    ("word_memorize", ""): 600,
 }
 
 
@@ -101,6 +112,7 @@ class MainPanel(ttk.Frame):
             ("단어장", lambda: self._run_studio_menu("vocabulary")),
             ("숏츠 회화", lambda: self._run_studio_menu("shorts", "conversation")),
             ("숏츠 단어", lambda: self._run_studio_menu("shorts", "vocabulary")),
+            ("단어 외우기", self._run_word_memorize_menu),
             ("녹화 파일 경로 열기", self._open_release_folder),
         ])
 
@@ -201,21 +213,38 @@ class MainPanel(ttk.Frame):
         )
 
     def _run_tts(self) -> None:
-        picked = TtsGenerateDialog.ask(
+        result = TtsGenerateDialog.ask(
             self.winfo_toplevel(),
             initial=self._arg(),
         )
-        if not picked:
+        if not result:
             return
-        kind, raw = picked
-        self._arg_var.set(raw)
-        self._dispatch_tts(kind, raw)
+        self._arg_var.set(result.value)
+        if result.kind == "word_memorize":
+            self._dispatch_word_memorize_tts(
+                WordMemorizeTtsOptions.from_generate_result(result)
+            )
+            return
+        self._dispatch_tts(result.kind, result.value, result.lang)
 
-    def _dispatch_tts(self, kind: str, raw: str) -> None:
+    def _ko_voice_argv(self, lang: TtsLangOptions) -> list[str]:
+        if not lang.gen_ko or not lang.voice_ko:
+            return []
+        return ["--tts-voice", lang.voice_ko]
+
+    def _dispatch_tts(self, kind: str, raw: str, lang: TtsLangOptions) -> None:
+        voice = self._ko_voice_argv(lang)
+        lang_tag = "KO" if lang.gen_ko else ""
         if kind == "conv":
             self._run_task(
-                ["-m", "tools.tts_gen.build_conversation_sub_ko", "--topic", raw],
-                title=f"회화 TTS ({raw})",
+                [
+                    "-m",
+                    "tools.tts_gen.build_conversation_sub_ko",
+                    "--topic",
+                    raw,
+                    *voice,
+                ],
+                title=f"회화 TTS ({raw}) [{lang_tag}]",
             )
             return
         if kind == "vocab":
@@ -225,8 +254,9 @@ class MainPanel(ttk.Frame):
                     "tools.tts_gen.build_vocab_meaning_ko",
                     "--studio-topic",
                     raw,
+                    *voice,
                 ],
-                title=f"단어장 TTS ({raw})",
+                title=f"단어장 TTS ({raw}) [{lang_tag}]",
             )
             return
         if kind == "shorts_conv":
@@ -236,8 +266,9 @@ class MainPanel(ttk.Frame):
                     "tools.tts_gen.build_shorts_ko_narration",
                     "--topic",
                     raw,
+                    *voice,
                 ],
-                title=f"숏츠 회화 TTS topic {raw}",
+                title=f"숏츠 회화 TTS ({raw}) [{lang_tag}]",
             )
             return
         if kind == "shorts_vocab":
@@ -247,9 +278,39 @@ class MainPanel(ttk.Frame):
                     "tools.tts_gen.build_vocab_meaning_ko",
                     "--topic",
                     raw,
+                    *voice,
                 ],
-                title=f"숏츠 단어 TTS topic {raw}",
+                title=f"숏츠 단어 TTS ({raw}) [{lang_tag}]",
             )
+            return
+    def _dispatch_word_memorize_tts(self, opts: WordMemorizeTtsOptions) -> None:
+        argv = [
+            "-m",
+            "tools.tts_gen.build_word_memorize_tts",
+            "--layout",
+            opts.layout_path,
+            "--tts-voice",
+            opts.voice_ko,
+            "--tts-voice-zh",
+            opts.voice_zh,
+            "--tts-voice-en",
+            opts.voice_en,
+        ]
+        if not opts.gen_ko:
+            argv.append("--skip-ko")
+        if not opts.gen_zh:
+            argv.append("--skip-zh")
+        if not opts.gen_en:
+            argv.append("--skip-en")
+        parts = []
+        if opts.gen_ko:
+            parts.append("KO")
+        if opts.gen_zh:
+            parts.append("ZH")
+        if opts.gen_en:
+            parts.append("EN")
+        title = f"단어 외우기 TTS ({opts.layout_name}) [{'+'.join(parts)}]"
+        self._run_task(argv, title=title)
 
     def _run_studio_menu(self, studio: str, shorts_type: str = "") -> None:
         meta = self._studio_run_meta(studio, shorts_type)
@@ -276,6 +337,58 @@ class MainPanel(ttk.Frame):
         mode, topic = picked
         self._arg_var.set(topic)
         self._dispatch_studio(mode, studio, shorts_type, topic)
+
+    def _run_word_memorize_menu(self) -> None:
+        layouts = list_layout_files()
+        if not layouts:
+            messagebox.showwarning(
+                "단어 외우기",
+                "저장된 배치가 없습니다.\n"
+                "단어 외우기 배치 편집기에서 JSON을 저장한 뒤\n"
+                "resource/table/word_memorize_layouts/ 를 확인하세요.",
+                parent=self.winfo_toplevel(),
+            )
+            return
+        initial = normalize_layout_filename(self._arg())
+        names = [name for name, _ in layouts]
+        if initial and initial not in names:
+            initial = ""
+        picked = WordMemorizeRunDialog.ask(
+            self.winfo_toplevel(),
+            layouts=layouts,
+            initial_layout=initial,
+        )
+        if not picked:
+            return
+        mode, layout_path = picked
+        stem = Path(layout_path).stem
+        self._arg_var.set(stem)
+        self._dispatch_word_memorize(mode, layout_path)
+
+    def _dispatch_word_memorize(self, mode: str, layout_path: str) -> None:
+        stem = Path(layout_path).stem
+        argv = [
+            "-u",
+            "-m",
+            "studio.runner",
+            "--mode",
+            mode,
+            "--studio",
+            "word_memorize",
+            "--layout",
+            layout_path,
+        ]
+        if mode == "record":
+            max_sec = _RECORD_MAX_SEC.get(("word_memorize", ""), 600)
+            argv.extend(
+                [
+                    "--record-until-content-done",
+                    "--record-max-sec",
+                    str(max_sec),
+                ]
+            )
+        prefix = "녹화" if mode == "record" else "F5"
+        self._run_task(argv, title=f"{prefix} 단어 외우기 ({stem})")
 
     def _studio_run_meta(
         self,
