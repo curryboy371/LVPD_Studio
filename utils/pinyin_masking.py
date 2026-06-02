@@ -61,7 +61,63 @@ def apply_mask_to_lexical_syllables(
 _TONE3_SYLLABLE_RE = re.compile(r"^[a-züv]+(?:[0-5](?:\.5)?)?$", re.IGNORECASE)
 
 
-def _mark_syllable_to_lexical(marked: str, fallback: str, pp: PinyinProcessor) -> str:
+def _char_base_and_tone(ch: str, pp: PinyinProcessor) -> tuple[str, int]:
+    """성조 기호·라틴 글자 하나 → (기본자모, 성조 0~4)."""
+    for vowel, variants in pp.tone_map.items():
+        for ti, mv in enumerate(variants):
+            if ch == mv:
+                return ("v" if vowel == "ü" else vowel), ti
+    low = ch.lower()
+    if low in "abcdefghijklmnopqrstuvwxyz":
+        return low, 0
+    return "", 0
+
+
+def _consume_pinyin_chunk_for_base(
+    rest: str, base_lex: str, pp: PinyinProcessor
+) -> tuple[str, str]:
+    """붙여 쓴 성조 병음에서 한 음절(한자 g2pm 기준)만큼 앞에서 잘라낸다."""
+    base, _ = pp._split_tone((base_lex or "").strip())
+    base_cmp = (base or "").lower().replace("ü", "v")
+    if not base_cmp or not rest:
+        return "", rest
+
+    idx = 0
+    matched = 0
+    chunk: list[str] = []
+    while idx < len(rest) and matched < len(base_cmp):
+        b, _ = _char_base_and_tone(rest[idx], pp)
+        if b and b == base_cmp[matched]:
+            matched += 1
+        chunk.append(rest[idx])
+        idx += 1
+    return "".join(chunk), rest[idx:]
+
+
+def _syllable_chunks_from_pinyin_for_bases(
+    pinyin_text: str,
+    base_lexicals: list[str],
+    pp: PinyinProcessor,
+) -> list[str]:
+    """한자 음절 수에 맞춰 pinyin 문자열을 음절 조각으로 나눈다."""
+    rest = re.sub(r"\s+", "", (pinyin_text or "").strip())
+    chunks: list[str] = []
+    for base_lex in base_lexicals:
+        if not rest:
+            chunks.append("")
+            continue
+        chunk, rest = _consume_pinyin_chunk_for_base(rest, base_lex, pp)
+        chunks.append(chunk)
+    return chunks
+
+
+def _mark_syllable_to_lexical(
+    marked: str,
+    fallback: str,
+    pp: PinyinProcessor,
+    *,
+    neutral_if_unmarked: bool = False,
+) -> str:
     """성조 기호 음절(예: lè) 또는 숫자 병음(예: le4)을 lexical(숫자) 형식으로 변환."""
     tok = (marked or "").strip()
     if not tok:
@@ -72,16 +128,9 @@ def _mark_syllable_to_lexical(marked: str, fallback: str, pp: PinyinProcessor) -
     tone = 0
     base_chars: list[str] = []
     for ch in tok:
-        ch_base = ch.lower()
-        ch_tone = 0
-        for vowel, variants in pp.tone_map.items():
-            for ti, mv in enumerate(variants):
-                if ch == mv:
-                    ch_base = "v" if vowel == "ü" else vowel
-                    ch_tone = ti
-                    break
-        if ch_tone == 0 and ch_base in "abcdefghijklmnopqrstuvwxyz":
-            pass
+        ch_base, ch_tone = _char_base_and_tone(ch, pp)
+        if not ch_base:
+            ch_base = ch.lower()
         base_chars.append(ch_base)
         if ch_tone > tone:
             tone = ch_tone
@@ -90,7 +139,10 @@ def _mark_syllable_to_lexical(marked: str, fallback: str, pp: PinyinProcessor) -
         fb_base, fb_tone = pp._split_tone(fallback)
         if fb_base:
             base = fb_base
-        tone = int(fb_tone) if fb_tone is not None else 0
+        if neutral_if_unmarked:
+            tone = 5
+        else:
+            tone = int(fb_tone) if fb_tone is not None else 0
     return f"{base}{int(tone)}" if tone > 0 else base
 
 
@@ -121,7 +173,10 @@ def word_pinyin_to_lexical_syllables(
     *,
     processor: Optional[PinyinProcessor] = None,
 ) -> list[str]:
-    """words.csv `pinyin` 값을 문장 병음용 lexical 음절 리스트로 변환."""
+    """words.csv `pinyin` → lexical 음절.
+
+    음절 경계·자모는 한자(g2pM) 기준, 성조는 ``pinyin`` 필드에서 가져온다.
+    """
     text = (pinyin_text or "").strip()
     if not text:
         return []
@@ -132,14 +187,18 @@ def word_pinyin_to_lexical_syllables(
         fallbacks = pp.get_lexical_pinyin(hz) or []
     expected = len(fallbacks) or len(hz) or 1
     tokens = _split_pinyin_display_tokens(text, expected)
-    if fallbacks and len(tokens) != len(fallbacks):
-        return list(fallbacks)
+
+    if fallbacks:
+        if len(tokens) != len(fallbacks):
+            tokens = _syllable_chunks_from_pinyin_for_bases(text, fallbacks, pp)
     if not tokens:
         return []
     out: list[str] = []
     for i, tok in enumerate(tokens):
         fb = fallbacks[i] if i < len(fallbacks) else (fallbacks[-1] if fallbacks else "")
-        out.append(_mark_syllable_to_lexical(tok, fb, pp))
+        out.append(
+            _mark_syllable_to_lexical(tok, fb, pp, neutral_if_unmarked=bool(fallbacks))
+        )
     return out
 
 

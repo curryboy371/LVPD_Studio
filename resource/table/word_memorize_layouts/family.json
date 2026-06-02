@@ -4,99 +4,97 @@
   "frame_height": 1920,
   "background": {
     "type": "image",
-    "value": "black_wood"
+    "value": "wood1"
   },
-  "title": "중국어 요일을 알아보자",
-  "title_x": 539,
-  "title_y": 109,
+  "title": "가족을 알아보자",
+  "title_x": 523,
+  "title_y": 84,
   "title_y_offset_px": 0,
-  "bg_music_path": "resource/sound/bg_short/Rain_Against_the_Glass.mp3",
+  "bg_music_path": "resource/sound/bg_short/쇼츠-밝음.mp3",
   "boxes": [
     {
-      "word_id": "20019",
+      "word_id": "20042",
       "order": 1,
       "x": 40,
-      "y": 258,
+      "y": 256,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_1"
     },
     {
-      "word_id": "20020",
+      "word_id": "20041",
       "order": 2,
       "x": 378,
-      "y": 258,
+      "y": 256,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_2"
     },
     {
-      "word_id": "20021",
+      "word_id": "20043",
       "order": 3,
       "x": 716,
-      "y": 258,
+      "y": 256,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_3"
     },
     {
-      "word_id": "20022",
+      "word_id": "20044",
       "order": 4,
       "x": 40,
-      "y": 708,
+      "y": 710,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_4"
     },
     {
-      "word_id": "20023",
+      "word_id": "20045",
       "order": 5,
       "x": 378,
-      "y": 708,
+      "y": 710,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_5"
     },
     {
-      "word_id": "20024",
+      "word_id": "20046",
       "order": 6,
       "x": 716,
-      "y": 708,
+      "y": 710,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_6"
     },
     {
-      "word_id": "20025",
+      "word_id": "20047",
       "order": 7,
       "x": 40,
-      "y": 1158,
+      "y": 1164,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_7"
     },
     {
-      "word_id": "20026",
+      "word_id": "20048",
       "order": 8,
       "x": 378,
-      "y": 1158,
+      "y": 1164,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_8"
     },
     {
-      "word_id": "20027",
+      "word_id": "20049",
       "order": 9,
       "x": 716,
-      "y": 1158,
+      "y": 1164,
       "w": 322,
-      "h": 434,
+      "h": 415,
       "box_key": "box_9"
     }
   ],
-  "holding_word_ids": [
-    "20028"
-  ],
-  "margin_top_ratio": 0.12604166666666666,
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.11927083333333334,
   "margin_bottom_ratio": 0.16197916666666667
 }

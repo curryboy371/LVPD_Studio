@@ -40,6 +40,7 @@ class WordMemorizeStudio(IStudio):
         self._layout_path = Path(layout_path)
         self._layout = load_layout(self._layout_path)
         self._renderer = WordMemorizeRenderer()
+        self._renderer.set_background_stem(self._layout.background_value)
         self._en_by_id = load_en_meaning_by_id(Path(DEFAULT_WORDS_TABLE_CSV))
         self._sequence: list[WordMemorizeBox] = []
         self._seq_index = 0
@@ -185,6 +186,7 @@ class WordMemorizeStudio(IStudio):
         if self._done:
             return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
+        self._renderer.tick_background_video(dt)
         self._timer += dt
         if self._timer < self._hold_sec:
             return
@@ -200,12 +202,16 @@ class WordMemorizeStudio(IStudio):
     def _box_active_key(self, box: WordMemorizeBox) -> str:
         return box.box_key or f"{box.word_id}:{box.order}"
 
+    def _outro_hold_sec(self) -> float:
+        """마지막 음성 이후 종료 대기 시간 (녹화는 즉시 종료)."""
+        return 0.0 if self._is_recording_mode() else END_HOLD_SEC
+
     def _begin_word(self, index: int) -> None:
         if index >= len(self._sequence):
             self._phase = "outro"
             self._active_key = None
             self._word_substep = ""
-            self._hold_sec = END_HOLD_SEC
+            self._hold_sec = self._outro_hold_sec()
             return
         box = self._sequence[index]
         self._seq_index = index
@@ -253,7 +259,7 @@ class WordMemorizeStudio(IStudio):
         else:
             self._phase = "outro"
             self._active_key = None
-            self._hold_sec = END_HOLD_SEC
+            self._hold_sec = self._outro_hold_sec()
 
     def _is_recording_mode(self) -> bool:
         return getattr(self._last_config, "recording_log_event", None) is not None
@@ -373,6 +379,7 @@ class WordMemorizeStudio(IStudio):
             active_box_key=self._active_key if highlight else None,
             dim_inactive=False,
             config=config,
+            use_video_background=True,
         )
 
     def get_recording_prefix(self) -> Optional[str]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import colorchooser, filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from typing import Literal
 
 from core.paths import SHORTS_HEIGHT, SHORTS_WIDTH, get_repo_root
@@ -14,13 +14,19 @@ from extra.table_editor.services.word_memorize_grid import (
 )
 from extra.table_editor.services.word_memorize_layout import (
     DEFAULT_LAYOUTS_DIR,
+    WORD_MEMORIZE_BG_DIR,
     WordMemorizeBox,
     WordMemorizeLayout,
     box_overlaps_any,
+    clamp_title_position,
+    resolve_title_position,
     find_non_overlapping_position,
     layout_has_overlaps,
+    list_word_memorize_bg_stems,
     load_layout,
+    normalize_word_memorize_bg_stem,
     save_layout,
+    word_memorize_bg_image_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
     WordMemorizeVocabImportDialog,
@@ -67,6 +73,14 @@ BOX_BADGE_FONT = ("Segoe UI", 11, "bold")
 BOX_PINYIN_COLOR = "#c62828"
 BOX_HANZI_COLOR = "#212121"
 BOX_EN_COLOR = "#4caf50"
+TITLE_PLACEHOLDER_LABEL = "제목"
+TITLE_MARKER_W_FHD = 360
+TITLE_MARKER_H_FHD = 64
+TITLE_MARKER_FILL = "#eceff1"
+TITLE_MARKER_OUTLINE = "#78909c"
+TITLE_MARKER_OUTLINE_SEL = "#4fc3f7"
+TITLE_MARKER_TEXT_COLOR = "#546e7a"
+TITLE_MARKER_FONT = ("Segoe UI", 10)
 BOX_CONTENT_PAD = 8
 BOX_LINE_GAP = 3
 BOX_IMG_BOTTOM_PAD = 6
@@ -98,7 +112,7 @@ def _try_configure_cursor(widget: tk.Widget, names: tuple[str, ...]) -> None:
 
 
 ResizeHandle = Literal[
-    "nw", "n", "ne", "e", "se", "s", "sw", "w", "move", ""
+    "nw", "n", "ne", "e", "se", "s", "sw", "w", "move", "title_move", ""
 ]
 MarginDragMode = Literal["", "top", "bottom"]
 
@@ -129,6 +143,8 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._drag_mode: ResizeHandle = ""
         self._drag_start: tuple[int, int] | None = None
         self._drag_box_snapshot: WordMemorizeBox | None = None
+        self._title_drag_snapshot: tuple[int, int] | None = None
+        self._title_selected = False
         self._next_box_num = 1
         self._box_photos: dict[str, object] = {}
         self._dirty = False
@@ -219,6 +235,37 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         ).pack(fill=tk.X, pady=3)
         ttk.Button(btn_col, text="배경 설정", command=self._edit_background).pack(
             fill=tk.X, pady=3
+        )
+
+        title_frame = ttk.LabelFrame(sidebar, text="제목")
+        title_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        title_in = ttk.Frame(title_frame)
+        title_in.pack(fill=tk.X, padx=6, pady=6)
+        self._title_var = tk.StringVar(value=self._layout.title)
+        title_entry = ttk.Entry(title_in, textvariable=self._title_var)
+        title_entry.pack(fill=tk.X)
+        title_entry.bind("<KeyRelease>", self._on_title_changed, add="+")
+        title_pos_row = ttk.Frame(title_in)
+        title_pos_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(title_pos_row, text="Y 보정(px)").pack(side=tk.LEFT)
+        self._title_y_offset_var = tk.StringVar(
+            value=str(int(getattr(self._layout, "title_y_offset_px", 0)))
+        )
+        title_y_spin = ttk.Spinbox(
+            title_pos_row,
+            from_=-300,
+            to=300,
+            increment=2,
+            width=8,
+            textvariable=self._title_y_offset_var,
+        )
+        title_y_spin.pack(side=tk.LEFT, padx=(8, 0))
+        title_y_spin.bind("<KeyRelease>", self._on_title_y_offset_changed, add="+")
+        title_y_spin.bind(
+            "<<Increment>>", self._on_title_y_offset_changed, add="+"
+        )
+        title_y_spin.bind(
+            "<<Decrement>>", self._on_title_y_offset_changed, add="+"
         )
 
         bg_music_frame = ttk.LabelFrame(sidebar, text="쇼츠 배경음")
@@ -979,6 +1026,28 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._mark_dirty()
 
+    def _on_title_changed(self, _event: tk.Event | None = None) -> None:
+        self._layout.title = (self._title_var.get() or "").strip()
+        self._mark_dirty()
+
+    def _on_title_y_offset_changed(self, _event: tk.Event | None = None) -> None:
+        raw = (self._title_y_offset_var.get() or "").strip()
+        try:
+            val = int(raw)
+        except ValueError:
+            return
+        val = max(-300, min(300, val))
+        if val != int(getattr(self._layout, "title_y_offset_px", 0)):
+            self._layout.title_y_offset_px = val
+            self._mark_dirty()
+            self._redraw_canvas()
+
+    def _sync_title_var(self) -> None:
+        self._title_var.set(self._layout.title or "")
+        self._title_y_offset_var.set(
+            str(int(getattr(self._layout, "title_y_offset_px", 0)))
+        )
+
     def _edit_background(self) -> None:
         dlg = tk.Toplevel(self)
         dlg.title("배경 설정")
@@ -987,75 +1056,42 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         frame = ttk.Frame(dlg, padding=12)
         frame.pack()
 
-        kind_var = tk.StringVar(
-            value=self._layout.background_type
+        choices = list_word_memorize_bg_stems()
+        current = normalize_word_memorize_bg_stem(self._layout.background_value)
+        stem_var = tk.StringVar(value=current)
+
+        ttk.Label(
+            frame,
+            text=f"resource/BG 폴더의 이미지 (재생·녹화 시 동일 이름 .mp4 반복)",
+            wraplength=360,
+        ).pack(anchor="w", pady=(0, 8))
+
+        row = ttk.Frame(frame)
+        row.pack(fill=tk.X, pady=4)
+        ttk.Label(row, text="배경:").pack(side=tk.LEFT)
+        combo = ttk.Combobox(
+            row,
+            textvariable=stem_var,
+            values=choices,
+            state="readonly",
+            width=24,
         )
-        ttk.Radiobutton(frame, text="단색", variable=kind_var, value="color").pack(
-            anchor="w"
+        combo.pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
+        if current in choices:
+            combo.current(choices.index(current))
+
+        hint = (
+            f"미리보기: {WORD_MEMORIZE_BG_DIR.name}/{{이름}}.png  ·  "
+            f"재생: {WORD_MEMORIZE_BG_DIR.name}/{{이름}}.mp4"
         )
-        ttk.Radiobutton(frame, text="이미지", variable=kind_var, value="image").pack(
-            anchor="w", pady=(0, 8)
+        ttk.Label(frame, text=hint, foreground="#555", wraplength=360).pack(
+            anchor="w", pady=(4, 0)
         )
-
-        color_var = tk.StringVar(value=self._layout.background_value)
-        path_var = tk.StringVar(value=self._layout.background_value)
-
-        color_row = ttk.Frame(frame)
-        color_row.pack(fill=tk.X, pady=4)
-        ttk.Label(color_row, text="색상:").pack(side=tk.LEFT)
-        color_entry = ttk.Entry(color_row, textvariable=color_var, width=14)
-        color_entry.pack(side=tk.LEFT, padx=4)
-
-        def _pick_color() -> None:
-            initial = color_var.get() or "#ffffff"
-            chosen = colorchooser.askcolor(color=initial, parent=dlg)
-            if chosen and chosen[1]:
-                color_var.set(chosen[1])
-
-        ttk.Button(color_row, text="…", width=3, command=_pick_color).pack(
-            side=tk.LEFT
-        )
-
-        path_row = ttk.Frame(frame)
-        path_row.pack(fill=tk.X, pady=4)
-        ttk.Label(path_row, text="이미지:").pack(side=tk.LEFT)
-        path_entry = ttk.Entry(path_row, textvariable=path_var, width=28)
-        path_entry.pack(side=tk.LEFT, padx=4, fill=tk.X, expand=True)
-
-        def _browse_image() -> None:
-            repo = get_repo_root()
-            initial = repo / "resource" / "image"
-            path = filedialog.askopenfilename(
-                parent=dlg,
-                title="배경 이미지",
-                initialdir=str(initial if initial.is_dir() else repo),
-                filetypes=[
-                    ("이미지", "*.png *.jpg *.jpeg *.webp *.bmp"),
-                    ("모든 파일", "*.*"),
-                ],
-            )
-            if path:
-                try:
-                    rel = Path(path).resolve().relative_to(repo.resolve())
-                    path_var.set(rel.as_posix())
-                except ValueError:
-                    path_var.set(path)
-
-        ttk.Button(path_row, text="찾기", command=_browse_image).pack(side=tk.LEFT)
 
         def _apply() -> None:
-            bg_type = kind_var.get()
-            if bg_type == "image":
-                val = path_var.get().strip()
-                if not val:
-                    messagebox.showwarning(
-                        "경로 없음", "이미지 경로를 입력하세요.", parent=dlg
-                    )
-                    return
-            else:
-                val = color_var.get().strip() or "#ffffff"
-            self._layout.background_type = bg_type  # type: ignore[assignment]
-            self._layout.background_value = val
+            stem = normalize_word_memorize_bg_stem(stem_var.get())
+            self._layout.background_type = "image"
+            self._layout.background_value = stem
             self._mark_dirty()
             self._redraw_canvas()
             dlg.destroy()
@@ -1065,7 +1101,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         ttk.Button(btn_row, text="적용", command=_apply).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_row, text="취소", command=dlg.destroy).pack(side=tk.LEFT, padx=4)
         dlg.bind("<Escape>", lambda _e: dlg.destroy())
-        schedule_center_toplevel_on_parent(dlg, self, width=420, height=220)
+        schedule_center_toplevel_on_parent(dlg, self, width=440, height=200)
 
     def _refresh_order_list(self) -> None:
         self._order_list.delete(0, tk.END)
@@ -1156,7 +1192,29 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             x1, y1, x2, y2 = self._screen_rect(other)
             if x1 <= sx <= x2 and y1 <= sy <= y2:
                 return other.box_key, "move"
+        if self._hit_test_title(sx, sy):
+            return None, "title_move"
         return None, ""
+
+    def _title_marker_screen_rect(self) -> tuple[int, int, int, int]:
+        cx_fhd, cy_fhd = resolve_title_position(
+            frame_width=self._layout.frame_width,
+            frame_height=self._layout.frame_height,
+            margin_top_ratio=self._layout.margin_top_ratio,
+            y_offset_px=int(getattr(self._layout, "title_y_offset_px", 0)),
+            title_x=int(getattr(self._layout, "title_x", 0)),
+            title_y=int(getattr(self._layout, "title_y", 0)),
+        )
+        cx, cy = self._fhd_to_screen(cx_fhd, cy_fhd)
+        sw = max(48, int(round(TITLE_MARKER_W_FHD * SCALE)))
+        sh = max(28, int(round(TITLE_MARKER_H_FHD * SCALE)))
+        return cx - sw // 2, cy - sh // 2, cx + sw // 2, cy + sh // 2
+
+    def _hit_test_title(self, sx: int, sy: int) -> bool:
+        if not (self._layout.title or "").strip():
+            return False
+        x1, y1, x2, y2 = self._title_marker_screen_rect()
+        return x1 <= sx <= x2 and y1 <= sy <= y2
 
     def _hit_handles(self, box: WordMemorizeBox, sx: int, sy: int) -> ResizeHandle:
         x1, y1, x2, y2 = self._screen_rect(box)
@@ -1179,7 +1237,24 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
     def _on_canvas_press(self, event: tk.Event) -> None:
         key, mode = self._hit_test(event.x, event.y)
+        if mode == "title_move":
+            self._select_box(None)
+            self._title_selected = True
+            self._drag_mode = "title_move"
+            self._drag_start = (event.x, event.y)
+            cx, cy = resolve_title_position(
+                frame_width=self._layout.frame_width,
+                frame_height=self._layout.frame_height,
+                margin_top_ratio=self._layout.margin_top_ratio,
+                y_offset_px=0,
+                title_x=int(getattr(self._layout, "title_x", 0)),
+                title_y=int(getattr(self._layout, "title_y", 0)),
+            )
+            self._title_drag_snapshot = (cx, cy)
+            self._drag_box_snapshot = None
+            return
         if key:
+            self._title_selected = False
             self._select_box(key)
             box = self._box_by_key(key)
             if box is None:
@@ -1196,12 +1271,27 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 box_key=box.box_key,
             )
         else:
+            self._title_selected = False
             self._select_box(None)
             self._drag_mode = ""
             self._drag_start = None
             self._drag_box_snapshot = None
+            self._title_drag_snapshot = None
 
     def _on_canvas_motion(self, event: tk.Event) -> None:
+        if self._drag_mode == "title_move":
+            if not self._drag_start or not self._title_drag_snapshot:
+                return
+            dx, dy = self._screen_to_fhd(
+                event.x - self._drag_start[0], event.y - self._drag_start[1]
+            )
+            tx, ty = self._title_drag_snapshot
+            fw, fh = self._layout.frame_width, self._layout.frame_height
+            nx, ny = clamp_title_position(tx + dx, ty + dy, fw, fh)
+            self._layout.title_x = int(nx)
+            self._layout.title_y = int(ny)
+            self._redraw_canvas()
+            return
         if not self._drag_mode or not self._drag_start or not self._drag_box_snapshot:
             return
         box = self._box_by_key(self._drag_box_snapshot.box_key)
@@ -1243,41 +1333,64 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._drag_mode = ""
         self._drag_start = None
         self._drag_box_snapshot = None
+        self._title_drag_snapshot = None
 
     def _draw_background(self) -> None:
         c = self._canvas
         c.delete("bg")
-        if self._layout.background_type == "image":
-            path = Path(self._layout.background_value)
-            if not path.is_absolute():
-                path = get_repo_root() / path.as_posix().replace("\\", "/")
-            if path.is_file():
-                try:
-                    from PIL import Image, ImageTk
+        path = word_memorize_bg_image_path(self._layout.background_value)
+        if path.is_file():
+            try:
+                from PIL import Image, ImageTk
 
-                    img = Image.open(path).convert("RGB")
-                    img = img.resize((PREVIEW_WIDTH, PREVIEW_HEIGHT), Image.Resampling.LANCZOS)
-                    self._bg_photo = ImageTk.PhotoImage(img)
-                    c.create_image(0, 0, anchor="nw", image=self._bg_photo, tags="bg")
-                    return
-                except Exception:
-                    pass
-            c.create_rectangle(
-                0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT,
-                fill="#333", outline="", tags="bg",
-            )
-            c.create_text(
-                PREVIEW_WIDTH // 2,
-                PREVIEW_HEIGHT // 2,
-                text="배경 이미지 없음",
-                fill="#aaa",
-                tags="bg",
-            )
-            return
-        fill = self._layout.background_value or "#ffffff"
+                img = Image.open(path).convert("RGB")
+                img = img.resize((PREVIEW_WIDTH, PREVIEW_HEIGHT), Image.Resampling.LANCZOS)
+                self._bg_photo = ImageTk.PhotoImage(img)
+                c.create_image(0, 0, anchor="nw", image=self._bg_photo, tags="bg")
+                return
+            except Exception:
+                pass
         c.create_rectangle(
             0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT,
-            fill=fill, outline="", tags="bg",
+            fill="#333", outline="", tags="bg",
+        )
+        stem = normalize_word_memorize_bg_stem(self._layout.background_value)
+        c.create_text(
+            PREVIEW_WIDTH // 2,
+            PREVIEW_HEIGHT // 2,
+            text=f"배경 없음 ({stem})\nresource/BG/{stem}.png",
+            fill="#aaa",
+            tags="bg",
+        )
+
+    def _draw_title_preview(self) -> None:
+        if not (self._layout.title or "").strip():
+            return
+        c = self._canvas
+        x1, y1, x2, y2 = self._title_marker_screen_rect()
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        outline = TITLE_MARKER_OUTLINE_SEL if self._title_selected else TITLE_MARKER_OUTLINE
+        width = 2 if self._title_selected else 1
+        c.create_rectangle(
+            x1,
+            y1,
+            x2,
+            y2,
+            fill=TITLE_MARKER_FILL,
+            outline=outline,
+            width=width,
+            dash=(4, 3) if self._title_selected else (),
+            tags=("title", "title_hit"),
+        )
+        c.create_text(
+            cx,
+            cy,
+            text=TITLE_PLACEHOLDER_LABEL,
+            anchor="center",
+            fill=TITLE_MARKER_TEXT_COLOR,
+            font=TITLE_MARKER_FONT,
+            tags="title",
         )
 
     def _display_pinyin(self, details: dict[str, str]) -> str:
@@ -1460,6 +1573,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         box = self._selected_box()
         if box is not None:
             self._draw_handles(box)
+        self._draw_title_preview()
         self._draw_margin_rail()
 
     def _refresh_margin_views(self) -> None:
@@ -1533,6 +1647,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._refresh_order_list()
         self._update_margin_label()
         self._sync_bg_music_combo()
+        self._sync_title_var()
 
     def _open(self) -> None:
         if not self._confirm_discard_dirty("다른 배치 파일을 불러옵니다."):
@@ -1576,6 +1691,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 parent=self,
             )
         self._sync_bg_music_combo()
+        self._sync_title_var()
 
     def _on_close(self) -> None:
         if not self._confirm_discard_dirty("창을 닫습니다."):

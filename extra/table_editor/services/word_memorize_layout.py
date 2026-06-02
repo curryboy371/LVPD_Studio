@@ -13,8 +13,105 @@ LAYOUT_VERSION = 1
 DEFAULT_MARGIN_TOP_RATIO = 0.1125
 DEFAULT_MARGIN_BOTTOM_RATIO = 0.13177083333333334
 DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_layouts"
+WORD_MEMORIZE_BG_DIR = get_repo_root() / "resource" / "BG"
+DEFAULT_WORD_MEMORIZE_BG_STEM = "3and3"
+_BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
-BackgroundType = Literal["color", "image"]
+BackgroundType = Literal["image"]
+TITLE_DEFAULT_MIN_Y = 40
+TITLE_RAISE_PX = 24
+
+
+def default_title_position(
+    frame_width: int = SHORTS_WIDTH,
+    frame_height: int = SHORTS_HEIGHT,
+    margin_top_ratio: float = DEFAULT_MARGIN_TOP_RATIO,
+    y_offset_px: int = 0,
+) -> tuple[int, int]:
+    """제목 앵커(중심) FHD 좌표 — 상단 중앙, margin_top 구간 기준."""
+    band_h = int(margin_top_ratio * frame_height)
+    if band_h > TITLE_DEFAULT_MIN_Y * 2:
+        y = max(TITLE_DEFAULT_MIN_Y, band_h // 2)
+    else:
+        y = TITLE_DEFAULT_MIN_Y
+    y = max(TITLE_DEFAULT_MIN_Y, y - TITLE_RAISE_PX + int(y_offset_px))
+    return frame_width // 2, y
+
+
+def clamp_title_position(
+    x: int, y: int, frame_width: int = SHORTS_WIDTH, frame_height: int = SHORTS_HEIGHT
+) -> tuple[int, int]:
+    return (
+        max(0, min(int(x), int(frame_width))),
+        max(TITLE_DEFAULT_MIN_Y, min(int(y), int(frame_height))),
+    )
+
+
+def resolve_title_position(
+    frame_width: int = SHORTS_WIDTH,
+    frame_height: int = SHORTS_HEIGHT,
+    margin_top_ratio: float = DEFAULT_MARGIN_TOP_RATIO,
+    y_offset_px: int = 0,
+    title_x: int = 0,
+    title_y: int = 0,
+) -> tuple[int, int]:
+    if int(title_x) <= 0 or int(title_y) <= 0:
+        return default_title_position(
+            frame_width=frame_width,
+            frame_height=frame_height,
+            margin_top_ratio=margin_top_ratio,
+            y_offset_px=y_offset_px,
+        )
+    x, y = clamp_title_position(
+        int(title_x), int(title_y) + int(y_offset_px), frame_width, frame_height
+    )
+    return x, y
+
+
+def list_word_memorize_bg_stems() -> list[str]:
+    """resource/BG 내 배경 이미지 stem 목록 (확장자 제외)."""
+    d = WORD_MEMORIZE_BG_DIR
+    if not d.is_dir():
+        return [DEFAULT_WORD_MEMORIZE_BG_STEM]
+    stems = sorted(
+        {
+            p.stem
+            for p in d.iterdir()
+            if p.is_file() and p.suffix.lower() in _BG_IMAGE_EXTS
+        }
+    )
+    return stems if stems else [DEFAULT_WORD_MEMORIZE_BG_STEM]
+
+
+def normalize_word_memorize_bg_stem(raw: str) -> str:
+    """배경 stem 정규화 — resource/BG 에 있으면 그대로, 없으면 기본값."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text.startswith("#"):
+        return DEFAULT_WORD_MEMORIZE_BG_STEM
+    if "/" in text:
+        stem = Path(text).stem
+    else:
+        stem = Path(text).stem
+    choices = list_word_memorize_bg_stems()
+    if stem in choices:
+        return stem
+    return DEFAULT_WORD_MEMORIZE_BG_STEM
+
+
+def word_memorize_bg_image_path(stem: str) -> Path:
+    """미리보기·폴백용 PNG(등) 절대 경로."""
+    name = normalize_word_memorize_bg_stem(stem)
+    for ext in _BG_IMAGE_EXTS:
+        path = WORD_MEMORIZE_BG_DIR / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return WORD_MEMORIZE_BG_DIR / f"{DEFAULT_WORD_MEMORIZE_BG_STEM}.png"
+
+
+def word_memorize_bg_video_path(stem: str) -> Path:
+    """재생·녹화용 MP4 절대 경로 (이미지와 동일 stem)."""
+    name = normalize_word_memorize_bg_stem(stem)
+    return WORD_MEMORIZE_BG_DIR / f"{name}.mp4"
 
 
 @dataclass
@@ -116,8 +213,12 @@ def find_non_overlapping_position(
 class WordMemorizeLayout:
     frame_width: int = SHORTS_WIDTH
     frame_height: int = SHORTS_HEIGHT
-    background_type: BackgroundType = "color"
-    background_value: str = "#ffffff"
+    background_type: BackgroundType = "image"
+    background_value: str = DEFAULT_WORD_MEMORIZE_BG_STEM
+    title: str = ""
+    title_x: int = 0
+    title_y: int = 0
+    title_y_offset_px: int = 0
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -143,9 +244,13 @@ class WordMemorizeLayout:
             "frame_width": self.frame_width,
             "frame_height": self.frame_height,
             "background": {
-                "type": self.background_type,
-                "value": self.background_value,
+                "type": "image",
+                "value": normalize_word_memorize_bg_stem(self.background_value),
             },
+            "title": (self.title or "").strip(),
+            "title_x": int(self.title_x),
+            "title_y": int(self.title_y),
+            "title_y_offset_px": int(self.title_y_offset_px),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -167,14 +272,17 @@ class WordMemorizeLayout:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WordMemorizeLayout:
         bg = data.get("background") or {}
-        bg_type = bg.get("type", "color")
-        if bg_type not in ("color", "image"):
-            bg_type = "color"
         layout = cls(
             frame_width=int(data.get("frame_width", SHORTS_WIDTH)),
             frame_height=int(data.get("frame_height", SHORTS_HEIGHT)),
-            background_type=bg_type,  # type: ignore[arg-type]
-            background_value=str(bg.get("value", "#ffffff")),
+            background_type="image",
+            background_value=normalize_word_memorize_bg_stem(
+                str(bg.get("value", DEFAULT_WORD_MEMORIZE_BG_STEM))
+            ),
+            title=str(data.get("title", "") or "").strip(),
+            title_x=int(data.get("title_x", 0) or 0),
+            title_y=int(data.get("title_y", 0) or 0),
+            title_y_offset_px=int(data.get("title_y_offset_px", 0) or 0),
         )
         boxes: list[WordMemorizeBox] = []
         for raw in data.get("boxes") or []:

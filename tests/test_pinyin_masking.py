@@ -18,3 +18,11 @@ def test_spaced_display_splits_by_hanzi():
     assert word_pinyin_to_marks_spaced("星期一", "xīngqīyī") == "xīng qī yī"
     assert word_pinyin_to_marks_spaced("今天", "jīntiān") == "jīn tiān"
     assert word_pinyin_to_marks_spaced("月", "yuè") == "yuè"
+
+
+def test_reduplication_uses_pinyin_tones_and_hanzi_spacing():
+    assert word_pinyin_to_marks_spaced("妈妈", "māma") == "mā ma"
+    assert word_pinyin_to_marks_spaced("哥哥", "gēge") == "gē ge"
+    assert word_pinyin_to_marks_spaced("爸爸", "bàba") == "bà ba"
+    assert word_pinyin_to_marks_spaced("孩子", "háizi") == "hái zi"
+    assert word_pinyin_to_marks_spaced("奶奶", "nǎinai") == "nǎi nai"

@@ -10,7 +10,13 @@ import pygame
 
 from core.paths import get_repo_root
 from data.models import Word
-from extra.table_editor.services.word_memorize_layout import WordMemorizeBox, WordMemorizeLayout
+from extra.table_editor.services.word_memorize_layout import (
+    WordMemorizeBox,
+    WordMemorizeLayout,
+    resolve_title_position,
+    word_memorize_bg_image_path,
+    word_memorize_bg_video_path,
+)
 from utils.pinyin_masking import (
     get_masked_pinyin_marks,
     normalize_word_masking,
@@ -32,21 +38,24 @@ GRAD_BORDER_STOPS: tuple[tuple[int, int, int], ...] = (
     (130, 220, 195),
     (120, 200, 255),
 )
-GRAD_BORDER_CYCLE_SEC = 1.1
-GRAD_BORDER_WIDTH = 3
-GRAD_BORDER_WIDTH_ACTIVE = 4
+GRAD_BORDER_CYCLE_SEC = 0.7
+GRAD_BORDER_WIDTH = 4
+GRAD_BORDER_WIDTH_ACTIVE = 7
 GRAD_GLOW_LAYERS = 5
 GRAD_GLOW_SPREAD = 10
 GRAD_RING_SAMPLES_PER_EDGE = 32
 GRAD_RING_ARC_STEPS = 12
 GRAD_RING_SUBDIV = 5
-ACTIVE_CARD_SCALE = 1.06
+ACTIVE_CARD_SCALE = 1.03
 TEXT_LINE_GAP = 4
 IMG_BOTTOM_PAD = 8
 IMG_LIFT = 12
 PINYIN_FONT_PT = 32
 HANZI_FONT_PT = 72
 EN_FONT_PT = 30
+TITLE_FONT_PT = 68
+TITLE_COLOR = (255, 255, 255)
+TITLE_SHADOW_COLOR = (0, 0, 0)
 IMG_MAX_HEIGHT_RATIO = 0.38
 
 
@@ -281,6 +290,46 @@ def _load_scaled_image(path: Path, max_w: int, max_h: int) -> pygame.Surface | N
         return None
 
 
+def _blit_contained_background(
+    surface: pygame.Surface, bg: pygame.Surface, fw: int, fh: int
+) -> None:
+    ix = (fw - bg.get_width()) // 2
+    iy = (fh - bg.get_height()) // 2
+    surface.blit(bg, (ix, iy))
+
+
+class LoopingBackgroundVideo:
+    """resource/BG 동명 MP4 — 끝나면 처음부터 반복."""
+
+    def __init__(self) -> None:
+        from studio.conversation.video_players import SimpleVideoPlayer
+
+        self._player = SimpleVideoPlayer()
+
+    def set_path(self, path: Path | None) -> None:
+        if path is not None and path.is_file():
+            self._player.set_source(str(path.resolve()), 0.0, -1.0)
+        else:
+            self._player.close()
+
+    def tick(self, dt_sec: float) -> None:
+        if not self._player.has_source():
+            return
+        if self._player.is_paused():
+            end = self._player.get_effective_end_sec()
+            if self._player.get_pts() >= end - 1e-3:
+                self._player.seek_to(0.0)
+                return
+        self._player.tick(dt_sec)
+        if self._player.is_paused():
+            self._player.seek_to(0.0)
+
+    def get_frame(self, fw: int, fh: int) -> pygame.Surface | None:
+        if not self._player.has_source():
+            return None
+        return self._player.get_frame(fw, fh, contain=True)
+
+
 class WordMemorizeRenderer:
     def __init__(self, repo_root: Path | None = None) -> None:
         self._repo = (repo_root or get_repo_root()).resolve()
@@ -288,7 +337,16 @@ class WordMemorizeRenderer:
         self._font_pinyin: pygame.font.Font | None = None
         self._font_hanzi: pygame.font.Font | None = None
         self._font_en: pygame.font.Font | None = None
+        self._font_title: pygame.font.Font | None = None
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
+        self._bg_video = LoopingBackgroundVideo()
+
+    def set_background_stem(self, stem: str) -> None:
+        video = word_memorize_bg_video_path(stem)
+        self._bg_video.set_path(video if video.is_file() else None)
+
+    def tick_background_video(self, dt_sec: float) -> None:
+        self._bg_video.tick(dt_sec)
 
     def ensure_fonts(self) -> None:
         if self._fonts_ready:
@@ -301,6 +359,9 @@ class WordMemorizeRenderer:
             HANZI_FONT_PT, HANZI_COLOR, weight="bold"
         )
         self._font_en = load_font_korean(EN_FONT_PT, EN_COLOR)
+        self._font_title = load_font_korean(
+            TITLE_FONT_PT, TITLE_COLOR, weight="bold"
+        )
         self._fonts_ready = True
 
     def draw(
@@ -314,6 +375,7 @@ class WordMemorizeRenderer:
         dim_inactive: bool = False,
         anim_time_sec: float | None = None,
         config: Any | None = None,
+        use_video_background: bool = False,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -322,7 +384,10 @@ class WordMemorizeRenderer:
             else border_anim_time_sec(config)
         )
         fw, fh = layout.frame_width, layout.frame_height
-        self._draw_background(surface, layout, fw, fh)
+        self._draw_background(
+            surface, layout, fw, fh, use_video=use_video_background
+        )
+        self._draw_title(surface, layout, fw, fh)
 
         entries: list[tuple[WordMemorizeBox, Word, str, bool]] = []
         for box in layout.sorted_boxes():
@@ -353,32 +418,45 @@ class WordMemorizeRenderer:
         layout: WordMemorizeLayout,
         fw: int,
         fh: int,
+        *,
+        use_video: bool = False,
     ) -> None:
-        if layout.background_type == "image":
-            path = Path(layout.background_value)
-            if not path.is_absolute():
-                path = self._repo / path.as_posix().replace("\\", "/")
-            bg = _load_scaled_image(path, fw, fh) if path.is_file() else None
-            if bg is not None:
-                ix = (fw - bg.get_width()) // 2
-                iy = (fh - bg.get_height()) // 2
-                surface.blit(bg, (ix, iy))
+        if use_video:
+            frame = self._bg_video.get_frame(fw, fh)
+            if frame is not None:
+                _blit_contained_background(surface, frame, fw, fh)
                 return
-        color = self._parse_color(layout.background_value or "#ffffff")
-        surface.fill(color)
+        img_path = word_memorize_bg_image_path(layout.background_value)
+        bg = _load_scaled_image(img_path, fw, fh) if img_path.is_file() else None
+        if bg is not None:
+            _blit_contained_background(surface, bg, fw, fh)
+            return
+        surface.fill((0, 0, 0))
 
-    def _parse_color(self, raw: str) -> tuple[int, int, int]:
-        s = (raw or "").strip()
-        if s.startswith("#") and len(s) >= 7:
-            try:
-                return (
-                    int(s[1:3], 16),
-                    int(s[3:5], 16),
-                    int(s[5:7], 16),
-                )
-            except ValueError:
-                pass
-        return (255, 255, 255)
+    def _draw_title(
+        self,
+        surface: pygame.Surface,
+        layout: WordMemorizeLayout,
+        fw: int,
+        fh: int,
+    ) -> None:
+        title = (layout.title or "").strip()
+        if not title or self._font_title is None:
+            return
+        text = title[:80]
+        cx, cy = resolve_title_position(
+            frame_width=fw,
+            frame_height=fh,
+            margin_top_ratio=layout.margin_top_ratio,
+            y_offset_px=getattr(layout, "title_y_offset_px", 0),
+            title_x=getattr(layout, "title_x", 0),
+            title_y=getattr(layout, "title_y", 0),
+        )
+        shadow = self._font_title.render(text, True, TITLE_SHADOW_COLOR)
+        main = self._font_title.render(text, True, TITLE_COLOR)
+        rect = main.get_rect(center=(cx, cy))
+        surface.blit(shadow, rect.move(2, 2))
+        surface.blit(main, rect)
 
     def _draw_box(
         self,
