@@ -24,6 +24,7 @@ from extra.table_editor.services.word_memorize_layout import (
     TitleLineSpec,
     box_overlaps_any,
     clamp_title_position,
+    box_runtime_key,
     layout_card_content_vertical,
     layout_title_line_specs,
     resolve_title_position,
@@ -32,8 +33,11 @@ from extra.table_editor.services.word_memorize_layout import (
     list_word_memorize_bg_stems,
     list_title_color_labels,
     list_title_font_labels,
+    list_row_highlight_labels,
     list_selection_highlight_labels,
     load_layout,
+    boxes_in_row_group,
+    normalize_row_highlight,
     normalize_selection_highlight,
     normalize_title_color,
     normalize_title_font,
@@ -47,6 +51,7 @@ from extra.table_editor.services.word_memorize_layout import (
     title_font_label_for_value,
     title_line_specs_from_legacy_layout,
     title_preview_font_for_key,
+    row_highlight_label_for_value,
     selection_highlight_label_for_value,
     DEFAULT_TITLE_FONT_PT,
     TITLE_FONT_PT_MIN,
@@ -347,7 +352,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         highlight_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         highlight_in = ttk.Frame(highlight_frame)
         highlight_in.pack(fill=tk.X, padx=6, pady=6)
-        ttk.Label(highlight_in, text="타입").pack(side=tk.LEFT)
+        ttk.Label(highlight_in, text="카드").pack(side=tk.LEFT)
         self._selection_highlight_var = tk.StringVar(
             value=selection_highlight_label_for_value(
                 getattr(self._layout, "selection_highlight", "")
@@ -358,18 +363,37 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             textvariable=self._selection_highlight_var,
             values=list_selection_highlight_labels(),
             state="readonly",
-            width=14,
+            width=12,
         )
         self._selection_highlight_combo.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
         self._selection_highlight_combo.bind(
             "<<ComboboxSelected>>", self._on_selection_highlight_changed, add="+"
         )
+        row_hl_row = ttk.Frame(highlight_frame)
+        row_hl_row.pack(fill=tk.X, padx=6, pady=(4, 0))
+        ttk.Label(row_hl_row, text="가로줄").pack(side=tk.LEFT)
+        self._row_highlight_var = tk.StringVar(
+            value=row_highlight_label_for_value(
+                getattr(self._layout, "row_highlight", "none")
+            )
+        )
+        self._row_highlight_combo = ttk.Combobox(
+            row_hl_row,
+            textvariable=self._row_highlight_var,
+            values=list_row_highlight_labels(),
+            state="readonly",
+            width=12,
+        )
+        self._row_highlight_combo.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
+        self._row_highlight_combo.bind(
+            "<<ComboboxSelected>>", self._on_row_highlight_changed, add="+"
+        )
         ttk.Label(
             highlight_frame,
-            text="재생 시 강조된 단어 카드 효과 (스케일업은 공통)",
+            text="카드=재생 중인 단어만 · 가로줄=같은 줄 전체(별도)",
             foreground="#666",
             wraplength=280,
-        ).pack(anchor="w", padx=6, pady=(0, 6))
+        ).pack(anchor="w", padx=6, pady=(4, 6))
 
         grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
         grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
@@ -467,6 +491,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         ttk.Button(order_btns, text="▼", width=4, command=self._move_order_down).pack(
             side=tk.LEFT, padx=2
         )
+        ttk.Button(
+            order_btns,
+            text="단어 id 변경…",
+            command=self._change_selected_word_id,
+        ).pack(side=tk.LEFT, padx=(6, 2), fill=tk.X, expand=True)
 
         self._path_var = tk.StringVar(value="(새 배치 — 저장 전)")
         ttk.Label(
@@ -864,14 +893,25 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             return False
         return True
 
-    def _pick_word_id(self) -> str | None:
+    def _pick_word_id(
+        self,
+        *,
+        replace_word_id: str | None = None,
+        dialog_title: str = "word 추가",
+    ) -> str | None:
         picked: list[str] = []
 
         def _on_pick(word_id: str) -> None:
             picked.append(word_id)
 
+        exclude = set(self._used_word_ids())
+        if replace_word_id:
+            exclude.discard((replace_word_id or "").strip())
         dlg = WordMemorizeWordPickDialog(
-            self, _on_pick, exclude_ids=self._used_word_ids()
+            self,
+            _on_pick,
+            exclude_ids=exclude,
+            title=dialog_title,
         )
         self.wait_window(dlg)
         return picked[0] if picked else None
@@ -1044,6 +1084,49 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._mark_dirty()
         self._update_window_title()
 
+    def _change_selected_word_id(self) -> None:
+        box = self._selected_box()
+        if box is None:
+            messagebox.showinfo(
+                "선택 없음",
+                "캔버스 목록에서 단어 id를 바꿀 항목을 선택하세요.",
+                parent=self,
+            )
+            return
+        old_id = (box.word_id or "").strip()
+        new_id = self._pick_word_id(
+            replace_word_id=old_id,
+            dialog_title="단어 id 변경",
+        )
+        if not new_id:
+            return
+        new_id = new_id.strip()
+        if new_id == old_id:
+            return
+        if any(
+            (b.word_id or "").strip() == new_id
+            for b in self._layout.boxes
+            if b.box_key != box.box_key
+        ):
+            messagebox.showwarning(
+                "id 중복",
+                f"id {new_id} 는 이미 이 배치의 다른 칸에 사용 중입니다.",
+                parent=self,
+            )
+            return
+        if not lookup_word_details(new_id).get("word", "").strip():
+            messagebox.showwarning(
+                "단어장 없음",
+                f"words.xlsx에 id {new_id} 가 없습니다.",
+                parent=self,
+            )
+            return
+        box.word_id = new_id
+        self._mark_dirty()
+        self._refresh_order_list()
+        self._sync_order_list_selection()
+        self._redraw_canvas()
+
     def _delete_selected(self) -> None:
         box = self._selected_box()
         if box is None:
@@ -1107,11 +1190,22 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._mark_dirty()
             self._redraw_canvas()
 
+    def _on_row_highlight_changed(self, _event: tk.Event | None = None) -> None:
+        label = (self._row_highlight_var.get() or "").strip()
+        key = normalize_row_highlight(label)
+        if key != normalize_row_highlight(getattr(self._layout, "row_highlight", "none")):
+            self._layout.row_highlight = key
+            self._mark_dirty()
+            self._redraw_canvas()
+
     def _sync_selection_highlight_combo(self) -> None:
         self._selection_highlight_var.set(
             selection_highlight_label_for_value(
                 getattr(self._layout, "selection_highlight", "")
             )
+        )
+        self._row_highlight_var.set(
+            row_highlight_label_for_value(getattr(self._layout, "row_highlight", "none"))
         )
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
@@ -1814,6 +1908,109 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         if photo is not None and img_h > 0 and image_y is not None:
             c.create_image(cx, base_y + image_y, anchor="n", image=photo, tags=tags)
 
+    def _row_preview_y_span(self, anchor: WordMemorizeBox) -> tuple[int, int]:
+        _, y1, _, y2 = self._screen_rect(anchor)
+        return y1, y2
+
+    def _row_preview_x_min(self, anchor: WordMemorizeBox) -> int:
+        boxes = boxes_in_row_group(self._layout, anchor)
+        if not boxes:
+            x1, _, _, _ = self._screen_rect(anchor)
+            return x1
+        return min(self._screen_rect(b)[0] for b in boxes)
+
+    def _preview_bracket_lines(
+        self,
+        c: tk.Canvas,
+        *,
+        x: int,
+        y1: int,
+        y2: int,
+        arm: int,
+        facing: Literal["left", "right"],
+        color: str,
+        width: int,
+        tags: tuple[str, ...],
+    ) -> None:
+        if facing == "left":
+            c.create_line(x, y1, x, y2, fill=color, width=width, tags=tags)
+            c.create_line(x, y1, x + arm, y1, fill=color, width=width, tags=tags)
+            c.create_line(x, y2, x + arm, y2, fill=color, width=width, tags=tags)
+        else:
+            c.create_line(x, y1, x, y2, fill=color, width=width, tags=tags)
+            c.create_line(x, y1, x - arm, y1, fill=color, width=width, tags=tags)
+            c.create_line(x, y2, x - arm, y2, fill=color, width=width, tags=tags)
+
+    def _draw_row_highlight_preview(self, c: tk.Canvas, anchor: WordMemorizeBox) -> None:
+        kind = normalize_row_highlight(getattr(self._layout, "row_highlight", "none"))
+        if kind == "none":
+            return
+        y1, y2 = self._row_preview_y_span(anchor)
+        color = "#4fc3f7"
+        tags: tuple[str, ...] = ("row_highlight",)
+        row_h = max(8, y2 - y1)
+        arm = max(10, min(28, row_h // 3))
+        thick_one = 4
+        thick_both = 6
+        if kind == "neon_glow":
+            c.create_rectangle(
+                0,
+                y1,
+                PREVIEW_WIDTH,
+                y2,
+                outline=color,
+                width=3,
+                tags=tags,
+            )
+        elif kind == "brackets":
+            margin = 14
+            self._preview_bracket_lines(
+                c,
+                x=margin,
+                y1=y1,
+                y2=y2,
+                arm=arm,
+                facing="left",
+                color=color,
+                width=thick_both,
+                tags=tags,
+            )
+            self._preview_bracket_lines(
+                c,
+                x=PREVIEW_WIDTH - margin,
+                y1=y1,
+                y2=y2,
+                arm=arm,
+                facing="right",
+                color=color,
+                width=thick_both,
+                tags=tags,
+            )
+        elif kind == "bracket_one":
+            ox = max(8, self._row_preview_x_min(anchor) - arm - 6)
+            self._preview_bracket_lines(
+                c,
+                x=ox,
+                y1=y1,
+                y2=y2,
+                arm=arm,
+                facing="left",
+                color=color,
+                width=thick_one,
+                tags=tags,
+            )
+        elif kind == "left_bar":
+            bar_w = 8
+            c.create_rectangle(
+                0,
+                y1,
+                bar_w,
+                y2,
+                fill=color,
+                outline="",
+                tags=tags,
+            )
+
     def _redraw_canvas(self) -> None:
         c = self._canvas
         c.delete("all")
@@ -1821,14 +2018,21 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._draw_background()
         self._draw_shorts_zone_guides()
 
+        card_highlight = normalize_selection_highlight(
+            getattr(self._layout, "selection_highlight", "")
+        )
+        selected = self._selected_box()
+        if selected is not None:
+            self._draw_row_highlight_preview(c, selected)
+
         for box in self._layout.sorted_boxes():
-            selected = box.box_key == self._selected_key
+            is_selected = box_runtime_key(box) == (self._selected_key or "")
             x1, y1, x2, y2 = self._screen_rect(box)
-            if selected:
-                highlight = normalize_selection_highlight(
-                    getattr(self._layout, "selection_highlight", "")
-                )
-                outline = "#f44336" if highlight == "red_border" else "#4fc3f7"
+            if is_selected and card_highlight == "red_border":
+                outline = "#f44336"
+                width = 3
+            elif is_selected:
+                outline = "#4fc3f7"
                 width = 3
             else:
                 outline = "#90a4ae"

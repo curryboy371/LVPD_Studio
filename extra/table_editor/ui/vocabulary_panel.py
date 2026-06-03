@@ -406,6 +406,7 @@ class VocabularyPanel(ttk.Frame):
         original_id: str | None = None,
     ) -> None:
         def on_save(values: dict[str, str], new: bool) -> None:
+            values = {c: (values.get(c) or "").strip() for c in WORDS_FIELDNAMES}
             if new:
                 self._all_rows.append(values)
             else:

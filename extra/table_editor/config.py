@@ -69,18 +69,20 @@ LONG_TEXT_FIELDS = frozenset({
     "last_hold_text",
 })
 
-# words.csv · ko_narration_sets — TTS 엔진/목소리 (배치·런타임과 동일)
+# ko_narration_sets — TTS 엔진/목소리 (배치·런타임과 동일)
 TTS_TYPE_CHOICES: tuple[str, ...] = ("", "edge", "gtts")
 EDGE_TTS_VOICE_CHOICES: tuple[str, ...] = (
     "",
     "ko-KR-SunHiNeural",
     "ko-KR-InJoonNeural",
 )
-DEFAULT_WORD_TTS_TYPE = "edge"
-DEFAULT_WORD_TTS_VOICE = "ko-KR-SunHiNeural"
+DEFAULT_KO_NARRATION_TTS_TYPE = "edge"
+DEFAULT_KO_NARRATION_TTS_VOICE = "ko-KR-SunHiNeural"
+
+# words.xlsx 레거시 — 편집기·저장 시 제거
+WORDS_LEGACY_TTS_COLUMNS = frozenset({"tts_type", "tts_voice", "tts"})
 
 COMBOBOX_FIELD_CHOICES: dict[str, tuple[str, ...]] = {
-    "tts_type": TTS_TYPE_CHOICES,
     "tts": TTS_TYPE_CHOICES,
     "tts_voice": EDGE_TTS_VOICE_CHOICES,
 }
@@ -100,8 +102,9 @@ __all__ = [
     "MULTILINE_LINES_FIELDS",
     "TTS_TYPE_CHOICES",
     "EDGE_TTS_VOICE_CHOICES",
-    "DEFAULT_WORD_TTS_TYPE",
-    "DEFAULT_WORD_TTS_VOICE",
+    "DEFAULT_KO_NARRATION_TTS_TYPE",
+    "DEFAULT_KO_NARRATION_TTS_VOICE",
+    "WORDS_LEGACY_TTS_COLUMNS",
     "COMBOBOX_FIELD_CHOICES",
     "DEFAULT_BASE_SENTENCES_CSV",
     "DEFAULT_BASE_SENTENCES_EXCEL",

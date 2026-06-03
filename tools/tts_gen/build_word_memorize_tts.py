@@ -6,7 +6,7 @@
   wm_zh_word_{word_id}_0.mp3       — 중국어 한자 (words.sound_path 와 별도)
   en_word_{word_id}_0.mp3          — 영문 en_meaning
 
-TTS 엔진: words.csv tts_type(edge|gtts). 목소리: --tts-voice / --tts-voice-zh / --tts-voice-en.
+TTS 엔진·목소리: --tts / --tts-voice / --tts-voice-zh / --tts-voice-en CLI.
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def main() -> int:
     parser.add_argument(
         "--tts-voice",
         default="ko-KR-SunHiNeural",
-        help="한국어 뜻 TTS Edge 목소리(비우면 words.csv tts_voice)",
+        help="한국어 뜻 TTS Edge 목소리",
     )
     parser.add_argument(
         "--tts-voice-zh",

@@ -83,14 +83,10 @@ def resolve_word_en_tts_config(
     tts_cli: str = "edge",
     tts_voice_cli: str = DEFAULT_EN_TTS_VOICE,
 ) -> tuple[str, str]:
-    """words.tts_type 우선, 영어 목소리는 CLI 기본(한국어 tts_voice는 사용하지 않음)."""
-    engine = (tts_cli or "edge").strip().lower()
+    """CLI TTS 엔진·영어 목소리 (word_id는 호환용)."""
+    _ = word_id
+    engine = _normalize_word_tts_type(tts_cli) or "edge"
     voice = (tts_voice_cli or DEFAULT_EN_TTS_VOICE).strip()
-    word = get_word(int(word_id))
-    if word is not None:
-        wt = _normalize_word_tts_type(getattr(word, "tts_type", "") or "")
-        if wt:
-            engine = wt
     if not voice and engine in ("edge", "edge-tts", "edge_tts"):
         voice = DEFAULT_EN_TTS_VOICE
     return engine, voice

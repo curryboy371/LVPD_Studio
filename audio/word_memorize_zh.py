@@ -73,13 +73,9 @@ def resolve_word_zh_tts_config(
     tts_cli: str = "edge",
     tts_voice_cli: str = DEFAULT_ZH_TTS_VOICE,
 ) -> tuple[str, str]:
-    engine = (tts_cli or "edge").strip().lower()
+    _ = word_id
+    engine = _normalize_word_tts_type(tts_cli) or "edge"
     voice = (tts_voice_cli or DEFAULT_ZH_TTS_VOICE).strip()
-    word = get_word(int(word_id))
-    if word is not None:
-        wt = _normalize_word_tts_type(getattr(word, "tts_type", "") or "")
-        if wt:
-            engine = wt
     if not voice and engine in ("edge", "edge-tts", "edge_tts"):
         voice = DEFAULT_ZH_TTS_VOICE
     return engine, voice

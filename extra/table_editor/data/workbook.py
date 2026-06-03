@@ -85,16 +85,26 @@ def _row_lists_equal(
     return True
 
 
-def align_dataframe_columns(df: pd.DataFrame, fieldnames: list[str]) -> pd.DataFrame:
-    """Ensure editor columns exist; keep extra excel columns at the end."""
+def align_dataframe_columns(
+    df: pd.DataFrame,
+    fieldnames: list[str],
+    *,
+    drop_extra_columns: bool = False,
+) -> pd.DataFrame:
+    """Ensure editor columns exist.
+
+    drop_extra_columns: True면 fieldnames 외 엑셀 열은 버린다 (words.xlsx 등).
+    """
     if df is None or df.empty:
         return pd.DataFrame(columns=fieldnames)
-    extra = [c for c in df.columns if c not in fieldnames]
-    ordered = list(fieldnames) + [c for c in extra if c not in fieldnames]
     out = df.copy()
     for col in fieldnames:
         if col not in out.columns:
             out[col] = ""
+    if drop_extra_columns:
+        return out[fieldnames]
+    extra = [c for c in out.columns if c not in fieldnames]
+    ordered = list(fieldnames) + [c for c in extra if c not in fieldnames]
     return out[ordered]
 
 
@@ -174,7 +184,9 @@ class MultiSheetWorkbookStore:
                 self._sheets[name] = pd.DataFrame(columns=self.fieldnames)
             else:
                 self._sheets[name] = align_dataframe_columns(
-                    df.dropna(axis=1, how="all"), self.fieldnames
+                    df.dropna(axis=1, how="all"),
+                    self.fieldnames,
+                    drop_extra_columns=True,
                 )
         self.path = p.resolve()
         self.dirty = False
@@ -183,7 +195,9 @@ class MultiSheetWorkbookStore:
         return self._sheets.get(sheet_name, pd.DataFrame(columns=self.fieldnames)).copy()
 
     def set_sheet_dataframe(self, sheet_name: str, df: pd.DataFrame) -> None:
-        self._sheets[sheet_name] = align_dataframe_columns(df, self.fieldnames)
+        self._sheets[sheet_name] = align_dataframe_columns(
+            df, self.fieldnames, drop_extra_columns=True
+        )
         if sheet_name not in self._sheet_order:
             self._sheet_order.append(sheet_name)
         self.dirty = True

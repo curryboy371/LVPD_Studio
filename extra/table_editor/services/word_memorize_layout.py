@@ -19,6 +19,7 @@ _BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 BackgroundType = Literal["image"]
 SelectionHighlightType = Literal["gradient", "red_border"]
+RowHighlightType = Literal["none", "neon_glow", "brackets", "bracket_one", "left_bar"]
 TITLE_DEFAULT_MIN_Y = 40
 TITLE_RAISE_PX = 24
 
@@ -52,6 +53,14 @@ SELECTION_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
     ("빨간 테두리", "red_border"),
 )
 DEFAULT_SELECTION_HIGHLIGHT: SelectionHighlightType = "gradient"
+ROW_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("없음", "none"),
+    ("네온 글로우", "neon_glow"),
+    ("양쪽 대괄호", "brackets"),
+    ("한쪽 대괄호", "bracket_one"),
+    ("왼쪽 세로 바", "left_bar"),
+)
+DEFAULT_ROW_HIGHLIGHT: RowHighlightType = "none"
 # 배치 편집기 미리보기 캔버스 스케일 (word_memorize_layout_editor.PREVIEW_WIDTH / SHORTS_WIDTH)
 TITLE_EDITOR_PREVIEW_SCALE = 504 / float(SHORTS_WIDTH)
 
@@ -260,6 +269,8 @@ def normalize_selection_highlight(raw: str) -> SelectionHighlightType:
     if not text:
         return DEFAULT_SELECTION_HIGHLIGHT
     lowered = text.lower()
+    if lowered == "row_band" or text == "가로줄":
+        return DEFAULT_SELECTION_HIGHLIGHT
     valid_keys = {key for _, key in SELECTION_HIGHLIGHT_CHOICES}
     if lowered in valid_keys:
         return lowered  # type: ignore[return-value]
@@ -275,6 +286,68 @@ def selection_highlight_label_for_value(raw: str) -> str:
         if k == key:
             return label
     return SELECTION_HIGHLIGHT_CHOICES[0][0]
+
+
+def list_row_highlight_labels() -> list[str]:
+    return [label for label, _ in ROW_HIGHLIGHT_CHOICES]
+
+
+def normalize_row_highlight(raw: str | bool | None) -> RowHighlightType:
+    if isinstance(raw, bool):
+        return "neon_glow" if raw else "none"
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_ROW_HIGHLIGHT
+    lowered = text.lower()
+    valid = {key for _, key in ROW_HIGHLIGHT_CHOICES}
+    if lowered in valid:
+        return lowered  # type: ignore[return-value]
+    for label, key in ROW_HIGHLIGHT_CHOICES:
+        if text == label:
+            return key  # type: ignore[return-value]
+    if lowered in ("row_band", "true", "1", "yes"):
+        return "neon_glow"
+    return DEFAULT_ROW_HIGHLIGHT
+
+
+def row_highlight_label_for_value(raw: str | bool | None) -> str:
+    key = normalize_row_highlight(raw)
+    for label, k in ROW_HIGHLIGHT_CHOICES:
+        if k == key:
+            return label
+    return ROW_HIGHLIGHT_CHOICES[0][0]
+
+
+def box_runtime_key(box: WordMemorizeBox) -> str:
+    """재생·렌더에서 쓰는 박스 식별자."""
+    key = (box.box_key or "").strip()
+    if key:
+        return key
+    return f"{box.word_id}:{box.order}"
+
+
+def box_row_group_key(box: WordMemorizeBox) -> tuple[int, int]:
+    """같은 가로줄 그룹 — y·h(FHD)가 동일한 박스."""
+    return (int(box.y), int(box.h))
+
+
+def find_box_by_runtime_key(
+    layout: WordMemorizeLayout, active_key: str
+) -> WordMemorizeBox | None:
+    target = (active_key or "").strip()
+    if not target:
+        return None
+    for box in layout.boxes:
+        if box_runtime_key(box) == target:
+            return box
+    return None
+
+
+def boxes_in_row_group(
+    layout: WordMemorizeLayout, anchor: WordMemorizeBox
+) -> list[WordMemorizeBox]:
+    group = box_row_group_key(anchor)
+    return [b for b in layout.boxes if box_row_group_key(b) == group]
 
 
 def normalize_title_font(raw: str) -> str:
@@ -570,6 +643,8 @@ class WordMemorizeLayout:
     title_font_pt: int = DEFAULT_TITLE_FONT_PT
     title_lines: list[TitleLineSpec] = field(default_factory=list)
     selection_highlight: SelectionHighlightType = DEFAULT_SELECTION_HIGHLIGHT
+    # 재생 중인 단어와 y·h가 같은 줄 강조 (카드 효과와 별도)
+    row_highlight: RowHighlightType = DEFAULT_ROW_HIGHLIGHT
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -609,6 +684,7 @@ class WordMemorizeLayout:
             "title_font_pt": normalize_title_font_pt(self.title_font_pt),
             "title_lines": [s.to_dict() for s in self.title_lines],
             "selection_highlight": normalize_selection_highlight(self.selection_highlight),
+            "row_highlight": normalize_row_highlight(self.row_highlight),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -667,9 +743,14 @@ class WordMemorizeLayout:
             )
         sync_layout_title_fields(layout)
         layout.title_x = int(layout.frame_width) // 2
-        layout.selection_highlight = normalize_selection_highlight(
-            str(data.get("selection_highlight", DEFAULT_SELECTION_HIGHLIGHT) or "")
-        )
+        raw_highlight = str(
+            data.get("selection_highlight", DEFAULT_SELECTION_HIGHLIGHT) or ""
+        ).strip()
+        layout.selection_highlight = normalize_selection_highlight(raw_highlight)
+        layout.row_highlight = normalize_row_highlight(data.get("row_highlight", "none"))
+        if raw_highlight.lower() in ("row_band",) or raw_highlight == "가로줄":
+            if layout.row_highlight == "none":
+                layout.row_highlight = "neon_glow"
         boxes: list[WordMemorizeBox] = []
         for raw in data.get("boxes") or []:
             if not isinstance(raw, dict):

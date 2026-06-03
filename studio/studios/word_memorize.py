@@ -14,7 +14,11 @@ from core.paths import (
     get_repo_root,
 )
 from data.table_manager import get_word, load_words_table_from_csv
-from extra.table_editor.services.word_memorize_layout import WordMemorizeBox, load_layout
+from extra.table_editor.services.word_memorize_layout import (
+    WordMemorizeBox,
+    box_runtime_key,
+    load_layout,
+)
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
     load_en_meaning_by_id,
@@ -215,7 +219,7 @@ class WordMemorizeStudio(IStudio):
             self.stop_background_audio()
 
     def _box_active_key(self, box: WordMemorizeBox) -> str:
-        return box.box_key or f"{box.word_id}:{box.order}"
+        return box_runtime_key(box)
 
     def _outro_hold_sec(self) -> float:
         """마지막 음성 이후 종료 대기 시간 (녹화는 즉시 종료)."""

@@ -53,14 +53,12 @@
 #   masking     : 한자 글자 수만큼 0 → 저장 시 "000" 형태
 #   img_path    : 한자 stem (특수문자 제거)
 #   sound_path  : img_path 와 동일 (한자 이름)
-#   tts_type    : edge
-#   tts_voice   : ko-KR-SunHiNeural
 #   tip, video_path : 비움
 #
 #   같은 시트·같은 pos 에 동일 한자(word)가 있으면:
 #     - meaning / en_meaning / pinyin 등 기존 값이 비어 있으면 배치 값으로 보충
 #     - type 은 @type 값이 있으면 항상 덮어씀
-#     - img_path / sound_path / masking / tts 도 비어 있으면 자동채움 규칙으로 보충
+#     - img_path / sound_path / masking 도 비어 있으면 자동채움 규칙으로 보충
 #     - 이미 채워진 필드는 덮어쓰지 않음 (pos 가 다르면 별도 행으로 추가)
 #   --force 를 쓰면 중복이어도 항상 새 행을 추가합니다.
 #

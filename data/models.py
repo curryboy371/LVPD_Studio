@@ -155,14 +155,6 @@ class Word(BaseModel):
     type: str = Field(default="", description="종류 (예: 과일, 동물). 한글 분류·검색용")
     meaning: str = Field(default="", description="뜻")
     tip: str = Field(default="", description="학습 팁(숏츠 단어 모드 등)")
-    tts_type: str = Field(
-        default="",
-        description="숏츠 뜻 TTS 엔진 (edge|gtts). 비우면 edge",
-    )
-    tts_voice: str = Field(
-        default="",
-        description="Edge 목소리 ID (예: ko-KR-SunHiNeural). gtts는 무시",
-    )
     img_path: str = Field(default="", description="이미지 경로")
     video_path: str = Field(default="", description="연상 동영상 경로 (숏츠 단어 모드, 선택)")
     sound_path: str = Field(default="", description="단어 단독 발음 음원 (선택)")

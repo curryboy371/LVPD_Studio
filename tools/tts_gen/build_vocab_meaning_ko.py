@@ -10,8 +10,7 @@
   --topic      topic → word_id 뜻 TTS + ko_narration_id 인트로 TTS
   --word-id    words.csv id 직접 (30123 또는 30123|30124, 뜻 TTS만)
 
-TTS 엔진: words.csv `tts_type`(edge|gtts), `tts_voice`(Edge 목소리).
-  비어 있으면 --tts / --tts-voice CLI 기본값.
+TTS 엔진·목소리: --tts / --tts-voice CLI (기본 edge, ko-KR-SunHiNeural).
 """
 from __future__ import annotations
 

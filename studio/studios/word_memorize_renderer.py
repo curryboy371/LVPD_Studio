@@ -12,11 +12,16 @@ from core.paths import get_repo_root
 from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
     CARD_IMG_BOTTOM_PAD_FHD,
+    RowHighlightType,
     WordMemorizeBox,
     WordMemorizeLayout,
+    box_runtime_key,
+    boxes_in_row_group,
     default_card_item_gap,
+    find_box_by_runtime_key,
     layout_card_content_vertical,
     layout_title_line_specs,
+    normalize_row_highlight,
     normalize_selection_highlight,
     normalize_title_font,
     normalize_title_font_pt,
@@ -57,6 +62,14 @@ GRAD_RING_SUBDIV = 5
 ACTIVE_CARD_SCALE = 1.03
 RED_ACTIVE_BORDER_COLOR = (244, 67, 54)
 RED_ACTIVE_BORDER_WIDTH = 6
+ROW_BAND_BORDER_WIDTH = 10
+ROW_BAND_V_INSET = 6
+ROW_BRACKET_ARM = 32
+ROW_BRACKET_THICK = 8
+ROW_BRACKET_THICK_BOTH = 14
+ROW_BRACKET_MARGIN_X = 24
+ROW_LEFT_BAR_WIDTH = 12
+ROW_NEON_GLOW_STRENGTH = 0.42
 TEXT_LINE_GAP = 4
 IMG_BOTTOM_PAD = 8
 IMG_LIFT = 12
@@ -193,6 +206,8 @@ def _draw_active_border(
     *,
     anim_time_sec: float,
     border_width: int = GRAD_BORDER_WIDTH_ACTIVE,
+    glow_strength: float = 1.0,
+    ring_alpha_scale: float = 1.0,
 ) -> None:
     """애니메이션 그라데이션 보더 + 은은한 외곽 글로우."""
     t_sec = anim_time_sec
@@ -200,6 +215,8 @@ def _draw_active_border(
     border_width = max(2, int(border_width * (0.96 + 0.04 * breathe)))
     phase = _border_anim_phase(t_sec)
     grad_mid = _animated_grad_color(0.35, phase)
+    glow_k = max(0.0, min(1.0, float(glow_strength)))
+    ring_k = max(0.0, min(1.0, float(ring_alpha_scale)))
 
     pad = GRAD_GLOW_SPREAD + 6
     layer = pygame.Surface(
@@ -212,7 +229,9 @@ def _draw_active_border(
     for i in range(GRAD_GLOW_LAYERS, 0, -1):
         expand = i * 2
         glow = inner.inflate(expand * 2, expand * 2)
-        alpha = int((5 + i * 10) * breathe)
+        alpha = int((5 + i * 10) * breathe * glow_k)
+        if alpha < 1:
+            continue
         pygame.draw.rect(
             layer,
             (*grad_mid, alpha),
@@ -229,7 +248,7 @@ def _draw_active_border(
             t_sec=t_sec,
             phase=phase,
             border_width=border_width,
-            breathe=breathe,
+            breathe=breathe * ring_k,
         )
 
     surface.blit(layer, (rect.x - pad, rect.y - pad))
@@ -257,6 +276,192 @@ def _draw_red_active_border(
         border_radius=ACTIVE_BORDER_RADIUS,
     )
     surface.blit(layer, (rect.x - pad, rect.y - pad))
+
+
+def _row_highlight_geometry(
+    layout: WordMemorizeLayout,
+    anchor: WordMemorizeBox,
+    *,
+    frame_width: int,
+) -> tuple[int, int, int, int]:
+    """y, h, x_min, x_max (FHD) for a row group."""
+    boxes = boxes_in_row_group(layout, anchor)
+    inset = ROW_BAND_V_INSET
+    y = max(0, int(anchor.y) - inset)
+    h = int(anchor.h) + inset * 2
+    x_min = min((int(b.x) for b in boxes), default=0)
+    x_max = max((int(b.x + b.w) for b in boxes), default=frame_width)
+    return y, h, x_min, x_max
+
+
+def _row_accent_color(anim_time_sec: float) -> tuple[int, int, int]:
+    return _animated_grad_color(0.35, _border_anim_phase(anim_time_sec))
+
+
+def _draw_bracket_stroke(
+    layer: pygame.Surface,
+    color: tuple[int, int, int],
+    *,
+    x: int,
+    y0: int,
+    y1: int,
+    arm: int,
+    thick: int,
+    alpha: int,
+    facing: str,
+) -> None:
+    rgba = (*color, max(0, min(255, alpha)))
+    if facing == "left":
+        pygame.draw.line(layer, rgba, (x, y0), (x, y1), thick)
+        pygame.draw.line(layer, rgba, (x, y0), (x + arm, y0), thick)
+        pygame.draw.line(layer, rgba, (x, y1), (x + arm, y1), thick)
+    else:
+        pygame.draw.line(layer, rgba, (x, y0), (x, y1), thick)
+        pygame.draw.line(layer, rgba, (x, y0), (x - arm, y0), thick)
+        pygame.draw.line(layer, rgba, (x, y1), (x - arm, y1), thick)
+
+
+def _draw_row_neon_glow(
+    surface: pygame.Surface,
+    *,
+    frame_width: int,
+    row_y: int,
+    row_h: int,
+    anim_time_sec: float,
+) -> None:
+    band = pygame.Rect(0, row_y, frame_width, row_h)
+    _draw_active_border(
+        surface,
+        band,
+        anim_time_sec=anim_time_sec,
+        border_width=ROW_BAND_BORDER_WIDTH,
+        glow_strength=ROW_NEON_GLOW_STRENGTH,
+        ring_alpha_scale=0.55,
+    )
+
+
+def _draw_row_brackets(
+    surface: pygame.Surface,
+    *,
+    frame_width: int,
+    row_y: int,
+    row_h: int,
+    anim_time_sec: float,
+    both_ends: bool,
+    x_min: int,
+) -> None:
+    color = _row_accent_color(anim_time_sec)
+    y0, y1 = row_y, row_y + row_h
+    arm = max(16, min(ROW_BRACKET_ARM, row_h // 3))
+    thick = ROW_BRACKET_THICK_BOTH if both_ends else ROW_BRACKET_THICK
+    layer = pygame.Surface((frame_width, row_h), pygame.SRCALPHA)
+    if both_ends:
+        lx = ROW_BRACKET_MARGIN_X
+        rx = frame_width - ROW_BRACKET_MARGIN_X
+        _draw_bracket_stroke(
+            layer,
+            color,
+            x=lx,
+            y0=0,
+            y1=row_h,
+            arm=arm,
+            thick=thick,
+            alpha=248,
+            facing="left",
+        )
+        _draw_bracket_stroke(
+            layer,
+            color,
+            x=rx,
+            y0=0,
+            y1=row_h,
+            arm=arm,
+            thick=thick,
+            alpha=248,
+            facing="right",
+        )
+    else:
+        ox = max(12, x_min - arm - 8)
+        _draw_bracket_stroke(
+            layer,
+            color,
+            x=ox,
+            y0=0,
+            y1=row_h,
+            arm=arm,
+            thick=thick,
+            alpha=248,
+            facing="left",
+        )
+    surface.blit(layer, (0, row_y))
+
+
+def _draw_row_left_bar(
+    surface: pygame.Surface,
+    *,
+    row_y: int,
+    row_h: int,
+    anim_time_sec: float,
+) -> None:
+    color = _row_accent_color(anim_time_sec)
+    layer = pygame.Surface((ROW_LEFT_BAR_WIDTH + 4, row_h), pygame.SRCALPHA)
+    pygame.draw.rect(
+        layer,
+        (*color, 235),
+        pygame.Rect(0, 0, ROW_LEFT_BAR_WIDTH, row_h),
+        border_radius=4,
+    )
+    surface.blit(layer, (0, row_y))
+
+
+def draw_row_highlight(
+    surface: pygame.Surface,
+    row_type: RowHighlightType | str,
+    layout: WordMemorizeLayout,
+    anchor: WordMemorizeBox,
+    *,
+    anim_time_sec: float,
+) -> None:
+    """가로줄(y·h 동일) 강조 — 카드 하이라이트와 별도."""
+    kind = normalize_row_highlight(row_type)
+    if kind == "none":
+        return
+    fw = int(layout.frame_width)
+    row_y, row_h, x_min, _x_max = _row_highlight_geometry(
+        layout, anchor, frame_width=fw
+    )
+    if kind == "neon_glow":
+        _draw_row_neon_glow(
+            surface,
+            frame_width=fw,
+            row_y=row_y,
+            row_h=row_h,
+            anim_time_sec=anim_time_sec,
+        )
+    elif kind == "brackets":
+        _draw_row_brackets(
+            surface,
+            frame_width=fw,
+            row_y=row_y,
+            row_h=row_h,
+            anim_time_sec=anim_time_sec,
+            both_ends=True,
+            x_min=x_min,
+        )
+    elif kind == "bracket_one":
+        _draw_row_brackets(
+            surface,
+            frame_width=fw,
+            row_y=row_y,
+            row_h=row_h,
+            anim_time_sec=anim_time_sec,
+            both_ends=False,
+            x_min=x_min,
+        )
+    elif kind == "left_bar":
+        _draw_row_left_bar(
+            surface, row_y=row_y, row_h=row_h, anim_time_sec=anim_time_sec
+        )
 
 
 def _draw_active_highlight(
@@ -474,7 +679,12 @@ class WordMemorizeRenderer:
         )
         self._draw_title(surface, layout, fw, fh)
 
-        entries: list[tuple[WordMemorizeBox, Word, str, bool]] = []
+        active_anchor = find_box_by_runtime_key(layout, active_box_key or "")
+        row_highlight_type = normalize_row_highlight(
+            getattr(layout, "row_highlight", "none")
+        )
+
+        entries: list[tuple[WordMemorizeBox, Word, str, str]] = []
         for box in layout.sorted_boxes():
             try:
                 wid = int(box.word_id)
@@ -483,31 +693,47 @@ class WordMemorizeRenderer:
             word = words_by_id.get(wid)
             if word is None:
                 continue
-            active = bool(active_box_key and box.box_key == active_box_key)
-            entries.append((box, word, card_meaning_by_id.get(wid, ""), active))
+            entries.append((box, word, card_meaning_by_id.get(wid, ""), box_runtime_key(box)))
 
-        for box, word, card_meaning, active in entries:
-            if not active:
-                self._draw_box(
-                    surface,
-                    box,
-                    word,
-                    card_meaning,
-                    layout=layout,
-                    active=False,
-                    anim_time_sec=t_anim,
-                )
-        for box, word, card_meaning, _active in entries:
-            if _active:
-                self._draw_box(
-                    surface,
-                    box,
-                    word,
-                    card_meaning,
-                    layout=layout,
-                    active=True,
-                    anim_time_sec=t_anim,
-                )
+        inactive: list[tuple[WordMemorizeBox, Word, str]] = []
+        active_cards: list[tuple[WordMemorizeBox, Word, str]] = []
+
+        for box, word, card_meaning, runtime_key in entries:
+            if active_box_key and runtime_key == active_box_key:
+                active_cards.append((box, word, card_meaning))
+            else:
+                inactive.append((box, word, card_meaning))
+
+        for box, word, card_meaning in inactive:
+            self._draw_box(
+                surface,
+                box,
+                word,
+                card_meaning,
+                layout=layout,
+                active=False,
+                anim_time_sec=t_anim,
+            )
+
+        if row_highlight_type != "none" and active_anchor is not None:
+            draw_row_highlight(
+                surface,
+                row_highlight_type,
+                layout,
+                active_anchor,
+                anim_time_sec=t_anim,
+            )
+
+        for box, word, card_meaning in active_cards:
+            self._draw_box(
+                surface,
+                box,
+                word,
+                card_meaning,
+                layout=layout,
+                active=True,
+                anim_time_sec=t_anim,
+            )
 
     def _draw_background(
         self,

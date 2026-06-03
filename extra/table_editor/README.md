@@ -56,11 +56,10 @@ lvpd.bat editor
 - **검색** (Enter):
   - 숫자 → `id` 일치 행으로 이동.
   - 한자 → `word` 완전 일치. 여러 id면 선택 대화상자, 하나면 바로 이동.
-- **더블클릭** / **새로 만들기**: 동일 편집 창. **새로 만들기**는 시트 id 구간 안 **비어 있는 최소 id**·pos 필터·TTS 기본(`edge` / `ko-KR-SunHiNeural`) 자동 입력. 시트별 id 구간은 `extra/table_editor/services/word_sheet_id_ranges.py` 참고.
+- **더블클릭** / **새로 만들기**: 동일 편집 창. **새로 만들기**는 시트 id 구간 안 **비어 있는 최소 id**·pos 필터 자동 입력. 시트별 id 구간은 `extra/table_editor/services/word_sheet_id_ranges.py` 참고.
 - **새 단어** 편집에서 `word` 입력 후 **Enter**: `img_path`·`sound_path` = 한자, `masking` = 글자 수만큼 `0` (입력 `000` → 저장 `"000"`).
 - **masking**: 편집창에는 `000`처럼 숫자만 보이고, 저장 시 엑셀/CSV에는 `"000"` 형태로 기록.
 - **삭제**: 행 선택 후 **삭제** 버튼 또는 `Delete` 키. 확인 후 현재 시트에서 제거(저장 전까지 메모리만 변경).
-- **tts_type** / **tts_voice**: 드롭다운 선택 (`edge` \| `gtts`, Edge 목소리 `ko-KR-SunHiNeural` \| `ko-KR-InJoonNeural`). `gtts`일 때 voice는 비움.
 - **tip**: 줄마다 `[입력] [+] [-]` 한 줄. `+` 는 아래 줄 추가, `-` 는 해당 줄 삭제. 저장 시 `\\n` 으로 합침.
 - **img_path**: **이미지 사용** / **이미지 미사용** — 미사용 시 `none`·입력·클립보드 버튼 비활성. 사용 시 `word`와 동일 stem·입력 가능. **클립보드(배경x/o)** 는 파일·OS 클립보드 이미지를 **1:1 정사각형**으로 맞춘 뒤 미리보기·OS 클립보드에 반영(배경x만 rembg). **저장** 시 `resource/image/word/{stem}.png` 반영. 드래그 앤 드롭은 배경 제거·임시 PNG (Windows: `windnd`). `pip install -r extra/table_editor/requirements.txt`. 투명 PNG는 rembg 생략.
 

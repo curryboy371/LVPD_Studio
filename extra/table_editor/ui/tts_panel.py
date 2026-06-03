@@ -11,8 +11,8 @@ from extra.table_editor.config import (
     DEFAULT_KO_NARRATION_LINES_EXCEL,
     DEFAULT_KO_NARRATION_SETS_CSV,
     DEFAULT_KO_NARRATION_SETS_EXCEL,
-    DEFAULT_WORD_TTS_TYPE,
-    DEFAULT_WORD_TTS_VOICE,
+    DEFAULT_KO_NARRATION_TTS_TYPE,
+    DEFAULT_KO_NARRATION_TTS_VOICE,
 )
 from extra.table_editor.data.fields import (
     KO_NARRATION_LINES_FIELDNAMES,
@@ -493,8 +493,8 @@ class TtsPanel(ttk.Frame):
     def _new_set_row(self) -> None:
         defaults = {c: "" for c in KO_NARRATION_SETS_FIELDNAMES}
         defaults["id"] = allocate_next_row_id(self._all_set_rows)
-        defaults["tts"] = DEFAULT_WORD_TTS_TYPE
-        defaults["tts_voice"] = DEFAULT_WORD_TTS_VOICE
+        defaults["tts"] = DEFAULT_KO_NARRATION_TTS_TYPE
+        defaults["tts_voice"] = DEFAULT_KO_NARRATION_TTS_VOICE
         self._open_set_editor(defaults, is_new=True, title="새 set 행")
 
     def _new_line_row(self) -> None:

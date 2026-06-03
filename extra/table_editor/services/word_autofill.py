@@ -1,11 +1,7 @@
 """Auto-fill words.csv fields from hanzi (word) on new-row editor."""
 from __future__ import annotations
 
-from extra.table_editor.config import (
-    DEFAULT_WORD_TTS_TYPE,
-    DEFAULT_WORD_TTS_VOICE,
-    IMG_PATH_NONE,
-)
+from extra.table_editor.config import IMG_PATH_NONE
 
 
 def masking_for_hanzi(word: str) -> str:
@@ -24,14 +20,10 @@ def media_path_stem_for_hanzi(word: str) -> str:
 
 
 def apply_new_word_defaults(row: dict[str, str], *, pos: str = "") -> dict[str, str]:
-    """새 단어 편집창 초기값: TTS 기본·pos."""
+    """새 단어 편집창 초기값: pos."""
     out = dict(row)
     if pos:
         out["pos"] = pos
-    if not (out.get("tts_type") or "").strip():
-        out["tts_type"] = DEFAULT_WORD_TTS_TYPE
-    if not (out.get("tts_voice") or "").strip():
-        out["tts_voice"] = DEFAULT_WORD_TTS_VOICE
     return out
 
 
@@ -41,7 +33,7 @@ def apply_hanzi_autofill(
     *,
     image_enabled: bool = True,
 ) -> dict[str, str]:
-    """한자 입력 후 Enter 시 경로·masking·TTS 보조 채움."""
+    """한자 입력 후 Enter 시 경로·masking 보조 채움."""
     word = (hanzi or "").strip()
     if not word:
         return row
@@ -51,8 +43,4 @@ def apply_hanzi_autofill(
     out["img_path"] = stem if image_enabled else IMG_PATH_NONE
     out["sound_path"] = stem
     out["masking"] = masking_for_hanzi(word)
-    if not (out.get("tts_type") or "").strip():
-        out["tts_type"] = DEFAULT_WORD_TTS_TYPE
-    if not (out.get("tts_voice") or "").strip():
-        out["tts_voice"] = DEFAULT_WORD_TTS_VOICE
     return out

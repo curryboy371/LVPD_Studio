@@ -236,12 +236,10 @@ class RowEditorDialog(tk.Toplevel):
                 entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 self._widgets[col] = entry
 
-        if "tts_type" in self._widgets and "tts_voice" in self._widgets:
-            tts_combo = self._widgets["tts_type"]
-            tts_combo.bind("<<ComboboxSelected>>", self._sync_tts_voice_state)
-            self._sync_tts_voice_state()
-        elif "tts" in self._widgets and "tts_voice" in self._widgets:
-            self._widgets["tts"].bind("<<ComboboxSelected>>", self._sync_tts_voice_state)
+        if self._uses_ko_narration_set_tts_fields():
+            self._widgets["tts"].bind(
+                "<<ComboboxSelected>>", self._sync_tts_voice_state
+            )
             self._sync_tts_voice_state()
 
         if self._img_editor is not None:
@@ -367,10 +365,11 @@ class RowEditorDialog(tk.Toplevel):
             if text and text not in values:
                 w.configure(values=[text, *values])
             w.set(text)
-            if col in ("tts_type", "tts") and text.lower() == "gtts":
-                self._sync_tts_voice_state()
-            elif col == "tts_voice":
-                self._sync_tts_voice_state()
+            if self._uses_ko_narration_set_tts_fields() and col in ("tts", "tts_voice"):
+                if col == "tts" and text.lower() == "gtts":
+                    self._sync_tts_voice_state()
+                elif col == "tts_voice":
+                    self._sync_tts_voice_state()
         elif isinstance(w, ttk.Entry):
             show = masking_for_display(value) if col == MASKING_FIELD else value
             w.delete(0, tk.END)
@@ -413,11 +412,18 @@ class RowEditorDialog(tk.Toplevel):
         combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         return combo
 
+    def _uses_ko_narration_set_tts_fields(self) -> bool:
+        """ko_narration_sets 행 편집 — words 단어장과 구분."""
+        return (
+            not self._is_words_editor
+            and "tts" in self._fieldnames
+            and "tts_voice" in self._fieldnames
+        )
+
     def _tts_engine_value(self) -> str:
-        for key in ("tts_type", "tts"):
-            w = self._widgets.get(key)
-            if isinstance(w, ttk.Combobox):
-                return (w.get() or "").strip().lower()
+        w = self._widgets.get("tts")
+        if isinstance(w, ttk.Combobox):
+            return (w.get() or "").strip().lower()
         return ""
 
     def _sync_tts_voice_state(self, _event: tk.Event | None = None) -> None:
@@ -456,7 +462,7 @@ class RowEditorDialog(tk.Toplevel):
             else:
                 raw = w.get().strip()
                 out[col] = masking_for_storage(raw) if col == MASKING_FIELD else raw
-        if out.get("tts_type", "").strip().lower() == "gtts" or out.get("tts", "").strip().lower() == "gtts":
+        if self._uses_ko_narration_set_tts_fields() and out.get("tts", "").strip().lower() == "gtts":
             out["tts_voice"] = ""
         if self._is_base_editor:
             for col in BASE_FIELDNAMES:

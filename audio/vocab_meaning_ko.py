@@ -81,7 +81,7 @@ def korean_meaning_text_for_word_id(word_id: int) -> str:
 
 
 def _normalize_word_tts_type(raw: str) -> str:
-    """words.tts_type → resolve_tts_provider 키."""
+    """TTS CLI/engine 문자열 → resolve_tts_provider 키."""
     key = (raw or "").strip().lower()
     if key in ("edge", "edge-tts", "edge_tts"):
         return "edge"
@@ -96,17 +96,10 @@ def resolve_word_meaning_tts_config(
     tts_cli: str = "edge",
     tts_voice_cli: str = "ko-KR-SunHiNeural",
 ) -> tuple[str, str]:
-    """words.csv tts_type·tts_voice 우선, 비어 있으면 CLI/기본값."""
-    engine = (tts_cli or "edge").strip().lower()
+    """CLI TTS 엔진·목소리 (word_id는 호환용, 테이블 per-word TTS 미사용)."""
+    _ = word_id
+    engine = _normalize_word_tts_type(tts_cli) or "edge"
     voice = (tts_voice_cli or "").strip()
-    word = get_word(int(word_id))
-    if word is not None:
-        wt = _normalize_word_tts_type(getattr(word, "tts_type", "") or "")
-        wv = (getattr(word, "tts_voice", "") or "").strip()
-        if wt:
-            engine = wt
-        if wv:
-            voice = wv
     if not voice and engine in ("edge", "edge-tts", "edge_tts"):
         voice = "ko-KR-SunHiNeural"
     return engine, voice
@@ -138,7 +131,7 @@ def build_vocab_meaning_plan_for_word(
     tts_voice: str | None = None,
     force_tts: bool = False,
 ) -> Optional[KoNarrationPlan]:
-    """단어 1개 뜻 TTS·timeline JSON 생성 (words.csv tts_type·tts_voice)."""
+    """단어 1개 뜻 TTS·timeline JSON 생성."""
     from audio.ko_narration import KO_SOUND_DIR
 
     line = (text or "").strip()

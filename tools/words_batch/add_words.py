@@ -19,7 +19,6 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from core.paths import DEFAULT_WORDS_TABLE_CSV, DEFAULT_WORDS_TABLE_EXCEL
-from extra.table_editor.config import DEFAULT_WORD_TTS_TYPE, DEFAULT_WORD_TTS_VOICE
 from extra.table_editor.data.fields import WORDS_FIELDNAMES
 from extra.table_editor.data.workbook import MultiSheetWorkbookStore
 from extra.table_editor.services.masking_format import masking_for_storage
@@ -150,10 +149,6 @@ def build_word_row(
     row = apply_new_word_defaults(row, pos=pos)
     row = apply_hanzi_autofill(row, entry.word, image_enabled=True)
     row["masking"] = masking_for_storage(row.get("masking", ""))
-    if not (row.get("tts_type") or "").strip():
-        row["tts_type"] = DEFAULT_WORD_TTS_TYPE
-    if not (row.get("tts_voice") or "").strip():
-        row["tts_voice"] = DEFAULT_WORD_TTS_VOICE
     return row
 
 
@@ -162,7 +157,7 @@ def _all_sheet_rows(store: MultiSheetWorkbookStore) -> dict[str, list[dict[str, 
 
 
 _BATCH_MERGE_FIELDS = ("meaning", "en_meaning", "pinyin")
-_AUTOFILL_MERGE_FIELDS = ("img_path", "sound_path", "masking", "tts_type", "tts_voice")
+_AUTOFILL_MERGE_FIELDS = ("img_path", "sound_path", "masking")
 
 
 def _find_duplicate_row_index(

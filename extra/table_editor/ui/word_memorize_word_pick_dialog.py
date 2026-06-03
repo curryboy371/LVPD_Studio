@@ -16,9 +16,10 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
         on_select: Callable[[str], None],
         *,
         exclude_ids: set[str] | frozenset[str] | None = None,
+        title: str = "word 추가",
     ) -> None:
         super().__init__(parent)
-        self.title("word 추가")
+        self.title(title)
         self.transient(parent)
         self.grab_set()
         self._on_select = on_select
