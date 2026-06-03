@@ -370,7 +370,7 @@ class MainPanel(ttk.Frame):
     ) -> None:
         stem = Path(layout_path).stem
         lang = (meaning_lang or "ko").strip().lower()
-        if lang not in ("ko", "en"):
+        if lang not in ("ko", "en", "zh"):
             lang = "ko"
         argv = [
             "-u",

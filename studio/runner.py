@@ -723,7 +723,7 @@ def _create_studio(
         if not layout_path:
             raise ValueError("word_memorize 스튜디오에는 layout_path가 필요합니다.")
         meaning_lang = str(kw.pop("meaning_lang", "ko") or "ko").strip().lower()
-        if meaning_lang not in ("ko", "en"):
+        if meaning_lang not in ("ko", "en", "zh"):
             meaning_lang = "ko"
         return WordMemorizeStudio(
             layout_path=layout_path, meaning_lang=meaning_lang  # type: ignore[arg-type]
@@ -762,8 +762,8 @@ def main() -> None:
         "--meaning-lang",
         type=str,
         default="ko",
-        choices=("ko", "en"),
-        help="word_memorize: 카드 뜻·첫 TTS 언어 (ko=한국어 뜻, en=영어 뜻). 기본 ko.",
+        choices=("ko", "en", "zh"),
+        help="word_memorize: 카드 뜻·TTS 순서 (ko=한→중, en=영→중, zh=중→한·BG/ch MP4). 기본 ko.",
     )
     parser.add_argument(
         "--csv",

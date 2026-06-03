@@ -34,12 +34,13 @@ LASER_BORDER_ALPHA_BRIGHT = 255
 # ADD는 어두운 픽셀이 잘 안 쌓여 흐릿해 보임 — 알파 합성으로 선명하게
 LASER_BLEND_FLAGS = 0
 LASER_ALPHA_RATIO = 0.75
+# 테두리 교차점에서 카드 안쪽으로 빔·도달을 조금 더 당김 (px)
+LASER_CARD_OVERSHOOT_PX = 3
 BEAM_ALPHA_BOOST = 1.55
 BEAM_MIN_VISIBLE_ALPHA = 200
 BEAM_THICKNESS_RATIO = 0.68
 
 _BEAM_CACHE: pygame.Surface | None = None
-_HEAD_CACHE: pygame.Surface | None = None
 
 
 def _laser_alpha(alpha: int) -> int:
@@ -87,18 +88,6 @@ def _load_beam() -> pygame.Surface | None:
     except Exception:
         _BEAM_CACHE = None
     return _BEAM_CACHE
-
-
-def _load_head_glow(beam_src: pygame.Surface) -> pygame.Surface:
-    """빔 오른쪽(머리) 구간 — 임팩트 글로우용."""
-    global _HEAD_CACHE
-    if _HEAD_CACHE is not None:
-        return _HEAD_CACHE
-    w, h = beam_src.get_size()
-    head_w = max(8, int(w * 0.38))
-    head_x = max(0, w - head_w)
-    _HEAD_CACHE = _ensure_srcalpha(beam_src.subsurface((head_x, 0, head_w, h)).copy())
-    return _HEAD_CACHE
 
 
 def _normalized_t(
@@ -235,6 +224,57 @@ def _aim_angle_rad(dx: float, dy: float) -> float:
     return math.atan2(dy, dx)
 
 
+def laser_target_on_card_border(
+    origin: tuple[float, float],
+    card_rect: tuple[int, int, int, int] | pygame.Rect,
+) -> tuple[float, float]:
+    """프레임 중앙→카드 광선이 테두리에 닿은 뒤 LASER_CARD_OVERSHOOT_PX 만큼 더 진행한 점."""
+    if isinstance(card_rect, pygame.Rect):
+        rect = card_rect
+    else:
+        x, y, w, h = card_rect
+        rect = pygame.Rect(int(x), int(y), int(w), int(h))
+
+    ox, oy = origin
+    cx = rect.x + rect.width * 0.5
+    cy = rect.y + rect.height * 0.5
+    dx = cx - ox
+    dy = cy - oy
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+        return cx, cy
+
+    t_enter = -math.inf
+    t_exit = math.inf
+    for p, d, lo, hi in (
+        (ox, dx, rect.left, rect.right),
+        (oy, dy, rect.top, rect.bottom),
+    ):
+        if abs(d) < 1e-9:
+            if p < lo or p > hi:
+                return cx, cy
+            continue
+        t1 = (lo - p) / d
+        t2 = (hi - p) / d
+        t_enter = max(t_enter, min(t1, t2))
+        t_exit = min(t_exit, max(t1, t2))
+
+    if t_enter > t_exit or t_exit < 0:
+        return cx, cy
+    t_hit = t_enter if t_enter > 0 else t_exit
+    if t_hit < 0:
+        return cx, cy
+    hx = ox + dx * t_hit
+    hy = oy + dy * t_hit
+    seg_dx = hx - ox
+    seg_dy = hy - oy
+    seg_len = math.hypot(seg_dx, seg_dy)
+    if seg_len > 1e-6 and LASER_CARD_OVERSHOOT_PX > 0:
+        scale = (seg_len + LASER_CARD_OVERSHOOT_PX) / seg_len
+        hx = ox + seg_dx * scale
+        hy = oy + seg_dy * scale
+    return hx, hy
+
+
 def _scale_beam_to_length(sprite: pygame.Surface, length_px: float) -> pygame.Surface:
     length = max(12, int(length_px))
     thickness = _beam_thickness_px(sprite)
@@ -279,18 +319,18 @@ def draw_laser_center_to_card(
     *,
     frame_width: int,
     frame_height: int,
-    card_center: tuple[int, int],
+    card_rect: tuple[int, int, int, int] | pygame.Rect,
     elapsed_sec: float,
     duration_sec: float,
     loop_preview: bool = False,
 ) -> None:
-    """프레임 정중앙(꼬리)에서 카드 중심(머리)으로 레이저 발사."""
+    """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사."""
     beam_src = _load_beam()
     if beam_src is None:
         return
 
     origin = (frame_width * 0.5, frame_height * 0.5)
-    target = (float(card_center[0]), float(card_center[1]))
+    target = laser_target_on_card_border(origin, card_rect)
     dx = target[0] - origin[0]
     dy = target[1] - origin[1]
     distance = math.hypot(dx, dy)
@@ -335,15 +375,3 @@ def draw_laser_center_to_card(
         angle_rad=angle,
         alpha=beam_alpha,
     )
-
-    if phase == "hold" or (
-        phase == "propagate" and phase_t > PROPAGATE_HIT_PHASE
-    ):
-        head_src = _load_head_glow(beam_src)
-        hw, hh = head_src.get_size()
-        tip_w = max(12, int(hw * 1.25))
-        tip_h = max(8, int(hh * 1.45))
-        tip = _ensure_srcalpha(pygame.transform.smoothscale(head_src, (tip_w, tip_h)))
-        tip.set_alpha(_laser_alpha(255))
-        rect = tip.get_rect(center=(int(target[0]), int(target[1])))
-        surface.blit(tip, rect, special_flags=LASER_BLEND_FLAGS)

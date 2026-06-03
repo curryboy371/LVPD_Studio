@@ -45,8 +45,8 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_title_font_pt,
     resolve_title_position,
     title_color_to_rgb,
-    word_memorize_bg_image_path,
-    word_memorize_bg_video_path,
+    resolve_word_memorize_bg_image_path,
+    resolve_word_memorize_bg_video_path,
 )
 from studio.studios.word_memorize_laser import (
     draw_laser_center_to_card,
@@ -639,9 +639,15 @@ class WordMemorizeRenderer:
         self._font_title_by_key: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
         self._bg_video = LoopingBackgroundVideo()
+        self._bg_layout_stem = ""
+        self._bg_meaning_lang = "ko"
 
-    def set_background_stem(self, stem: str) -> None:
-        video = word_memorize_bg_video_path(stem)
+    def set_background(self, layout_stem: str, meaning_lang: str = "ko") -> None:
+        self._bg_layout_stem = (layout_stem or "").strip()
+        self._bg_meaning_lang = (meaning_lang or "ko").strip().lower()
+        video = resolve_word_memorize_bg_video_path(
+            self._bg_layout_stem, meaning_lang=self._bg_meaning_lang
+        )
         self._bg_video.set_path(video if video.is_file() else None)
 
     def tick_background_video(self, dt_sec: float) -> None:
@@ -775,13 +781,16 @@ class WordMemorizeRenderer:
             and active_cards
             and not active_is_base
         ):
-            cx = int(active_anchor.x + active_anchor.w / 2)
-            cy = int(active_anchor.y + active_anchor.h / 2)
             draw_laser_center_to_card(
                 surface,
                 frame_width=fw,
                 frame_height=fh,
-                card_center=(cx, cy),
+                card_rect=pygame.Rect(
+                    active_anchor.x,
+                    active_anchor.y,
+                    active_anchor.w,
+                    active_anchor.h,
+                ),
                 elapsed_sec=word_timing[0],
                 duration_sec=word_timing[1],
                 loop_preview=word_timing[1] <= 0,
@@ -814,7 +823,10 @@ class WordMemorizeRenderer:
             if frame is not None:
                 _blit_contained_background(surface, frame, fw, fh)
                 return
-        img_path = word_memorize_bg_image_path(layout.background_value)
+        img_path = resolve_word_memorize_bg_image_path(
+            layout.background_value or self._bg_layout_stem,
+            meaning_lang=self._bg_meaning_lang,
+        )
         bg = _load_scaled_image(img_path, fw, fh) if img_path.is_file() else None
         if bg is not None:
             _blit_contained_background(surface, bg, fw, fh)

@@ -16,6 +16,7 @@ from extra.table_editor.ui.window_placement import center_toplevel_on_parent
 _MEANING_LANG_LABELS: dict[str, str] = {
     "ko": "한국어",
     "en": "영어",
+    "zh": "중국어",
 }
 _MEANING_LANG_BY_LABEL = {v: k for k, v in _MEANING_LANG_LABELS.items()}
 
@@ -63,10 +64,10 @@ class WordMemorizeRunDialog(tk.Toplevel):
 
         self._layout_paths = {name: path for name, path in layouts}
 
-        lang_frame = ttk.LabelFrame(self, text="언어 (카드 뜻 · 첫 TTS)")
+        lang_frame = ttk.LabelFrame(self, text="언어 (카드 뜻 · TTS 순서)")
         lang_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
         self._lang_var = tk.StringVar(value=_MEANING_LANG_LABELS["ko"])
-        for key in ("ko", "en"):
+        for key in ("ko", "en", "zh"):
             ttk.Radiobutton(
                 lang_frame,
                 text=_MEANING_LANG_LABELS[key],

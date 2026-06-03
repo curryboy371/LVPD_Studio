@@ -14,8 +14,11 @@ DEFAULT_MARGIN_TOP_RATIO = 0.1125
 DEFAULT_MARGIN_BOTTOM_RATIO = 0.13177083333333334
 DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_layouts"
 WORD_MEMORIZE_BG_DIR = get_repo_root() / "resource" / "BG"
+WORD_MEMORIZE_BG_CH_DIR = WORD_MEMORIZE_BG_DIR / "ch"
 WORD_MEMORIZE_LASER_BEAM = get_repo_root() / "resource" / "image" / "icon" / "laser.png"
 DEFAULT_WORD_MEMORIZE_BG_STEM = "3and3"
+# 배치 JSON stem 과 ch/ 폴더 파일명이 다른 경우 (예: mandara → mandala.mp4)
+_BG_CH_VIDEO_STEM_ALIASES: dict[str, str] = {"mandara": "mandala"}
 
 
 def word_memorize_laser_beam_path() -> Path:
@@ -549,6 +552,49 @@ def normalize_word_memorize_bg_stem(raw: str) -> str:
     if stem in choices:
         return stem
     return DEFAULT_WORD_MEMORIZE_BG_STEM
+
+
+def _is_zh_meaning_lang(meaning_lang: str) -> bool:
+    return (meaning_lang or "").strip().lower() in ("zh", "ch", "cn")
+
+
+def _word_memorize_bg_ch_video_candidates(stem: str) -> list[Path]:
+    """중국어 모드: resource/BG/ch/{stem}.mp4 후보 (동일 stem, 별칭 stem)."""
+    base = normalize_word_memorize_bg_stem(stem)
+    names: list[str] = [base]
+    alias = _BG_CH_VIDEO_STEM_ALIASES.get(base)
+    if alias and alias not in names:
+        names.append(alias)
+    return [WORD_MEMORIZE_BG_CH_DIR / f"{name}.mp4" for name in names]
+
+
+def resolve_word_memorize_bg_video_path(
+    stem: str, *, meaning_lang: str = "ko"
+) -> Path:
+    """재생·녹화·미리보기용 MP4 — zh 모드면 BG/ch/ 동일 파일명 우선."""
+    if _is_zh_meaning_lang(meaning_lang):
+        for path in _word_memorize_bg_ch_video_candidates(stem):
+            if path.is_file():
+                return path
+    return word_memorize_bg_video_path(stem)
+
+
+def resolve_word_memorize_bg_image_path(
+    stem: str, *, meaning_lang: str = "ko"
+) -> Path:
+    """정지 배경 폴백 — zh 모드면 BG/ch/ 동일 stem 이미지 우선."""
+    base = normalize_word_memorize_bg_stem(stem)
+    if _is_zh_meaning_lang(meaning_lang):
+        names = [base]
+        alias = _BG_CH_VIDEO_STEM_ALIASES.get(base)
+        if alias and alias not in names:
+            names.append(alias)
+        for name in names:
+            for ext in _BG_IMAGE_EXTS:
+                path = WORD_MEMORIZE_BG_CH_DIR / f"{name}{ext}"
+                if path.is_file():
+                    return path
+    return word_memorize_bg_image_path(stem)
 
 
 def word_memorize_bg_image_path(stem: str) -> Path:

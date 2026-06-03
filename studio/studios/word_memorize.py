@@ -1,4 +1,4 @@
-"""단어 외우기 — 배치 JSON 순차 하이라이트·TTS 재생(뜻 ko/en → 중국어 한자)."""
+"""단어 외우기 — 배치 JSON 순차 하이라이트·TTS 재생(ko/en→한자, zh 모드는 한자→한국어)."""
 from __future__ import annotations
 
 import logging
@@ -25,37 +25,46 @@ from studio.studios.word_memorize_renderer import (
     load_ko_meaning_by_id,
 )
 
-MeaningLang = Literal["ko", "en"]
+MeaningLang = Literal["ko", "en", "zh"]
 
 logger = logging.getLogger(__name__)
 
 INTRO_HOLD_SEC = 0.8
 END_HOLD_SEC = 0.6
 TTS_MISSING_HOLD_SEC = 1.2
-# 영어 mp3 종료 TTS_ZH_LEAD_BEFORE_EN_END_SEC 초 전에 한자 TTS 시작
-TTS_ZH_LEAD_BEFORE_EN_END_SEC = 0.8
-# 한자 mp3 종료 TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC 초 전에 다음 단어(영어) 시작
-TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC = 0.5
+# 첫 TTS 종료 TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC 초 전에 둘째 TTS 시작
+TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC = 0.8
+# 둘째 TTS 종료 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC 초 전에 다음 단어 시작
+TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 
-WordSubstep = Literal["", "en", "zh"]
+WordSubstep = Literal["", "first", "second"]
+
+
+def _normalize_meaning_lang(raw: str) -> MeaningLang:
+    lang = (raw or "ko").strip().lower()
+    if lang in ("zh", "ch", "cn"):
+        return "zh"
+    if lang == "en":
+        return "en"
+    return "ko"
 
 
 class WordMemorizeStudio(IStudio):
     def __init__(self, *, layout_path: str, meaning_lang: MeaningLang = "ko") -> None:
         self._layout_path = Path(layout_path)
         self._layout = load_layout(self._layout_path)
-        self._meaning_lang: MeaningLang = (
-            "ko" if str(meaning_lang).strip().lower() == "ko" else "en"
-        )
+        self._meaning_lang = _normalize_meaning_lang(str(meaning_lang))
         self._renderer = WordMemorizeRenderer()
-        self._renderer.set_background_stem(self._layout.background_value)
+        self._renderer.set_background(
+            self._layout.background_value, self._meaning_lang
+        )
         csv_path = Path(DEFAULT_WORDS_TABLE_CSV)
-        if self._meaning_lang == "ko":
-            self._card_meaning_by_id = load_ko_meaning_by_id(csv_path)
-        else:
+        if self._meaning_lang == "en":
             self._card_meaning_by_id = load_en_meaning_by_id(csv_path)
+        else:
+            self._card_meaning_by_id = load_ko_meaning_by_id(csv_path)
         self._sequence: list[WordMemorizeBox] = []
         self._seq_index = 0
         self._phase = "intro"
@@ -63,8 +72,8 @@ class WordMemorizeStudio(IStudio):
         self._timer = 0.0
         self._hold_sec = INTRO_HOLD_SEC
         self._active_key: str | None = None
-        self._queued_zh_path: Path | None = None
-        self._queued_zh_len = 0.0
+        self._queued_second_path: Path | None = None
+        self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._done = False
@@ -174,8 +183,8 @@ class WordMemorizeStudio(IStudio):
         self._timer = 0.0
         self._hold_sec = INTRO_HOLD_SEC
         self._active_key = None
-        self._queued_zh_path = None
-        self._queued_zh_len = 0.0
+        self._queued_second_path = None
+        self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._done = False
@@ -244,42 +253,43 @@ class WordMemorizeStudio(IStudio):
         self._active_key = self._box_active_key(box)
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = self._word_play_duration_sec(box)
-        self._queued_zh_path: Path | None = None
-        self._queued_zh_len = 0.0
-        en_len, zh_path, zh_len = self._word_tts_paths(box)
-        self._word_substep = "en"
-        if en_len > 0:
-            self._hold_sec = max(0.0, en_len - TTS_ZH_LEAD_BEFORE_EN_END_SEC)
-            self._queued_zh_path = zh_path
-            self._queued_zh_len = zh_len
-        elif zh_len > 0:
-            self._word_substep = "zh"
-            self._hold_sec = max(0.0, zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC)
-            self._queued_zh_path = None
-            self._queued_zh_len = 0.0
+        self._queued_second_path: Path | None = None
+        self._queued_second_len = 0.0
+        first_len, second_path, second_len = self._word_tts_paths(box)
+        self._word_substep = "first"
+        if first_len > 0:
+            self._hold_sec = max(0.0, first_len - TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC)
+            self._queued_second_path = second_path
+            self._queued_second_len = second_len
+        elif second_len > 0:
+            self._word_substep = "second"
+            self._hold_sec = max(
+                0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC
+            )
+            self._queued_second_path = None
+            self._queued_second_len = 0.0
         else:
-            self._word_substep = "zh"
+            self._word_substep = "second"
             self._hold_sec = 0.0
             return
 
     def _advance_word_step(self) -> None:
-        box = self._sequence[self._seq_index]
-        if self._word_substep == "en":
-            self._word_substep = "zh"
-            if self._queued_zh_path is not None and self._queued_zh_len > 0:
-                self._play_audio(self._queued_zh_path)
+        if self._word_substep == "first":
+            self._word_substep = "second"
+            if self._queued_second_path is not None and self._queued_second_len > 0:
+                self._play_audio(self._queued_second_path)
                 self._hold_sec = max(
                     0.0,
-                    self._queued_zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC,
+                    self._queued_second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC,
                 )
             else:
                 self._hold_sec = 0.0
-            self._queued_zh_path = None
-            self._queued_zh_len = 0.0
+            self._queued_second_path = None
+            self._queued_second_len = 0.0
             return
         self._word_substep = ""
-        self._queued_zh_path = None
-        self._queued_zh_len = 0.0
+        self._queued_second_path = None
+        self._queued_second_len = 0.0
         nxt = self._seq_index + 1
         if nxt < len(self._sequence):
             self._begin_word(nxt)
@@ -330,10 +340,15 @@ class WordMemorizeStudio(IStudio):
         except Exception:
             return 0.0
 
-    def _word_tts_durations(
+    def _first_tts_playback_volume(self) -> float:
+        if self._meaning_lang == "en":
+            return TTS_EN_PLAYBACK_VOLUME
+        return 1.0
+
+    def _word_tts_pair(
         self, box: WordMemorizeBox
-    ) -> tuple[float, Path | None, float]:
-        """(첫 TTS 길이, 한자 경로, 한자 길이) — 재생 없이 길이만."""
+    ) -> tuple[Path | None, Path | None, str, str, str, str]:
+        """(첫 TTS, 둘째 TTS, 첫 라벨, 둘째 라벨, 첫 파일 힌트, 둘째 파일 힌트)."""
         from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
         from audio.word_memorize_en import resolve_word_memorize_en_audio_path
         from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
@@ -341,77 +356,101 @@ class WordMemorizeStudio(IStudio):
         try:
             wid = int(box.word_id)
         except (TypeError, ValueError):
-            return 0.0, None, 0.0
+            return None, None, "", "", "", ""
 
-        if self._meaning_lang == "ko":
-            meaning_path = resolve_vocab_meaning_ko_audio_path(wid)
-        else:
-            meaning_path = resolve_word_memorize_en_audio_path(wid)
         zh_path = resolve_word_memorize_zh_audio_path(wid)
-        zh_len = self._audio_duration(zh_path)
-        meaning_len = self._audio_duration(meaning_path)
-        return meaning_len, zh_path, zh_len
+        ko_path = resolve_vocab_meaning_ko_audio_path(wid)
+        en_path = resolve_word_memorize_en_audio_path(wid)
+        if self._meaning_lang == "zh":
+            return (
+                zh_path,
+                ko_path,
+                "중국어",
+                "한국어",
+                f"wm_zh_word_{wid}_0.mp3",
+                f"ko_word_{wid}_0.mp3",
+            )
+        if self._meaning_lang == "en":
+            return (
+                en_path,
+                zh_path,
+                "영어",
+                "중국어",
+                f"en_word_{wid}_0.mp3",
+                f"wm_zh_word_{wid}_0.mp3",
+            )
+        return (
+            ko_path,
+            zh_path,
+            "한국어",
+            "중국어",
+            f"ko_word_{wid}_0.mp3",
+            f"wm_zh_word_{wid}_0.mp3",
+        )
+
+    def _word_tts_durations(
+        self, box: WordMemorizeBox
+    ) -> tuple[float, Path | None, float]:
+        """(첫 TTS 길이, 둘째 TTS 경로, 둘째 TTS 길이) — 재생 없이 길이만."""
+        first_path, second_path, _, _, _, _ = self._word_tts_pair(box)
+        first_len = self._audio_duration(first_path)
+        second_len = self._audio_duration(second_path)
+        return first_len, second_path, second_len
 
     def _word_play_duration_sec(self, box: WordMemorizeBox) -> float:
-        """단어 1개 재생 구간(뜻/영어 + 한자) 총 길이 — 레이저 스프라이트 동기화용."""
-        en_len, _, zh_len = self._word_tts_durations(box)
+        """단어 1개 재생 구간(첫·둘째 TTS) 총 길이 — 레이저 스프라이트 동기화용."""
+        first_len, _, second_len = self._word_tts_durations(box)
         total = 0.0
-        if en_len > 0:
-            total += max(0.0, en_len - TTS_ZH_LEAD_BEFORE_EN_END_SEC)
-            if zh_len > 0:
-                total += max(0.0, zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC)
-        elif zh_len > 0:
-            total += max(0.0, zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC)
+        if first_len > 0:
+            total += max(0.0, first_len - TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC)
+            if second_len > 0:
+                total += max(
+                    0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC
+                )
+        elif second_len > 0:
+            total += max(0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC)
         return max(total, 0.15)
 
     def _word_tts_paths(
         self, box: WordMemorizeBox
     ) -> tuple[float, Path | None, float]:
-        """(첫 TTS 재생 길이, 대기 한자 경로, 한자 길이) — 한자는 첫 TTS 종료 전 lead 만큼 앞당겨 재생."""
-        from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
-        from audio.word_memorize_en import resolve_word_memorize_en_audio_path
-        from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
-
+        """(첫 TTS 재생 길이, 대기 둘째 TTS 경로, 둘째 TTS 길이)."""
+        first_path, second_path, first_label, second_label, first_hint, second_hint = (
+            self._word_tts_pair(box)
+        )
         try:
             wid = int(box.word_id)
         except (TypeError, ValueError):
             return 0.0, None, 0.0
 
-        if self._meaning_lang == "ko":
-            meaning_path = resolve_vocab_meaning_ko_audio_path(wid)
-            meaning_label = "한국어"
-            meaning_file_hint = f"ko_word_{wid}_0.mp3"
-        else:
-            meaning_path = resolve_word_memorize_en_audio_path(wid)
-            meaning_label = "영어"
-            meaning_file_hint = f"en_word_{wid}_0.mp3"
-        zh_path = resolve_word_memorize_zh_audio_path(wid)
-        if meaning_path is None:
+        if first_path is None:
             logger.warning(
                 "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
                 wid,
-                meaning_label,
-                meaning_file_hint,
+                first_label,
+                first_hint,
             )
-        if zh_path is None:
+        if second_path is None:
             logger.warning(
-                "word_id=%s: 중국어 TTS 없음 (wm_zh_word_%s_0.mp3). TTS 생성 후 실행하세요.",
+                "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
                 wid,
-                wid,
+                second_label,
+                second_hint,
             )
 
-        zh_len = self._audio_duration(zh_path)
-        meaning_volume = 1.0 if self._meaning_lang == "ko" else TTS_EN_PLAYBACK_VOLUME
-        if meaning_path is not None:
-            meaning_len = self._play_audio(meaning_path, volume=meaning_volume)
-            if meaning_len <= 0:
-                meaning_len = self._audio_duration(meaning_path)
-            return meaning_len, zh_path, zh_len
-        if zh_path is not None:
-            zh_len = self._play_audio(zh_path)
-            if zh_len <= 0:
-                zh_len = self._audio_duration(zh_path)
-        return 0.0, zh_path, zh_len
+        second_len = self._audio_duration(second_path)
+        if first_path is not None:
+            first_len = self._play_audio(
+                first_path, volume=self._first_tts_playback_volume()
+            )
+            if first_len <= 0:
+                first_len = self._audio_duration(first_path)
+            return first_len, second_path, second_len
+        if second_path is not None:
+            second_len = self._play_audio(second_path)
+            if second_len <= 0:
+                second_len = self._audio_duration(second_path)
+        return 0.0, second_path, second_len
 
     def _play_audio(self, path: Path, *, volume: float = 1.0) -> float:
         try:
