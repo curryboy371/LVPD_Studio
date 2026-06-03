@@ -18,6 +18,7 @@ DEFAULT_WORD_MEMORIZE_BG_STEM = "3and3"
 _BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 BackgroundType = Literal["image"]
+SelectionHighlightType = Literal["gradient", "red_border"]
 TITLE_DEFAULT_MIN_Y = 40
 TITLE_RAISE_PX = 24
 
@@ -45,8 +46,95 @@ DEFAULT_TITLE_FONT_PT = 68
 TITLE_FONT_PT_MIN = 20
 TITLE_FONT_PT_MAX = 120
 TITLE_LINE_GAP_FHD = 10
+
+SELECTION_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("그라데이션", "gradient"),
+    ("빨간 테두리", "red_border"),
+)
+DEFAULT_SELECTION_HIGHLIGHT: SelectionHighlightType = "gradient"
 # 배치 편집기 미리보기 캔버스 스케일 (word_memorize_layout_editor.PREVIEW_WIDTH / SHORTS_WIDTH)
 TITLE_EDITOR_PREVIEW_SCALE = 504 / float(SHORTS_WIDTH)
+
+# Word card — 항목(병음·한자·뜻·이미지) 크기는 고정, 박스 높이가 줄면 항목 간격만 비율로 축소
+CARD_LINE_GAP_FHD = 4
+CARD_CONTENT_REFERENCE_INNER_H = 140
+CARD_IMG_BOTTOM_PAD_FHD = 8
+CARD_ITEM_GAP_MIN = 0
+
+
+def default_card_item_gap(inner_height: int) -> float:
+    """기준 박스 높이 대비 inner 높이로 기본 항목 간격 산출."""
+    if inner_height < 1:
+        return float(CARD_LINE_GAP_FHD)
+    return max(
+        float(CARD_ITEM_GAP_MIN),
+        CARD_LINE_GAP_FHD * inner_height / CARD_CONTENT_REFERENCE_INNER_H,
+    )
+
+
+def layout_card_content_vertical(
+    inner_height: int,
+    text_line_heights: list[int],
+    image_height: int = 0,
+    *,
+    pad_top: int = 0,
+    bottom_pad: int = 0,
+    default_gap: float | None = None,
+    min_gap: float = CARD_ITEM_GAP_MIN,
+) -> tuple[int, list[int], int | None]:
+    """박스 inner 기준 세로 배치. 반환: (첫 y 오프셋, 텍스트 줄 y들, 이미지 y).
+
+    항목 높이는 그대로 두고, 항목 사이 간격만 줄어들 공간이 부족하면 동일 비율로 축소한다.
+    """
+    line_hs = [max(0, int(h)) for h in text_line_heights if h > 0]
+    img_h = max(0, int(image_height))
+    item_heights = list(line_hs)
+    if img_h > 0:
+        item_heights.append(img_h)
+    if not item_heights:
+        return pad_top, [], None
+
+    n_items = len(item_heights)
+    n_gaps = n_items - 1
+    sum_items = sum(item_heights)
+    gap_default = (
+        float(default_gap)
+        if default_gap is not None
+        else default_card_item_gap(inner_height)
+    )
+    reserve_bottom = bottom_pad if img_h > 0 else 0
+    usable = max(0, inner_height - pad_top - reserve_bottom)
+
+    if n_gaps == 0:
+        block_h = sum_items
+        start = pad_top + max(0, (usable - block_h) // 2)
+        if img_h > 0:
+            return pad_top, [], start
+        return start, [start], None
+
+    needed = sum_items + n_gaps * gap_default
+    if needed > usable:
+        gap = max(min_gap, (usable - sum_items) / n_gaps)
+    else:
+        gap = gap_default
+
+    block_h = sum_items + n_gaps * gap
+    start_y = pad_top + max(0, (usable - block_h) // 2)
+
+    line_ys: list[int] = []
+    image_y: int | None = None
+    y = float(start_y)
+    n_lines = len(line_hs)
+    for i, h in enumerate(item_heights):
+        y_int = int(round(y))
+        if i < n_lines:
+            line_ys.append(y_int)
+        else:
+            image_y = y_int
+        if i < n_items - 1:
+            y += h + gap
+
+    return int(round(start_y)), line_ys, image_y
 
 
 @dataclass
@@ -161,6 +249,32 @@ TITLE_PREVIEW_FONTS: dict[str, tuple[str, int, str]] = {
 
 def list_title_font_labels() -> list[str]:
     return [label for label, _ in TITLE_FONT_CHOICES]
+
+
+def list_selection_highlight_labels() -> list[str]:
+    return [label for label, _ in SELECTION_HIGHLIGHT_CHOICES]
+
+
+def normalize_selection_highlight(raw: str) -> SelectionHighlightType:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_SELECTION_HIGHLIGHT
+    lowered = text.lower()
+    valid_keys = {key for _, key in SELECTION_HIGHLIGHT_CHOICES}
+    if lowered in valid_keys:
+        return lowered  # type: ignore[return-value]
+    for label, key in SELECTION_HIGHLIGHT_CHOICES:
+        if text == label:
+            return key  # type: ignore[return-value]
+    return DEFAULT_SELECTION_HIGHLIGHT
+
+
+def selection_highlight_label_for_value(raw: str) -> str:
+    key = normalize_selection_highlight(raw)
+    for label, k in SELECTION_HIGHLIGHT_CHOICES:
+        if k == key:
+            return label
+    return SELECTION_HIGHLIGHT_CHOICES[0][0]
 
 
 def normalize_title_font(raw: str) -> str:
@@ -455,6 +569,7 @@ class WordMemorizeLayout:
     title_font: str = DEFAULT_TITLE_FONT
     title_font_pt: int = DEFAULT_TITLE_FONT_PT
     title_lines: list[TitleLineSpec] = field(default_factory=list)
+    selection_highlight: SelectionHighlightType = DEFAULT_SELECTION_HIGHLIGHT
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -493,6 +608,7 @@ class WordMemorizeLayout:
             "title_font": normalize_title_font(self.title_font),
             "title_font_pt": normalize_title_font_pt(self.title_font_pt),
             "title_lines": [s.to_dict() for s in self.title_lines],
+            "selection_highlight": normalize_selection_highlight(self.selection_highlight),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -551,6 +667,9 @@ class WordMemorizeLayout:
             )
         sync_layout_title_fields(layout)
         layout.title_x = int(layout.frame_width) // 2
+        layout.selection_highlight = normalize_selection_highlight(
+            str(data.get("selection_highlight", DEFAULT_SELECTION_HIGHLIGHT) or "")
+        )
         boxes: list[WordMemorizeBox] = []
         for raw in data.get("boxes") or []:
             if not isinstance(raw, dict):

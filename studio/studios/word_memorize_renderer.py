@@ -11,9 +11,13 @@ import pygame
 from core.paths import get_repo_root
 from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
+    CARD_IMG_BOTTOM_PAD_FHD,
     WordMemorizeBox,
     WordMemorizeLayout,
+    default_card_item_gap,
+    layout_card_content_vertical,
     layout_title_line_specs,
+    normalize_selection_highlight,
     normalize_title_font,
     normalize_title_font_pt,
     resolve_title_position,
@@ -51,6 +55,8 @@ GRAD_RING_SAMPLES_PER_EDGE = 32
 GRAD_RING_ARC_STEPS = 12
 GRAD_RING_SUBDIV = 5
 ACTIVE_CARD_SCALE = 1.03
+RED_ACTIVE_BORDER_COLOR = (244, 67, 54)
+RED_ACTIVE_BORDER_WIDTH = 6
 TEXT_LINE_GAP = 4
 IMG_BOTTOM_PAD = 8
 IMG_LIFT = 12
@@ -227,6 +233,44 @@ def _draw_active_border(
         )
 
     surface.blit(layer, (rect.x - pad, rect.y - pad))
+
+
+def _draw_red_active_border(
+    surface: pygame.Surface,
+    rect: pygame.Rect,
+    *,
+    anim_time_sec: float,
+) -> None:
+    """빨간 테두리만 (글로우·그라데이션 없음)."""
+    _ = anim_time_sec
+    pad = 4
+    layer = pygame.Surface(
+        (rect.width + pad * 2, rect.height + pad * 2),
+        pygame.SRCALPHA,
+    )
+    inner = pygame.Rect(pad, pad, rect.width, rect.height)
+    pygame.draw.rect(
+        layer,
+        RED_ACTIVE_BORDER_COLOR,
+        inner,
+        width=RED_ACTIVE_BORDER_WIDTH,
+        border_radius=ACTIVE_BORDER_RADIUS,
+    )
+    surface.blit(layer, (rect.x - pad, rect.y - pad))
+
+
+def _draw_active_highlight(
+    surface: pygame.Surface,
+    rect: pygame.Rect,
+    *,
+    highlight_type: str,
+    anim_time_sec: float,
+) -> None:
+    kind = normalize_selection_highlight(highlight_type)
+    if kind == "red_border":
+        _draw_red_active_border(surface, rect, anim_time_sec=anim_time_sec)
+    else:
+        _draw_active_border(surface, rect, anim_time_sec=anim_time_sec)
 
 
 def load_en_meaning_by_id(csv_path: Path) -> dict[int, str]:
@@ -445,12 +489,24 @@ class WordMemorizeRenderer:
         for box, word, card_meaning, active in entries:
             if not active:
                 self._draw_box(
-                    surface, box, word, card_meaning, active=False, anim_time_sec=t_anim
+                    surface,
+                    box,
+                    word,
+                    card_meaning,
+                    layout=layout,
+                    active=False,
+                    anim_time_sec=t_anim,
                 )
         for box, word, card_meaning, _active in entries:
             if _active:
                 self._draw_box(
-                    surface, box, word, card_meaning, active=True, anim_time_sec=t_anim
+                    surface,
+                    box,
+                    word,
+                    card_meaning,
+                    layout=layout,
+                    active=True,
+                    anim_time_sec=t_anim,
                 )
 
     def _draw_background(
@@ -524,13 +580,23 @@ class WordMemorizeRenderer:
         word: Word,
         card_meaning: str,
         *,
+        layout: WordMemorizeLayout,
         active: bool,
         anim_time_sec: float,
     ) -> None:
+        highlight_type = normalize_selection_highlight(
+            getattr(layout, "selection_highlight", "gradient")
+        )
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         if not active:
             self._paint_box(
-                surface, base, word, card_meaning, active=False, anim_time_sec=anim_time_sec
+                surface,
+                base,
+                word,
+                card_meaning,
+                highlight_type=highlight_type,
+                active=False,
+                anim_time_sec=anim_time_sec,
             )
             return
 
@@ -542,6 +608,7 @@ class WordMemorizeRenderer:
             local,
             word,
             card_meaning,
+            highlight_type=highlight_type,
             active=True,
             draw_border=False,
             anim_time_sec=anim_time_sec,
@@ -551,7 +618,12 @@ class WordMemorizeRenderer:
         scaled = pygame.transform.smoothscale(layer, (sw, sh))
         dest = scaled.get_rect(center=base.center)
         surface.blit(scaled, dest)
-        _draw_active_border(surface, dest, anim_time_sec=anim_time_sec)
+        _draw_active_highlight(
+            surface,
+            dest,
+            highlight_type=highlight_type,
+            anim_time_sec=anim_time_sec,
+        )
 
     def _paint_box(
         self,
@@ -560,13 +632,19 @@ class WordMemorizeRenderer:
         word: Word,
         card_meaning: str,
         *,
+        highlight_type: str,
         active: bool,
         anim_time_sec: float,
         draw_border: bool = True,
     ) -> None:
         pygame.draw.rect(surface, BOX_FILL, rect, border_radius=ACTIVE_BORDER_RADIUS)
         if active and draw_border:
-            _draw_active_border(surface, rect, anim_time_sec=anim_time_sec)
+            _draw_active_highlight(
+                surface,
+                rect,
+                highlight_type=highlight_type,
+                anim_time_sec=anim_time_sec,
+            )
         elif not active:
             pygame.draw.rect(
                 surface,
@@ -591,29 +669,41 @@ class WordMemorizeRenderer:
             if img_surf is not None:
                 img_h = img_surf.get_height()
 
-        img_reserve = (img_h + IMG_BOTTOM_PAD + IMG_LIFT) if img_h else 0
-        text_bottom = inner.bottom - img_reserve
-        y = inner.top
+        line_heights: list[int] = []
+        line_surfs: list[pygame.Surface] = []
 
         pinyin = display_pinyin(word)
-        if pinyin and self._font_pinyin is not None and y < text_bottom:
+        if pinyin and self._font_pinyin is not None:
             surf = self._font_pinyin.render(pinyin[:48], True, PINYIN_COLOR)
-            y += self._blit_centered(surface, surf, cx, y) + TEXT_LINE_GAP
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
 
         hanzi = (word.word or "").strip()
-        if hanzi and self._font_hanzi is not None and y < text_bottom:
+        if hanzi and self._font_hanzi is not None:
             surf = self._font_hanzi.render(hanzi, True, HANZI_COLOR)
-            y += self._blit_centered(surface, surf, cx, y) + TEXT_LINE_GAP
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
 
         en = (card_meaning or "").strip()
-        if en and self._font_en is not None and y < text_bottom:
+        if en and self._font_en is not None:
             surf = self._font_en.render(en[:40], True, EN_COLOR)
-            y += self._blit_centered(surface, surf, cx, y) + TEXT_LINE_GAP
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
 
-        if img_surf is not None and img_h > 0:
+        _start, line_ys, image_y = layout_card_content_vertical(
+            inner.height,
+            line_heights,
+            img_h,
+            default_gap=default_card_item_gap(inner.height),
+            bottom_pad=CARD_IMG_BOTTOM_PAD_FHD if img_h else 0,
+        )
+
+        for surf, y_off in zip(line_surfs, line_ys):
+            self._blit_centered(surface, surf, cx, inner.top + y_off)
+
+        if img_surf is not None and img_h > 0 and image_y is not None:
             ix = cx - img_surf.get_width() // 2
-            iy = inner.bottom - img_h - IMG_LIFT
-            surface.blit(img_surf, (ix, iy))
+            surface.blit(img_surf, (ix, inner.top + image_y))
 
     def _blit_centered(
         self,

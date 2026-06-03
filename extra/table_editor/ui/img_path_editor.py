@@ -13,9 +13,12 @@ from extra.table_editor.config import (
 )
 from extra.table_editor.services.image_clipboard import (
     commit_staged_image,
+    copy_pil_image_to_system_clipboard,
     discard_staged_image,
-    stage_clipboard_image_to_tmp,
+    get_clipboard_image,
+    prepare_word_image_for_clipboard,
     stage_image_file_to_tmp,
+    stage_prepared_image_to_tmp,
 )
 from extra.table_editor.ui.file_drop import bind_file_drop
 from extra.table_editor.services.image_paths import (
@@ -67,12 +70,21 @@ class ImgPathEditor(ttk.Frame):
         self._entry = ttk.Entry(entry_frame, textvariable=self._path_var, width=48)
         self._entry.pack(fill=tk.X, expand=True)
         self._entry.bind("<KeyRelease>", lambda _e: self._refresh_preview())
-        self._clipboard_btn = ttk.Button(
-            entry_frame,
-            text="클립보드 사용",
-            command=self._use_clipboard,
+
+        clip_row = ttk.Frame(entry_frame)
+        clip_row.pack(fill=tk.X, pady=(4, 0))
+        self._copy_bg_x_btn = ttk.Button(
+            clip_row,
+            text="클립보드(배경x)",
+            command=lambda: self._copy_image_to_clipboard(remove_background=True),
         )
-        self._clipboard_btn.pack(fill=tk.X, pady=(4, 0))
+        self._copy_bg_x_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        self._copy_bg_o_btn = ttk.Button(
+            clip_row,
+            text="클립보드(배경o)",
+            command=lambda: self._copy_image_to_clipboard(remove_background=False),
+        )
+        self._copy_bg_o_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
 
         preview_outer = ttk.LabelFrame(
             self,
@@ -149,7 +161,8 @@ class ImgPathEditor(ttk.Frame):
         enabled = self.is_image_enabled()
         state = "normal" if enabled else "disabled"
         self._entry.configure(state=state)
-        self._clipboard_btn.configure(state=state)
+        self._copy_bg_x_btn.configure(state=state)
+        self._copy_bg_o_btn.configure(state=state)
         if not enabled:
             self._photo = None
             self._preview_label.configure(image="", text="(이미지 미사용)")
@@ -159,37 +172,49 @@ class ImgPathEditor(ttk.Frame):
         self._status_var.set("")
         self._refresh_preview()
 
-    def _word_context(self) -> tuple[str, str]:
-        root = self.winfo_toplevel()
+    def _widget_text(self, widget: tk.Widget) -> str:
+        if isinstance(widget, ttk.Combobox):
+            return (widget.get() or "").strip()
+        if isinstance(widget, tk.Text):
+            return widget.get("1.0", tk.END).strip()
+        return (widget.get() or "").strip()
+
+    def _row_context(self) -> tuple[str, str, str]:
+        """행 편집 창 id·word·sound_path (부모 체인에서 _widgets 탐색)."""
         word_id = ""
         word = ""
-        if hasattr(root, "_widgets"):
-            widgets = getattr(root, "_widgets", {})
-            for key in ("id", "word"):
-                w = widgets.get(key)
-                if w is None:
-                    continue
-                if isinstance(w, ttk.Combobox):
-                    val = (w.get() or "").strip()
-                elif isinstance(w, tk.Text):
-                    val = w.get("1.0", tk.END).strip()
-                else:
-                    val = w.get().strip()
-                if key == "id":
-                    word_id = val
-                else:
-                    word = val
+        sound_path = ""
+        w: tk.Misc | None = self
+        while w is not None:
+            widgets = getattr(w, "_widgets", None)
+            if isinstance(widgets, dict):
+                id_w = widgets.get("id")
+                if id_w is not None:
+                    word_id = self._widget_text(id_w)
+                word_w = widgets.get("word")
+                if word_w is not None:
+                    word = self._widget_text(word_w)
+                sound_w = widgets.get("sound_path")
+                if sound_w is not None:
+                    sound_path = self._widget_text(sound_w)
+                break
+            w = w.master
+        return word_id, word, sound_path
+
+    def _word_context(self) -> tuple[str, str]:
+        word_id, word, _sound = self._row_context()
         return word_id, word
 
     def _refresh_preview(self) -> None:
         if not self.is_image_enabled():
             return
-        word_id, word = self._word_context()
+        word_id, word, sound_path = self._row_context()
         path = preview_image_path(
             self._repo_root,
             self._path_var.get(),
             word_id=word_id,
             word=word,
+            sound_path=sound_path,
             pending_tmp=self._pending_tmp,
         )
         if path is None:
@@ -232,21 +257,65 @@ class ImgPathEditor(ttk.Frame):
         )
         self._refresh_preview()
 
-    def _use_clipboard(self) -> None:
+    def _load_image_for_clipboard_buttons(self):
+        """클립보드 버튼용 소스 — OS 클립보드 우선, 없을 때만 저장 파일·임시본."""
+        from PIL import Image
+
+        clip = get_clipboard_image()
+        if clip is not None:
+            return clip
+
+        word_id, word, sound_path = self._row_context()
+        path = preview_image_path(
+            self._repo_root,
+            self._path_var.get(),
+            word_id=word_id,
+            word=word,
+            sound_path=sound_path,
+            pending_tmp=self._pending_tmp,
+        )
+        if path is None:
+            return None
+        with Image.open(path) as loaded:
+            return loaded.copy()
+
+    def _copy_image_to_clipboard(self, *, remove_background: bool) -> None:
         if not self.is_image_enabled():
             return
+        tag = "배경x" if remove_background else "배경o"
         try:
-            tmp = stage_clipboard_image_to_tmp()
+            source = self._load_image_for_clipboard_buttons()
+            if source is None:
+                messagebox.showinfo(
+                    "클립보드 복사",
+                    "복사할 이미지가 없습니다.\n\n"
+                    "• resource/image/word/ 에 단어 이미지가 있거나\n"
+                    "• 미리보기에 이미지를 드래그해 둔 뒤, 또는\n"
+                    "• Windows 클립보드에 이미지를 넣은 다음 다시 시도하세요.",
+                    parent=self,
+                )
+                return
+            prepared = prepare_word_image_for_clipboard(
+                source, remove_background=remove_background
+            )
+            tmp = stage_prepared_image_to_tmp(prepared, prefix="clip")
+            self._apply_staged_tmp(tmp, source_label=f"클립보드({tag})")
+            copy_pil_image_to_system_clipboard(prepared)
+            self._status_var.set(
+                f"클립보드({tag})로 복사했습니다. 미리보기에 반영되었습니다.\n"
+                f"「저장」을 누르면 아래 경로의 파일이 교체됩니다:\n"
+                f"{self._commit_target}"
+            )
         except ImportError as ex:
-            messagebox.showerror("클립보드", str(ex), parent=self)
-            return
+            messagebox.showerror("클립보드 복사", str(ex), parent=self)
         except ValueError as ex:
-            messagebox.showinfo("클립보드", str(ex), parent=self)
-            return
+            messagebox.showinfo("클립보드 복사", str(ex), parent=self)
         except OSError as ex:
-            messagebox.showerror("클립보드", f"임시 저장 실패:\n{ex}", parent=self)
-            return
-        self._apply_staged_tmp(tmp, source_label="클립보드 이미지")
+            messagebox.showerror(
+                "클립보드 복사",
+                f"클립보드에 넣지 못했습니다:\n{ex}",
+                parent=self,
+            )
 
     def _on_files_dropped(self, paths: list[Path]) -> None:
         if not self.is_image_enabled():

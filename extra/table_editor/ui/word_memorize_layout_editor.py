@@ -14,6 +14,7 @@ from extra.table_editor.services.word_memorize_grid import (
     apply_grid_layout,
 )
 from extra.table_editor.services.word_memorize_layout import (
+    CARD_IMG_BOTTOM_PAD_FHD,
     DEFAULT_LAYOUTS_DIR,
     WORD_MEMORIZE_BG_DIR,
     WordMemorizeBox,
@@ -23,6 +24,7 @@ from extra.table_editor.services.word_memorize_layout import (
     TitleLineSpec,
     box_overlaps_any,
     clamp_title_position,
+    layout_card_content_vertical,
     layout_title_line_specs,
     resolve_title_position,
     find_non_overlapping_position,
@@ -30,7 +32,9 @@ from extra.table_editor.services.word_memorize_layout import (
     list_word_memorize_bg_stems,
     list_title_color_labels,
     list_title_font_labels,
+    list_selection_highlight_labels,
     load_layout,
+    normalize_selection_highlight,
     normalize_title_color,
     normalize_title_font,
     normalize_title_font_pt,
@@ -43,6 +47,7 @@ from extra.table_editor.services.word_memorize_layout import (
     title_font_label_for_value,
     title_line_specs_from_legacy_layout,
     title_preview_font_for_key,
+    selection_highlight_label_for_value,
     DEFAULT_TITLE_FONT_PT,
     TITLE_FONT_PT_MIN,
     TITLE_FONT_PT_MAX,
@@ -337,6 +342,34 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         bg_preview_row.pack(fill=tk.X)
         attach_bg_path_preview(bg_preview_row, self._bg_music_combo).pack(side=tk.LEFT)
         self._sync_bg_music_combo()
+
+        highlight_frame = ttk.LabelFrame(sidebar, text="선택 효과")
+        highlight_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        highlight_in = ttk.Frame(highlight_frame)
+        highlight_in.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Label(highlight_in, text="타입").pack(side=tk.LEFT)
+        self._selection_highlight_var = tk.StringVar(
+            value=selection_highlight_label_for_value(
+                getattr(self._layout, "selection_highlight", "")
+            )
+        )
+        self._selection_highlight_combo = ttk.Combobox(
+            highlight_in,
+            textvariable=self._selection_highlight_var,
+            values=list_selection_highlight_labels(),
+            state="readonly",
+            width=14,
+        )
+        self._selection_highlight_combo.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
+        self._selection_highlight_combo.bind(
+            "<<ComboboxSelected>>", self._on_selection_highlight_changed, add="+"
+        )
+        ttk.Label(
+            highlight_frame,
+            text="재생 시 강조된 단어 카드 효과 (스케일업은 공통)",
+            foreground="#666",
+            wraplength=280,
+        ).pack(anchor="w", padx=6, pady=(0, 6))
 
         grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
         grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
@@ -1064,6 +1097,23 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         elif choices:
             self._bg_music_var.set(choices[0])
 
+    def _on_selection_highlight_changed(self, _event: tk.Event | None = None) -> None:
+        label = (self._selection_highlight_var.get() or "").strip()
+        key = normalize_selection_highlight(label)
+        if key != normalize_selection_highlight(
+            getattr(self._layout, "selection_highlight", "")
+        ):
+            self._layout.selection_highlight = key
+            self._mark_dirty()
+            self._redraw_canvas()
+
+    def _sync_selection_highlight_combo(self) -> None:
+        self._selection_highlight_var.set(
+            selection_highlight_label_for_value(
+                getattr(self._layout, "selection_highlight", "")
+            )
+        )
+
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.bg_music_path = normalize_vocab_bg_path(
             bg_path_from_combo(self._bg_music_var.get())
@@ -1660,6 +1710,24 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         except Exception:
             return None
 
+    def _measure_canvas_text_height(
+        self, c: tk.Canvas, text: str, font: tuple[str, ...], *, width: int
+    ) -> int:
+        tid = c.create_text(
+            -10000,
+            -10000,
+            text=text,
+            anchor="n",
+            font=font,
+            width=width,
+        )
+        bbox = c.bbox(tid)
+        c.delete(tid)
+        if not bbox:
+            f = tkfont.Font(font=font)
+            return max(1, f.metrics("linespace"))
+        return max(1, bbox[3] - bbox[1])
+
     def _draw_box_content(
         self,
         c: tk.Canvas,
@@ -1673,69 +1741,78 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         """박스 안: 병음(빨강) → 한자 → 영어 → 이미지(하단)."""
         cx = (x1 + x2) // 2
         inner_w = max(24, x2 - x1 - BOX_CONTENT_PAD * 2)
-        top_y = y1 + BOX_CONTENT_PAD + 14
-        bottom_limit = y2 - BOX_CONTENT_PAD
+        pad_top = BOX_CONTENT_PAD + 14
+        inner_h = max(1, (y2 - y1) - pad_top - BOX_CONTENT_PAD)
+        base_y = y1 + pad_top
+        tags = ("box", box.box_key)
 
         box_h = max(1, y2 - y1)
         img_max = int(min(inner_w, box_h * BOX_IMG_MAX_RATIO))
         photo = self._load_box_photo(box.box_key, details, box.word_id, img_max)
         img_h = photo.height() if photo is not None else 0
-        if img_h > 0:
-            bottom_limit -= img_h + BOX_IMG_BOTTOM_PAD + BOX_IMG_LIFT
 
-        y = top_y
-        tags = ("box", box.box_key)
+        line_heights: list[int] = []
+        line_specs: list[tuple[str, tuple[str, ...], str]] = []
 
         pinyin = self._display_pinyin(details)
         if pinyin:
-            tid = c.create_text(
-                cx,
-                y,
-                text=pinyin[:48],
-                anchor="n",
-                fill=BOX_PINYIN_COLOR,
-                font=BOX_PINYIN_FONT,
-                width=inner_w,
-                tags=tags,
+            line_heights.append(
+                self._measure_canvas_text_height(
+                    c, pinyin[:48], BOX_PINYIN_FONT, width=inner_w
+                )
             )
-            bbox = c.bbox(tid)
-            if bbox:
-                y = bbox[3] + BOX_LINE_GAP
+            line_specs.append((pinyin[:48], BOX_PINYIN_FONT, BOX_PINYIN_COLOR))
 
         hanzi = (details.get("word") or "?").strip() or "?"
-        tid = c.create_text(
-            cx,
-            y,
-            text=hanzi,
-            anchor="n",
-            fill=BOX_HANZI_COLOR,
-            font=BOX_HANZI_FONT,
-            width=inner_w,
-            tags=tags,
+        line_heights.append(
+            self._measure_canvas_text_height(
+                c, hanzi, BOX_HANZI_FONT, width=inner_w
+            )
         )
-        bbox = c.bbox(tid)
-        if bbox:
-            y = bbox[3] + BOX_LINE_GAP
+        line_specs.append((hanzi, BOX_HANZI_FONT, BOX_HANZI_COLOR))
 
         en = (details.get("en_meaning") or "").strip()
-        if en and y < bottom_limit:
-            tid = c.create_text(
+        if en:
+            line_heights.append(
+                self._measure_canvas_text_height(
+                    c, en[:40], BOX_EN_FONT, width=inner_w
+                )
+            )
+            line_specs.append((en[:40], BOX_EN_FONT, BOX_EN_COLOR))
+
+        ref_inner_screen = max(
+            1,
+            int(round((DEFAULT_BOX_H - 2 * BOX_CONTENT_PAD - 14) * SCALE)),
+        )
+        bottom_pad = (
+            max(1, int(round(CARD_IMG_BOTTOM_PAD_FHD * SCALE)))
+            if img_h > 0
+            else 0
+        )
+        default_gap = max(1.0, BOX_LINE_GAP * inner_h / ref_inner_screen)
+
+        _start, line_ys, image_y = layout_card_content_vertical(
+            inner_h,
+            line_heights,
+            img_h,
+            default_gap=default_gap,
+            bottom_pad=bottom_pad,
+        )
+
+        for (text, font, fill), y_off in zip(line_specs, line_ys):
+            c.create_text(
                 cx,
-                y,
-                text=en[:40],
+                base_y + y_off,
+                text=text,
                 anchor="n",
-                fill=BOX_EN_COLOR,
-                font=BOX_EN_FONT,
+                fill=fill,
+                font=font,
                 width=inner_w,
                 tags=tags,
             )
-            bbox = c.bbox(tid)
-            if bbox:
-                y = bbox[3] + BOX_LINE_GAP
 
-        if photo is not None and img_h > 0:
-            iy = y2 - BOX_IMG_BOTTOM_PAD - BOX_IMG_LIFT - img_h
-            c.create_image(cx, iy, anchor="n", image=photo, tags=tags)
+        if photo is not None and img_h > 0 and image_y is not None:
+            c.create_image(cx, base_y + image_y, anchor="n", image=photo, tags=tags)
 
     def _redraw_canvas(self) -> None:
         c = self._canvas
@@ -1747,8 +1824,15 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         for box in self._layout.sorted_boxes():
             selected = box.box_key == self._selected_key
             x1, y1, x2, y2 = self._screen_rect(box)
-            outline = "#4fc3f7" if selected else "#90a4ae"
-            width = 3 if selected else 1
+            if selected:
+                highlight = normalize_selection_highlight(
+                    getattr(self._layout, "selection_highlight", "")
+                )
+                outline = "#f44336" if highlight == "red_border" else "#4fc3f7"
+                width = 3
+            else:
+                outline = "#90a4ae"
+                width = 1
             c.create_rectangle(
                 x1, y1, x2, y2,
                 outline=outline,
@@ -1846,6 +1930,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._refresh_order_list()
         self._update_margin_label()
         self._sync_bg_music_combo()
+        self._sync_selection_highlight_combo()
         self._sync_title_var()
 
     def _open(self) -> None:
@@ -1890,6 +1975,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 parent=self,
             )
         self._sync_bg_music_combo()
+        self._sync_selection_highlight_combo()
         self._sync_title_var()
 
     def _on_close(self) -> None:

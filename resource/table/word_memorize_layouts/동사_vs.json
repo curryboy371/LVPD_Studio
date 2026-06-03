@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "vs"
+  },
+  "title": "",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#ffffff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "selection_highlight": "red_border",
+  "bg_music_path": "resource/sound/bg_short/격겜.mp3",
+  "boxes": [
+    {
+      "word_id": "10010",
+      "order": 1,
+      "x": 167,
+      "y": 175,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "10062",
+      "order": 2,
+      "x": 675,
+      "y": 175,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "10013",
+      "order": 3,
+      "x": 167,
+      "y": 548,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_5"
+    },
+    {
+      "word_id": "10020",
+      "order": 4,
+      "x": 675,
+      "y": 548,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "10018",
+      "order": 5,
+      "x": 167,
+      "y": 921,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "10019",
+      "order": 6,
+      "x": 675,
+      "y": 921,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "10024",
+      "order": 7,
+      "x": 167,
+      "y": 1294,
+      "w": 238,
+      "h": 361,
+      "box_key": "box_9"
+    },
+    {
+      "word_id": "10025",
+      "order": 8,
+      "x": 675,
+      "y": 1294,
+      "w": 238,
+      "h": 357,
+      "box_key": "box_10"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.0828125,
+  "margin_bottom_ratio": 0.13177083333333334
+}

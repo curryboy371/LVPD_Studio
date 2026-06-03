@@ -1,0 +1,57 @@
+@sheet 동사
+@pos 동사
+@type 반대
+
+# meaning	en_meaning	word	pinyin
+가다	go	去	qù
+오다	come	来	lái
+사다	buy	买	mǎi
+팔다	sell	卖	mài
+주다	give	给	gěi
+받다	receive	收	shōu
+묻다	ask	问	wèn
+대답하다	answer	回答	huídá
+보다	see / watch	看	kàn
+듣다	listen	听	tīng
+말하다	speak / say	说	shuō
+배우다	learn	学	xué
+가르치다	teach	教	jiāo
+이기다	win	赢	yíng
+지다	lose	输	shū
+열다	open	开	kāi
+닫다	close	关	guān
+올라가다	go up	上	shàng
+내려가다	go down	下	xià
+들어가다	enter	进	jìn
+나가다	exit	出	chū
+일어나다	get up	起	qǐ
+앉다	sit	坐	zuò
+입다	put on	穿	chuān
+벗다	take off	脱	tuō
+시작하다	start	开始	kāishǐ
+끝내다	finish	结束	jiéshù
+기억하다	remember	记得	jìde
+잊다	forget	忘记	wàngjì
+좋아하다	like	喜欢	xǐhuan
+싫어하다	dislike	讨厌	tǎoyàn
+사랑하다	love	爱	ài
+미워하다	hate	恨	hèn
+일하다	work	工作	gōngzuò
+쉬다	rest	休息	xiūxi
+빌리다	borrow	借	jiè
+돌려주다	return	还	huán
+보내다	send	送	sòng
+받다	receive	收到	shōudào
+찾다	find / look for	找	zhǎo
+잃어버리다	lose	丢	diū
+걷다, 떠나다	walk / leave	走	zǒu
+뛰다	run	跑	pǎo
+멈추다	stop	停	tíng
+먹다	eat	吃	chī
+마시다	drink	喝	hē
+만들다, 하다	do / make	做	zuò
+사용하다	use	用	yòng
+살다, 머무르다	live / stay	住	zhù
+떠나다	leave	离开	líkāi
+들어가다	go in	进去	jìnqù
+나오다	come out	出来	chūlái

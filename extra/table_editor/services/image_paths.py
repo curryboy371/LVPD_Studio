@@ -90,21 +90,78 @@ def img_path_value_for_table(repo_root: Path, target: Path) -> str:
     return rel_posix
 
 
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    out: list[Path] = []
+    for p in paths:
+        key = p.resolve().as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p.resolve())
+    return out
+
+
+def resolve_existing_word_image_path(
+    repo_root: Path,
+    img_path_raw: str,
+    *,
+    word_id: str = "",
+    word: str = "",
+    sound_path: str = "",
+    pending_tmp: Path | None = None,
+) -> Path | None:
+    """미리보기·클립보드 복사용 — 실제 존재하는 이미지 파일 경로."""
+    if pending_tmp is not None and pending_tmp.is_file():
+        return pending_tmp.resolve()
+
+    repo_root = repo_root.resolve()
+    raw = (img_path_raw or "").strip()
+    candidates: list[Path] = []
+
+    if raw and raw.lower() != "none":
+        candidates.append(
+            resolve_image_absolute(
+                repo_root, raw, word_id=word_id, word=word
+            )
+        )
+
+    index = build_image_stem_index(repo_root)
+    stems: list[str] = []
+    for stem in (raw, (sound_path or "").strip(), (word or "").strip(), (word_id or "").strip()):
+        if not stem or stem.lower() == "none" or stem in stems:
+            continue
+        stems.append(stem)
+        hit = index.get(stem)
+        if hit is not None:
+            candidates.append(hit)
+        candidates.append(_default_word_image_path(repo_root, stem))
+
+    for path in _dedupe_paths(candidates):
+        if path.is_file():
+            return path
+    return None
+
+
 def preview_image_path(
     repo_root: Path,
     img_path_raw: str,
     *,
     word_id: str = "",
     word: str = "",
+    sound_path: str = "",
     pending_tmp: Path | None = None,
 ) -> Path | None:
-    """미리보기용 파일 경로 (임시 클립보드 이미지 우선)."""
-    if pending_tmp is not None and pending_tmp.is_file():
-        return pending_tmp
+    """미리보기용 파일 경로 (임시·img_path·sound_path·한자·id 순 탐색)."""
     raw = (img_path_raw or "").strip()
     if not raw or raw.lower() == "none":
-        return None
-    target = resolve_image_absolute(
-        repo_root, raw, word_id=word_id, word=word
+        if not (word or word_id or sound_path or pending_tmp):
+            return None
+    return resolve_existing_word_image_path(
+        repo_root,
+        img_path_raw,
+        word_id=word_id,
+        word=word,
+        sound_path=sound_path,
+        pending_tmp=pending_tmp,
     )
-    return target if target.is_file() else None
