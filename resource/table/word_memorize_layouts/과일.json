@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "wood"
+  },
+  "title": "과일 이름을 외우자\n果 (열매 과)  莓 (딸기 매)  瓜(오이 과)",
+  "title_x": 540,
+  "title_y": 91,
+  "title_y_offset_px": 0,
+  "title_color": "#69f0ae",
+  "title_font": "kr_cn",
+  "title_font_pt": 52,
+  "title_lines": [
+    {
+      "text": "과일 이름을 외우자",
+      "color": "#69f0ae",
+      "font": "kr_cn",
+      "font_pt": 52
+    },
+    {
+      "text": "果 (열매 과)  莓 (딸기 매)  瓜(오이 과)",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 38
+    }
+  ],
+  "bg_music_path": "resource/sound/bg_short/신디드럼.mp3",
+  "boxes": [
+    {
+      "word_id": "20501",
+      "order": 1,
+      "x": 40,
+      "y": 183,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "20502",
+      "order": 2,
+      "x": 378,
+      "y": 183,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_2"
+    },
+    {
+      "word_id": "20067",
+      "order": 3,
+      "x": 716,
+      "y": 183,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "20068",
+      "order": 4,
+      "x": 40,
+      "y": 552,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "20505",
+      "order": 5,
+      "x": 378,
+      "y": 552,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_5"
+    },
+    {
+      "word_id": "20062",
+      "order": 6,
+      "x": 716,
+      "y": 552,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "20069",
+      "order": 7,
+      "x": 40,
+      "y": 921,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "20071",
+      "order": 8,
+      "x": 378,
+      "y": 921,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "20503",
+      "order": 9,
+      "x": 716,
+      "y": 921,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_13"
+    },
+    {
+      "word_id": "20063",
+      "order": 10,
+      "x": 40,
+      "y": 1290,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_10"
+    },
+    {
+      "word_id": "20073",
+      "order": 11,
+      "x": 378,
+      "y": 1290,
+      "w": 322,
+      "h": 353,
+      "box_key": "box_12"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.08697916666666666,
+  "margin_bottom_ratio": 0.13489583333333333
+}

@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "wood"
+  },
+  "title": "과일 이름을 외우자\n子(아들 자) : 식물의 자식에 해당하는 '씨앗'이나 '작고 둥근 열매",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#4fc3f7",
+  "title_font": "korean",
+  "title_font_pt": 52,
+  "title_lines": [
+    {
+      "text": "과일 이름을 외우자",
+      "color": "#4fc3f7",
+      "font": "korean",
+      "font_pt": 52
+    },
+    {
+      "text": "子(아들 자) : 식물의 자식에 해당하는 '씨앗'이나 '작고 둥근 열매",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 38
+    }
+  ],
+  "bg_music_path": "resource/sound/bg_short/드럼비트.mp3",
+  "boxes": [
+    {
+      "word_id": "20064",
+      "order": 1,
+      "x": 40,
+      "y": 198,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "20508",
+      "order": 2,
+      "x": 294,
+      "y": 198,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_2"
+    },
+    {
+      "word_id": "20504",
+      "order": 3,
+      "x": 548,
+      "y": 198,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "20053",
+      "order": 4,
+      "x": 802,
+      "y": 198,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "20060",
+      "order": 5,
+      "x": 40,
+      "y": 565,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_5"
+    },
+    {
+      "word_id": "20074",
+      "order": 6,
+      "x": 294,
+      "y": 565,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "20075",
+      "order": 7,
+      "x": 548,
+      "y": 565,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "20076",
+      "order": 8,
+      "x": 802,
+      "y": 565,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "20077",
+      "order": 9,
+      "x": 40,
+      "y": 932,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_9"
+    },
+    {
+      "word_id": "20059",
+      "order": 10,
+      "x": 294,
+      "y": 932,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_10"
+    },
+    {
+      "word_id": "20061",
+      "order": 11,
+      "x": 548,
+      "y": 932,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_11"
+    },
+    {
+      "word_id": "20507",
+      "order": 12,
+      "x": 802,
+      "y": 932,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_12"
+    },
+    {
+      "word_id": "20066",
+      "order": 13,
+      "x": 40,
+      "y": 1299,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_13"
+    },
+    {
+      "word_id": "20506",
+      "order": 14,
+      "x": 294,
+      "y": 1299,
+      "w": 238,
+      "h": 351,
+      "box_key": "box_14"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.09479166666666666,
+  "margin_bottom_ratio": 0.13177083333333334
+}

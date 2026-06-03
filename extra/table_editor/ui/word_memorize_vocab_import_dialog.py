@@ -10,6 +10,7 @@ from extra.table_editor.services.word_sheet_browser import (
     clear_word_sheet_browser_cache,
     get_pos_values,
     get_sheet_names,
+    get_type_values,
     query_words,
 )
 from extra.table_editor.ui.window_placement import schedule_center_toplevel_on_parent
@@ -39,7 +40,7 @@ class WordMemorizeVocabImportDialog(tk.Toplevel):
         ttk.Label(
             frame,
             text=(
-                "시트·품사를 고른 뒤 목록에서 선택합니다. "
+                "시트·품사·종류를 고른 뒤 목록에서 선택합니다. "
                 "더블클릭 또는 [가져오기] → 보관함(미표시). "
                 "Ctrl·Shift로 복수 선택 가능."
             ),
@@ -70,8 +71,19 @@ class WordMemorizeVocabImportDialog(tk.Toplevel):
             state="readonly",
             width=12,
         )
-        self._pos_combo.pack(side=tk.LEFT, padx=4)
+        self._pos_combo.pack(side=tk.LEFT, padx=(4, 12))
         self._pos_combo.bind("<<ComboboxSelected>>", lambda _e: self._reload_list())
+
+        ttk.Label(filter_row, text="종류:").pack(side=tk.LEFT)
+        self._type_var = tk.StringVar(value=POS_FILTER_ALL)
+        self._type_combo = ttk.Combobox(
+            filter_row,
+            textvariable=self._type_var,
+            state="readonly",
+            width=12,
+        )
+        self._type_combo.pack(side=tk.LEFT, padx=4)
+        self._type_combo.bind("<<ComboboxSelected>>", lambda _e: self._reload_list())
 
         list_frame = ttk.Frame(frame)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
@@ -114,25 +126,36 @@ class WordMemorizeVocabImportDialog(tk.Toplevel):
     def _on_sheet_changed(self) -> None:
         sheet = self._sheet_var.get()
         pos_values = get_pos_values(sheet) if sheet else [POS_FILTER_ALL]
+        type_values = get_type_values(sheet) if sheet else [POS_FILTER_ALL]
         self._pos_combo["values"] = pos_values
+        self._type_combo["values"] = type_values
         if pos_values:
             self._pos_var.set(pos_values[0])
+        if type_values:
+            self._type_var.set(type_values[0])
         self._reload_list()
 
     def _reload_list(self) -> None:
         sheet = self._sheet_var.get()
         pos = self._pos_var.get()
-        self._rows = query_words(sheet, pos) if sheet else []
+        word_type = self._type_var.get()
+        self._rows = query_words(sheet, pos, word_type) if sheet else []
         self._list.delete(0, tk.END)
         for row in self._rows:
             wid = row["id"]
             hanzi = row.get("word", "")
             meaning = (row.get("meaning") or "")[:20]
             pos_label = (row.get("pos") or "").strip()
+            type_label = (row.get("type") or "").strip()
             tag = "  (이미 추가됨)" if wid in self._exclude_ids else ""
             label = f"{wid:>6}  {hanzi}  {meaning}"
-            if pos_label:
-                label += f"  [{pos_label}]"
+            meta: list[str] = []
+            if type_label:
+                meta.append(type_label)
+            if pos_label and pos_label not in meta:
+                meta.append(pos_label)
+            if meta:
+                label += f"  [{', '.join(meta)}]"
             label += tag
             self._list.insert(tk.END, label)
 

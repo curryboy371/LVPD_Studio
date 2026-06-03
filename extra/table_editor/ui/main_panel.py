@@ -360,13 +360,18 @@ class MainPanel(ttk.Frame):
         )
         if not picked:
             return
-        mode, layout_path = picked
+        mode, layout_path, meaning_lang = picked
         stem = Path(layout_path).stem
         self._arg_var.set(stem)
-        self._dispatch_word_memorize(mode, layout_path)
+        self._dispatch_word_memorize(mode, layout_path, meaning_lang)
 
-    def _dispatch_word_memorize(self, mode: str, layout_path: str) -> None:
+    def _dispatch_word_memorize(
+        self, mode: str, layout_path: str, meaning_lang: str = "ko"
+    ) -> None:
         stem = Path(layout_path).stem
+        lang = (meaning_lang or "ko").strip().lower()
+        if lang not in ("ko", "en"):
+            lang = "ko"
         argv = [
             "-u",
             "-m",
@@ -377,6 +382,8 @@ class MainPanel(ttk.Frame):
             "word_memorize",
             "--layout",
             layout_path,
+            "--meaning-lang",
+            lang,
         ]
         if mode == "record":
             max_sec = _RECORD_MAX_SEC.get(("word_memorize", ""), 600)
@@ -387,8 +394,11 @@ class MainPanel(ttk.Frame):
                     str(max_sec),
                 ]
             )
+        lang_label = "한국어" if lang == "ko" else "영어"
         prefix = "녹화" if mode == "record" else "F5"
-        self._run_task(argv, title=f"{prefix} 단어 외우기 ({stem})")
+        self._run_task(
+            argv, title=f"{prefix} 단어 외우기 ({stem}, {lang_label})"
+        )
 
     def _studio_run_meta(
         self,

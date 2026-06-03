@@ -186,11 +186,12 @@ def word_pinyin_to_lexical_syllables(
     if pp.available and hz:
         fallbacks = pp.get_lexical_pinyin(hz) or []
     expected = len(fallbacks) or len(hz) or 1
-    tokens = _split_pinyin_display_tokens(text, expected)
-
+    # 한자(g2pM) 음절이 있으면 성조 병음을 그 경계로만 자른다.
+    # 정규식 분리는 lǎoshǔ → ['lǎ','oshǔ'] 처럼 음절 수만 맞고 o에 잘못된 성조가 붙을 수 있음.
     if fallbacks:
-        if len(tokens) != len(fallbacks):
-            tokens = _syllable_chunks_from_pinyin_for_bases(text, fallbacks, pp)
+        tokens = _syllable_chunks_from_pinyin_for_bases(text, fallbacks, pp)
+    else:
+        tokens = _split_pinyin_display_tokens(text, expected)
     if not tokens:
         return []
     out: list[str] = []

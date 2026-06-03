@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
+from typing import Callable
 
 from extra.table_editor.services.tts_preview import is_tts_preview_playing, play_tts_preview
 from extra.table_editor.services.tts_voice_options import GENERATE_LABEL, SKIP_LABEL, TYPE_CHOICES
@@ -89,7 +90,15 @@ class LangTtsRow:
     def voice(self) -> str:
         return (self.voice_var.get() or "").strip()
 
+    def _widget_alive(self) -> bool:
+        try:
+            return bool(self._preview_btn.winfo_exists())
+        except tk.TclError:
+            return False
+
     def _sync_voice_state(self) -> None:
+        if not self._widget_alive():
+            return
         gen = self.should_generate()
         if self._enabled:
             self._voice_combo.configure(state="readonly" if gen else "disabled")
@@ -97,6 +106,13 @@ class LangTtsRow:
         else:
             self._voice_combo.configure(state=tk.DISABLED)
             self._preview_btn.configure(state=tk.DISABLED)
+
+    def _schedule_on_parent(self, parent: tk.Misc, callback: Callable[[], None]) -> None:
+        try:
+            if parent.winfo_exists():
+                parent.after(0, callback)
+        except tk.TclError:
+            pass
 
     def _on_preview(self) -> None:
         if not self.should_generate():
@@ -118,24 +134,31 @@ class LangTtsRow:
         self._preview_btn.configure(state=tk.DISABLED)
 
         def _done() -> None:
-            parent.after(
-                0,
-                lambda: self._preview_btn.configure(
+            def _restore() -> None:
+                if not self._widget_alive():
+                    return
+                self._preview_btn.configure(
                     state=tk.NORMAL if self.should_generate() else tk.DISABLED
-                ),
-            )
+                )
+
+            self._schedule_on_parent(parent, _restore)
 
         def _err(ex: BaseException) -> None:
             def _show() -> None:
+                if not self._widget_alive():
+                    return
                 self._sync_voice_state()
-                messagebox.showerror(
-                    "미리듣기",
-                    f"TTS 재생에 실패했습니다.\n\n{ex}\n\n"
-                    "edge-tts 설치: pip install edge-tts",
-                    parent=parent,
-                )
+                try:
+                    messagebox.showerror(
+                        "미리듣기",
+                        f"TTS 재생에 실패했습니다.\n\n{ex}\n\n"
+                        "edge-tts 설치: pip install edge-tts",
+                        parent=parent,
+                    )
+                except tk.TclError:
+                    pass
 
-            parent.after(0, _show)
+            self._schedule_on_parent(parent, _show)
 
         play_tts_preview(
             text=self.sample_text,

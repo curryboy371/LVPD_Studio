@@ -13,6 +13,12 @@ from extra.table_editor.ui.studio_run_dialog import (
 from extra.table_editor.services.word_memorize_layouts import normalize_layout_filename
 from extra.table_editor.ui.window_placement import center_toplevel_on_parent
 
+_MEANING_LANG_LABELS: dict[str, str] = {
+    "ko": "한국어",
+    "en": "영어",
+}
+_MEANING_LANG_BY_LABEL = {v: k for k, v in _MEANING_LANG_LABELS.items()}
+
 
 class WordMemorizeRunDialog(tk.Toplevel):
     def __init__(
@@ -26,7 +32,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
         self.title("단어 외우기")
         self.transient(parent)
         self.grab_set()
-        self.result: tuple[str, str] | None = None
+        self.result: tuple[str, str, str] | None = None
 
         ttk.Label(
             self,
@@ -56,6 +62,17 @@ class WordMemorizeRunDialog(tk.Toplevel):
             combo.set(labels[0])
 
         self._layout_paths = {name: path for name, path in layouts}
+
+        lang_frame = ttk.LabelFrame(self, text="언어 (카드 뜻 · 첫 TTS)")
+        lang_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        self._lang_var = tk.StringVar(value=_MEANING_LANG_LABELS["ko"])
+        for key in ("ko", "en"):
+            ttk.Radiobutton(
+                lang_frame,
+                text=_MEANING_LANG_LABELS[key],
+                variable=self._lang_var,
+                value=_MEANING_LANG_LABELS[key],
+            ).pack(side=tk.LEFT, padx=12, pady=6)
 
         mode_frame = ttk.LabelFrame(self, text="실행 방식")
         mode_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
@@ -90,7 +107,8 @@ class WordMemorizeRunDialog(tk.Toplevel):
             )
             return
         mode = _MODE_BY_LABEL.get(self._mode_var.get(), "debug")
-        self.result = (mode, str(path))
+        meaning_lang = _MEANING_LANG_BY_LABEL.get(self._lang_var.get(), "ko")
+        self.result = (mode, str(path), meaning_lang)
         self.destroy()
 
     def _cancel(self) -> None:
@@ -104,7 +122,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
         *,
         layouts: list[tuple[str, Path]],
         initial_layout: str = "",
-    ) -> tuple[str, str] | None:
+    ) -> tuple[str, str, str] | None:
         dialog = cls(parent, layouts=layouts, initial_layout=initial_layout)
         parent.wait_window(dialog)
         return dialog.result

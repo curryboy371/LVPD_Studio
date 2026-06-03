@@ -14,12 +14,17 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
         self,
         parent: tk.Misc,
         on_select: Callable[[str], None],
+        *,
+        exclude_ids: set[str] | frozenset[str] | None = None,
     ) -> None:
         super().__init__(parent)
         self.title("word 추가")
         self.transient(parent)
         self.grab_set()
         self._on_select = on_select
+        self._exclude_ids = {
+            (wid or "").strip() for wid in (exclude_ids or ()) if (wid or "").strip()
+        }
         self._matches: list[dict[str, str]] = []
 
         frame = ttk.Frame(self, padding=12)
@@ -28,8 +33,8 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
         ttk.Label(
             frame,
             text=(
-                "word id 또는 한자 입력 → [검색] 또는 Enter → [선택]. "
-                "결과가 1개면 Enter·선택으로 바로 추가됩니다."
+                "word id · 한자 · 종류(type) 입력 → [검색] 또는 Enter → [선택]. "
+                "종류(예: 과일)는 해당 단어 목록을 보여줍니다."
             ),
             foreground="#555",
         ).pack(anchor="w", pady=(0, 8))
@@ -48,7 +53,7 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        columns = ("id", "word", "pos")
+        columns = ("id", "word", "type", "meaning")
         self._tree = ttk.Treeview(
             tree_frame,
             columns=columns,
@@ -58,10 +63,12 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
         )
         self._tree.heading("id", text="id")
         self._tree.heading("word", text="한자")
-        self._tree.heading("pos", text="pos")
+        self._tree.heading("type", text="종류")
+        self._tree.heading("meaning", text="뜻")
         self._tree.column("id", width=56, minwidth=48, stretch=False)
         self._tree.column("word", width=88, minwidth=56, stretch=False)
-        self._tree.column("pos", width=72, minwidth=48, stretch=True)
+        self._tree.column("type", width=56, minwidth=40, stretch=False)
+        self._tree.column("meaning", width=120, minwidth=56, stretch=True)
 
         scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scroll.set)
@@ -106,7 +113,12 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
 
     def _run_search(self) -> None:
         query = self._search_var.get()
-        matches = search_words(query)
+        all_matches = search_words(query)
+        matches = [
+            row
+            for row in all_matches
+            if (row.get("id") or "").strip() not in self._exclude_ids
+        ]
         self._matches = matches
         self._meaning_var.set("—")
         self._en_meaning_var.set("—")
@@ -116,11 +128,18 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
 
         if not matches:
             if (query or "").strip():
-                messagebox.showinfo(
-                    "단어 검색",
-                    f"'{query.strip()}' 와 일치하는 단어가 없습니다.",
-                    parent=self,
-                )
+                if all_matches:
+                    messagebox.showinfo(
+                        "단어 검색",
+                        f"'{query.strip()}' 검색 결과가 모두 이미 배치에 추가된 단어입니다.",
+                        parent=self,
+                    )
+                else:
+                    messagebox.showinfo(
+                        "단어 검색",
+                        f"'{query.strip()}' 와 일치하는 id·한자·종류가 없습니다.",
+                        parent=self,
+                    )
             return
 
         for i, row in enumerate(matches):
@@ -131,7 +150,8 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
                 values=(
                     row.get("id", ""),
                     row.get("word", ""),
-                    row.get("pos", ""),
+                    row.get("type", ""),
+                    row.get("meaning", ""),
                 ),
             )
 
@@ -192,7 +212,7 @@ class WordMemorizeWordPickDialog(tk.Toplevel):
             if not query:
                 messagebox.showinfo(
                     "검색 필요",
-                    "word id 또는 한자를 입력한 뒤 [검색] 또는 Enter를 누르세요.",
+                    "word id · 한자 · 종류를 입력한 뒤 [검색] 또는 Enter를 누르세요.",
                     parent=self,
                 )
             elif self._matches:

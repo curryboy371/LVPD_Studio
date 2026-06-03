@@ -119,6 +119,7 @@ def _load_details_from_excel(path: Path) -> dict[str, dict[str, str]]:
                 "meaning": (row.get("meaning") or "").strip(),
                 "en_meaning": (row.get("en_meaning") or "").strip(),
                 "pos": (row.get("pos") or "").strip(),
+                "type": (row.get("type") or "").strip(),
                 "img_path": (row.get("img_path") or "").strip(),
                 "sheet": sheet,
             }
@@ -139,6 +140,7 @@ def _load_details_from_csv(path: Path) -> dict[str, dict[str, str]]:
                 "meaning": (row.get("meaning") or "").strip(),
                 "en_meaning": (row.get("en_meaning") or "").strip(),
                 "pos": (row.get("pos") or "").strip(),
+                "type": (row.get("type") or "").strip(),
                 "img_path": (row.get("img_path") or "").strip(),
                 "sheet": "",
             }
@@ -168,6 +170,7 @@ def lookup_word_details(word_id: str) -> dict[str, str]:
         "meaning": "",
         "en_meaning": "",
         "pos": "",
+        "type": "",
         "img_path": "",
         "sheet": "",
     }
@@ -189,12 +192,59 @@ def _word_search_row(word_id: str) -> dict[str, str]:
         "meaning": details.get("meaning", ""),
         "en_meaning": details.get("en_meaning", ""),
         "pos": details.get("pos", ""),
+        "type": details.get("type", ""),
         "sheet": details.get("sheet", ""),
     }
 
 
+def _row_to_search_result(row: dict[str, str], *, sheet: str = "") -> dict[str, str] | None:
+    wid = _normalize_id(row.get("id", ""))
+    word = (row.get("word") or "").strip()
+    if not wid or not word:
+        return None
+    return {
+        "id": wid,
+        "word": word,
+        "meaning": (row.get("meaning") or "").strip(),
+        "en_meaning": (row.get("en_meaning") or "").strip(),
+        "pos": (row.get("pos") or "").strip(),
+        "type": (row.get("type") or "").strip(),
+        "sheet": sheet,
+    }
+
+
+def _iter_all_word_search_rows() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    if DEFAULT_WORDS_TABLE_EXCEL.exists():
+        store = MultiSheetWorkbookStore(WORDS_FIELDNAMES)
+        store.load(DEFAULT_WORDS_TABLE_EXCEL)
+        for sheet in store.sheet_names:
+            for row in store.get_sheet_rows(sheet):
+                item = _row_to_search_result(row, sheet=sheet)
+                if item is not None:
+                    rows.append(item)
+    elif DEFAULT_WORDS_TABLE_CSV.exists():
+        with open(DEFAULT_WORDS_TABLE_CSV, encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                item = _row_to_search_result(row)
+                if item is not None:
+                    rows.append(item)
+    return rows
+
+
+def search_words_by_type(word_type: str) -> list[dict[str, str]]:
+    """words.type(종류) 정확히 일치하는 단어 목록."""
+    from extra.table_editor.services.search import sort_rows_by_id
+
+    target = (word_type or "").strip()
+    if not target:
+        return []
+    matches = [row for row in _iter_all_word_search_rows() if row.get("type") == target]
+    return sort_rows_by_id(matches)
+
+
 def search_words(query: str) -> list[dict[str, str]]:
-    """id 또는 한자(정확히 일치)로 words 검색."""
+    """id · 한자(정확히 일치) · type(종류) 로 words 검색."""
     from extra.table_editor.services.search import parse_search_query
 
     kind, value = parse_search_query(query)
@@ -206,5 +256,8 @@ def search_words(query: str) -> list[dict[str, str]]:
         return [row] if row.get("word") else []
 
     ids = lookup_word_ids(value)
-    rows = [_word_search_row(wid) for wid in ids]
-    return [row for row in rows if row.get("word")]
+    if ids:
+        rows = [_word_search_row(wid) for wid in ids]
+        return [row for row in rows if row.get("word")]
+
+    return search_words_by_type(value)

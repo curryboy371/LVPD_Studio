@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "blue"
+  },
+  "title": "동물 이름을 외우자!",
+  "title_x": 0,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "bg_music_path": "resource/sound/bg_short/쇼츠-약간빠름.mp3",
+  "boxes": [
+    {
+      "word_id": "20103",
+      "order": 1,
+      "x": 40,
+      "y": 250,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "20104",
+      "order": 2,
+      "x": 294,
+      "y": 250,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_2"
+    },
+    {
+      "word_id": "20105",
+      "order": 3,
+      "x": 548,
+      "y": 250,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "20106",
+      "order": 4,
+      "x": 802,
+      "y": 250,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "20058",
+      "order": 5,
+      "x": 40,
+      "y": 697,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_5"
+    },
+    {
+      "word_id": "20107",
+      "order": 6,
+      "x": 294,
+      "y": 697,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "20108",
+      "order": 7,
+      "x": 548,
+      "y": 697,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "20109",
+      "order": 8,
+      "x": 802,
+      "y": 697,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "20052",
+      "order": 9,
+      "x": 40,
+      "y": 1144,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_9"
+    },
+    {
+      "word_id": "20055",
+      "order": 10,
+      "x": 294,
+      "y": 1144,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_10"
+    },
+    {
+      "word_id": "20057",
+      "order": 11,
+      "x": 548,
+      "y": 1144,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_12"
+    },
+    {
+      "word_id": "20056",
+      "order": 12,
+      "x": 802,
+      "y": 1144,
+      "w": 238,
+      "h": 431,
+      "box_key": "box_11"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.121875,
+  "margin_bottom_ratio": 0.17083333333333334
+}

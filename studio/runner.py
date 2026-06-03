@@ -722,7 +722,12 @@ def _create_studio(
         layout_path = str(kw.pop("layout_path", "") or "").strip()
         if not layout_path:
             raise ValueError("word_memorize 스튜디오에는 layout_path가 필요합니다.")
-        return WordMemorizeStudio(layout_path=layout_path)
+        meaning_lang = str(kw.pop("meaning_lang", "ko") or "ko").strip().lower()
+        if meaning_lang not in ("ko", "en"):
+            meaning_lang = "ko"
+        return WordMemorizeStudio(
+            layout_path=layout_path, meaning_lang=meaning_lang  # type: ignore[arg-type]
+        )
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
 
@@ -752,6 +757,13 @@ def main() -> None:
         default="",
         metavar="PATH",
         help="word_memorize: resource/table/word_memorize_layouts/*.json 경로",
+    )
+    parser.add_argument(
+        "--meaning-lang",
+        type=str,
+        default="ko",
+        choices=("ko", "en"),
+        help="word_memorize: 카드 뜻·첫 TTS 언어 (ko=한국어 뜻, en=영어 뜻). 기본 ko.",
     )
     parser.add_argument(
         "--csv",
@@ -894,6 +906,7 @@ def main() -> None:
             print(f"배치 JSON을 찾을 수 없습니다: {layout_file}", file=sys.stderr)
             sys.exit(1)
         studio_kw["layout_path"] = str(layout_file.resolve())
+        studio_kw["meaning_lang"] = str(getattr(args, "meaning_lang", "ko") or "ko")
 
     if args.studio == "shorts":
         from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY, normalize_clip_type

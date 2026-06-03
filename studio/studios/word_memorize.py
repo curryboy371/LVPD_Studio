@@ -1,4 +1,4 @@
-"""단어 외우기 — 배치 JSON 순차 하이라이트·TTS 재생(영어 뜻 → 중국어 한자)."""
+"""단어 외우기 — 배치 JSON 순차 하이라이트·TTS 재생(뜻 ko/en → 중국어 한자)."""
 from __future__ import annotations
 
 import logging
@@ -18,7 +18,10 @@ from extra.table_editor.services.word_memorize_layout import WordMemorizeBox, lo
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
     load_en_meaning_by_id,
+    load_ko_meaning_by_id,
 )
+
+MeaningLang = Literal["ko", "en"]
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +39,19 @@ WordSubstep = Literal["", "en", "zh"]
 
 
 class WordMemorizeStudio(IStudio):
-    def __init__(self, *, layout_path: str) -> None:
+    def __init__(self, *, layout_path: str, meaning_lang: MeaningLang = "ko") -> None:
         self._layout_path = Path(layout_path)
         self._layout = load_layout(self._layout_path)
+        self._meaning_lang: MeaningLang = (
+            "ko" if str(meaning_lang).strip().lower() == "ko" else "en"
+        )
         self._renderer = WordMemorizeRenderer()
         self._renderer.set_background_stem(self._layout.background_value)
-        self._en_by_id = load_en_meaning_by_id(Path(DEFAULT_WORDS_TABLE_CSV))
+        csv_path = Path(DEFAULT_WORDS_TABLE_CSV)
+        if self._meaning_lang == "ko":
+            self._card_meaning_by_id = load_ko_meaning_by_id(csv_path)
+        else:
+            self._card_meaning_by_id = load_en_meaning_by_id(csv_path)
         self._sequence: list[WordMemorizeBox] = []
         self._seq_index = 0
         self._phase = "intro"
@@ -185,6 +195,11 @@ class WordMemorizeStudio(IStudio):
             )
         if self._done:
             return
+        # 녹화에서는 시작 직후 첫 단어를 바로 노출/재생한다.
+        if self._phase == "intro" and self._is_recording_mode():
+            self._timer = 0.0
+            self._begin_word(0)
+            return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
         self._renderer.tick_background_video(dt)
         self._timer += dt
@@ -306,7 +321,8 @@ class WordMemorizeStudio(IStudio):
     def _word_tts_paths(
         self, box: WordMemorizeBox
     ) -> tuple[float, Path | None, float]:
-        """(영어 재생 길이, 대기 한자 경로, 한자 길이) — 한자는 영어 종료 전 TTS_ZH_LEAD_BEFORE_EN_END_SEC 만큼 앞당겨 재생."""
+        """(첫 TTS 재생 길이, 대기 한자 경로, 한자 길이) — 한자는 첫 TTS 종료 전 lead 만큼 앞당겨 재생."""
+        from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
         from audio.word_memorize_en import resolve_word_memorize_en_audio_path
         from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
 
@@ -315,13 +331,21 @@ class WordMemorizeStudio(IStudio):
         except (TypeError, ValueError):
             return 0.0, None, 0.0
 
-        en_path = resolve_word_memorize_en_audio_path(wid)
+        if self._meaning_lang == "ko":
+            meaning_path = resolve_vocab_meaning_ko_audio_path(wid)
+            meaning_label = "한국어"
+            meaning_file_hint = f"ko_word_{wid}_0.mp3"
+        else:
+            meaning_path = resolve_word_memorize_en_audio_path(wid)
+            meaning_label = "영어"
+            meaning_file_hint = f"en_word_{wid}_0.mp3"
         zh_path = resolve_word_memorize_zh_audio_path(wid)
-        if en_path is None:
+        if meaning_path is None:
             logger.warning(
-                "word_id=%s: 영어 TTS 없음 (en_word_%s_0.mp3). TTS 생성 후 실행하세요.",
+                "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
                 wid,
-                wid,
+                meaning_label,
+                meaning_file_hint,
             )
         if zh_path is None:
             logger.warning(
@@ -331,11 +355,12 @@ class WordMemorizeStudio(IStudio):
             )
 
         zh_len = self._audio_duration(zh_path)
-        if en_path is not None:
-            en_len = self._play_audio(en_path, volume=TTS_EN_PLAYBACK_VOLUME)
-            if en_len <= 0:
-                en_len = self._audio_duration(en_path)
-            return en_len, zh_path, zh_len
+        meaning_volume = 1.0 if self._meaning_lang == "ko" else TTS_EN_PLAYBACK_VOLUME
+        if meaning_path is not None:
+            meaning_len = self._play_audio(meaning_path, volume=meaning_volume)
+            if meaning_len <= 0:
+                meaning_len = self._audio_duration(meaning_path)
+            return meaning_len, zh_path, zh_len
         if zh_path is not None:
             zh_len = self._play_audio(zh_path)
             if zh_len <= 0:
@@ -375,7 +400,7 @@ class WordMemorizeStudio(IStudio):
             screen,
             self._layout,
             words_by_id,
-            self._en_by_id,
+            self._card_meaning_by_id,
             active_box_key=self._active_key if highlight else None,
             dim_inactive=False,
             config=config,

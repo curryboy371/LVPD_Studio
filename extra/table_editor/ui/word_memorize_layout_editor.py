@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Literal
@@ -17,15 +18,34 @@ from extra.table_editor.services.word_memorize_layout import (
     WORD_MEMORIZE_BG_DIR,
     WordMemorizeBox,
     WordMemorizeLayout,
+    TITLE_FONT_CHOICES,
+    TITLE_LINE_GAP_FHD,
+    TitleLineSpec,
     box_overlaps_any,
     clamp_title_position,
+    layout_title_line_specs,
     resolve_title_position,
     find_non_overlapping_position,
     layout_has_overlaps,
     list_word_memorize_bg_stems,
+    list_title_color_labels,
+    list_title_font_labels,
     load_layout,
+    normalize_title_color,
+    normalize_title_font,
+    normalize_title_font_pt,
     normalize_word_memorize_bg_stem,
     save_layout,
+    sync_layout_title_fields,
+    title_color_hex_for_label,
+    title_color_label_for_value,
+    title_font_key_for_label,
+    title_font_label_for_value,
+    title_line_specs_from_legacy_layout,
+    title_preview_font_for_key,
+    DEFAULT_TITLE_FONT_PT,
+    TITLE_FONT_PT_MIN,
+    TITLE_FONT_PT_MAX,
     word_memorize_bg_image_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
@@ -73,14 +93,11 @@ BOX_BADGE_FONT = ("Segoe UI", 11, "bold")
 BOX_PINYIN_COLOR = "#c62828"
 BOX_HANZI_COLOR = "#212121"
 BOX_EN_COLOR = "#4caf50"
-TITLE_PLACEHOLDER_LABEL = "제목"
 TITLE_MARKER_W_FHD = 360
 TITLE_MARKER_H_FHD = 64
 TITLE_MARKER_FILL = "#eceff1"
 TITLE_MARKER_OUTLINE = "#78909c"
 TITLE_MARKER_OUTLINE_SEL = "#4fc3f7"
-TITLE_MARKER_TEXT_COLOR = "#546e7a"
-TITLE_MARKER_FONT = ("Segoe UI", 10)
 BOX_CONTENT_PAD = 8
 BOX_LINE_GAP = 3
 BOX_IMG_BOTTOM_PAD = 6
@@ -241,10 +258,35 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         title_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         title_in = ttk.Frame(title_frame)
         title_in.pack(fill=tk.X, padx=6, pady=6)
-        self._title_var = tk.StringVar(value=self._layout.title)
-        title_entry = ttk.Entry(title_in, textvariable=self._title_var)
-        title_entry.pack(fill=tk.X)
-        title_entry.bind("<KeyRelease>", self._on_title_changed, add="+")
+        title_lines_hdr = ttk.Frame(title_in)
+        title_lines_hdr.pack(fill=tk.X)
+        ttk.Label(title_lines_hdr, text="줄").pack(side=tk.LEFT)
+        ttk.Button(
+            title_lines_hdr, text="+", width=3, command=self._add_title_line
+        ).pack(side=tk.RIGHT, padx=(2, 0))
+        ttk.Button(
+            title_lines_hdr, text="-", width=3, command=self._remove_title_line
+        ).pack(side=tk.RIGHT)
+        self._title_lines_host = ttk.Frame(title_in)
+        self._title_lines_host.pack(fill=tk.X, pady=(4, 0))
+        self._title_line_rows: list[
+            tuple[tk.StringVar, tk.StringVar, tk.StringVar, tk.StringVar]
+        ] = []
+        self._title_font_combo_values = list_title_font_labels() + [
+            key for _, key in TITLE_FONT_CHOICES
+        ]
+        self._rebuild_title_line_entries()
+        ttk.Button(
+            title_in,
+            text="제목 적용",
+            command=self._apply_title_settings,
+        ).pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(
+            title_in,
+            text="텍스트·색·폰트·크기는 [제목 적용] 후 미리보기·저장에 반영됩니다.",
+            foreground="#666",
+            wraplength=280,
+        ).pack(anchor="w", pady=(4, 0))
         title_pos_row = ttk.Frame(title_in)
         title_pos_row.pack(fill=tk.X, pady=(6, 0))
         ttk.Label(title_pos_row, text="Y 보정(px)").pack(side=tk.LEFT)
@@ -795,7 +837,9 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         def _on_pick(word_id: str) -> None:
             picked.append(word_id)
 
-        dlg = WordMemorizeWordPickDialog(self, _on_pick)
+        dlg = WordMemorizeWordPickDialog(
+            self, _on_pick, exclude_ids=self._used_word_ids()
+        )
         self.wait_window(dlg)
         return picked[0] if picked else None
 
@@ -1026,9 +1070,140 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._mark_dirty()
 
-    def _on_title_changed(self, _event: tk.Event | None = None) -> None:
-        self._layout.title = (self._title_var.get() or "").strip()
+    def _title_specs_for_preview(self) -> list[TitleLineSpec]:
+        return layout_title_line_specs(self._layout)
+
+    def _flush_title_from_ui(self) -> None:
+        if not self._title_line_rows:
+            return
+        specs = self._collect_title_line_specs()
+        self._layout.title_lines = specs
+        sync_layout_title_fields(self._layout)
+        self._layout.title_x = int(self._layout.frame_width) // 2
+
+    def _title_preview_font(self, spec: TitleLineSpec) -> tkfont.Font:
+        family, size, weight = title_preview_font_for_key(
+            spec.font, font_pt=spec.font_pt
+        )
+        return tkfont.Font(
+            family=family,
+            size=size,
+            weight=weight,
+            root=self,
+        )
+
+    def _title_preview_line_height(self, f: tkfont.Font) -> int:
+        return f.metrics("ascent") + f.metrics("descent")
+
+    def _measure_title_preview_block(self) -> tuple[int, int]:
+        specs = self._title_specs_for_preview()
+        if not specs:
+            return 48, 28
+        gap = max(1, int(round(TITLE_LINE_GAP_FHD * SCALE)))
+        max_w = 0
+        total_h = 0
+        for i, spec in enumerate(specs):
+            f = self._title_preview_font(spec)
+            text = (spec.text or "").strip()[:60]
+            max_w = max(max_w, f.measure(text))
+            total_h += self._title_preview_line_height(f)
+            if i < len(specs) - 1:
+                total_h += gap
+        pad = 8
+        return max(48, max_w + pad * 2), max(28, total_h + pad * 2)
+
+    def _rebuild_title_line_entries(
+        self, specs: list[TitleLineSpec] | None = None
+    ) -> None:
+        for child in self._title_lines_host.winfo_children():
+            child.destroy()
+        self._title_line_rows = []
+        if specs is None:
+            if self._layout.title_lines:
+                specs = list(self._layout.title_lines)
+            else:
+                specs = title_line_specs_from_legacy_layout(
+                    self._layout.title,
+                    color=self._layout.title_color,
+                    font=self._layout.title_font,
+                    font_pt=self._layout.title_font_pt,
+                )
+        if not specs:
+            specs = [TitleLineSpec()]
+        color_labels = list_title_color_labels()
+        for i, spec in enumerate(specs):
+            row = ttk.Frame(self._title_lines_host)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text=f"{i + 1}.", width=3).pack(side=tk.LEFT)
+            text_var = tk.StringVar(value=spec.text)
+            entry = ttk.Entry(row, textvariable=text_var, width=10)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            color_var = tk.StringVar(
+                value=title_color_label_for_value(spec.color)
+            )
+            color_combo = ttk.Combobox(
+                row,
+                textvariable=color_var,
+                values=color_labels,
+                state="readonly",
+                width=6,
+            )
+            color_combo.pack(side=tk.LEFT, padx=(0, 4))
+            font_var = tk.StringVar(value=title_font_label_for_value(spec.font))
+            font_combo = ttk.Combobox(
+                row,
+                textvariable=font_var,
+                values=self._title_font_combo_values,
+                width=11,
+            )
+            font_combo.pack(side=tk.LEFT, padx=(0, 4))
+            pt_var = tk.StringVar(value=str(normalize_title_font_pt(spec.font_pt)))
+            pt_spin = ttk.Spinbox(
+                row,
+                from_=TITLE_FONT_PT_MIN,
+                to=TITLE_FONT_PT_MAX,
+                increment=2,
+                width=4,
+                textvariable=pt_var,
+            )
+            pt_spin.pack(side=tk.LEFT)
+            self._title_line_rows.append((text_var, color_var, font_var, pt_var))
+            entry.bind("<Return>", lambda _e: self._apply_title_settings(), add="+")
+
+    def _add_title_line(self) -> None:
+        specs = self._collect_title_line_specs()
+        specs.append(TitleLineSpec())
+        self._rebuild_title_line_entries(specs)
+
+    def _remove_title_line(self) -> None:
+        if len(self._title_line_rows) <= 1:
+            return
+        specs = self._collect_title_line_specs()[:-1]
+        self._rebuild_title_line_entries(specs)
+
+    def _collect_title_line_specs(self) -> list[TitleLineSpec]:
+        specs: list[TitleLineSpec] = []
+        for text_var, color_var, font_var, pt_var in self._title_line_rows:
+            raw_font = (font_var.get() or "").strip()
+            font_key = normalize_title_font(
+                title_font_key_for_label(raw_font) if raw_font else ""
+            )
+            specs.append(
+                TitleLineSpec(
+                    text=text_var.get(),
+                    color=title_color_hex_for_label(
+                        (color_var.get() or "").strip()
+                    ),
+                    font=font_key,
+                    font_pt=normalize_title_font_pt((pt_var.get() or "").strip()),
+                )
+            )
+        return specs
+
+    def _apply_title_settings(self) -> None:
+        self._flush_title_from_ui()
         self._mark_dirty()
+        self._redraw_canvas()
 
     def _on_title_y_offset_changed(self, _event: tk.Event | None = None) -> None:
         raw = (self._title_y_offset_var.get() or "").strip()
@@ -1043,7 +1218,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._redraw_canvas()
 
     def _sync_title_var(self) -> None:
-        self._title_var.set(self._layout.title or "")
+        self._rebuild_title_line_entries()
         self._title_y_offset_var.set(
             str(int(getattr(self._layout, "title_y_offset_px", 0)))
         )
@@ -1197,6 +1372,9 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         return None, ""
 
     def _title_marker_screen_rect(self) -> tuple[int, int, int, int]:
+        specs = self._title_specs_for_preview()
+        if not specs:
+            return 0, 0, 0, 0
         cx_fhd, cy_fhd = resolve_title_position(
             frame_width=self._layout.frame_width,
             frame_height=self._layout.frame_height,
@@ -1206,12 +1384,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             title_y=int(getattr(self._layout, "title_y", 0)),
         )
         cx, cy = self._fhd_to_screen(cx_fhd, cy_fhd)
-        sw = max(48, int(round(TITLE_MARKER_W_FHD * SCALE)))
-        sh = max(28, int(round(TITLE_MARKER_H_FHD * SCALE)))
+        sw, sh = self._measure_title_preview_block()
         return cx - sw // 2, cy - sh // 2, cx + sw // 2, cy + sh // 2
 
     def _hit_test_title(self, sx: int, sy: int) -> bool:
-        if not (self._layout.title or "").strip():
+        if not self._title_specs_for_preview():
             return False
         x1, y1, x2, y2 = self._title_marker_screen_rect()
         return x1 <= sx <= x2 and y1 <= sy <= y2
@@ -1246,7 +1423,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 frame_width=self._layout.frame_width,
                 frame_height=self._layout.frame_height,
                 margin_top_ratio=self._layout.margin_top_ratio,
-                y_offset_px=0,
+                y_offset_px=int(getattr(self._layout, "title_y_offset_px", 0)),
                 title_x=int(getattr(self._layout, "title_x", 0)),
                 title_y=int(getattr(self._layout, "title_y", 0)),
             )
@@ -1282,14 +1459,15 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         if self._drag_mode == "title_move":
             if not self._drag_start or not self._title_drag_snapshot:
                 return
-            dx, dy = self._screen_to_fhd(
+            _dx, dy = self._screen_to_fhd(
                 event.x - self._drag_start[0], event.y - self._drag_start[1]
             )
-            tx, ty = self._title_drag_snapshot
+            _tx, ty = self._title_drag_snapshot
             fw, fh = self._layout.frame_width, self._layout.frame_height
-            nx, ny = clamp_title_position(tx + dx, ty + dy, fw, fh)
-            self._layout.title_x = int(nx)
-            self._layout.title_y = int(ny)
+            _, ny = clamp_title_position(0, ty + dy, fw, fh)
+            y_off = int(getattr(self._layout, "title_y_offset_px", 0))
+            self._layout.title_x = fw // 2
+            self._layout.title_y = int(ny) - y_off
             self._redraw_canvas()
             return
         if not self._drag_mode or not self._drag_start or not self._drag_box_snapshot:
@@ -1364,10 +1542,13 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
 
     def _draw_title_preview(self) -> None:
-        if not (self._layout.title or "").strip():
+        specs = self._title_specs_for_preview()
+        if not specs:
             return
         c = self._canvas
         x1, y1, x2, y2 = self._title_marker_screen_rect()
+        if x2 <= x1 or y2 <= y1:
+            return
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
         outline = TITLE_MARKER_OUTLINE_SEL if self._title_selected else TITLE_MARKER_OUTLINE
@@ -1383,15 +1564,32 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             dash=(4, 3) if self._title_selected else (),
             tags=("title", "title_hit"),
         )
-        c.create_text(
-            cx,
-            cy,
-            text=TITLE_PLACEHOLDER_LABEL,
-            anchor="center",
-            fill=TITLE_MARKER_TEXT_COLOR,
-            font=TITLE_MARKER_FONT,
-            tags="title",
-        )
+        gap = max(1, int(round(TITLE_LINE_GAP_FHD * SCALE)))
+        line_heights: list[int] = []
+        for spec in specs:
+            f = self._title_preview_font(spec)
+            line_heights.append(self._title_preview_line_height(f))
+        total_h = sum(line_heights) + gap * (len(specs) - 1)
+        y = cy - total_h // 2
+        for spec, lh in zip(specs, line_heights):
+            text = (spec.text or "").strip()[:60]
+            if not text:
+                continue
+            family, size, weight = title_preview_font_for_key(
+                spec.font, font_pt=spec.font_pt
+            )
+            fill = normalize_title_color(spec.color)
+            line_cy = y + lh // 2
+            c.create_text(
+                cx,
+                line_cy,
+                text=text,
+                anchor="center",
+                fill=fill,
+                font=(family, size, weight),
+                tags="title",
+            )
+            y += lh + gap
 
     def _display_pinyin(self, details: dict[str, str]) -> str:
         hanzi = (details.get("word") or "").strip()
@@ -1625,6 +1823,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._write_layout(Path(path))
 
     def _write_layout(self, path: Path) -> None:
+        self._flush_title_from_ui()
         self._layout.renumber_orders()
         try:
             save_layout(path, self._layout)

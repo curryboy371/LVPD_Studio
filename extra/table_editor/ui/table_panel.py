@@ -16,6 +16,8 @@ class TablePanel(ttk.Frame):
         *,
         display_columns: list[str] | None = None,
         computed_columns: dict[str, Callable[[dict[str, str]], str]] | None = None,
+        column_widths: dict[str, int] | None = None,
+        column_headings: dict[str, str] | None = None,
         on_double_click: Callable[[dict[str, str]], None] | None = None,
         on_select: Callable[[dict[str, str] | None], None] | None = None,
         row_sort: Callable[[list[dict[str, str]]], list[dict[str, str]]] | None = None,
@@ -24,6 +26,8 @@ class TablePanel(ttk.Frame):
         self._fieldnames = list(fieldnames)
         self._display_columns = list(display_columns) if display_columns else None
         self._computed_columns = dict(computed_columns or {})
+        self._column_widths = dict(column_widths or {})
+        self._column_headings = dict(column_headings or {})
         self._on_double_click = on_double_click
         self._on_select = on_select
         self._row_sort = row_sort
@@ -62,24 +66,26 @@ class TablePanel(ttk.Frame):
         self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         for col in display_cols:
-            self._tree.heading(col, text=col)
-            width = (
-                160
-                if col in (
-                    "word",
-                    "raw_sentence",
-                    "meaning",
-                    "translation",
-                    "완성형",
-                    "alt_translation",
-                    "text",
-                    "한자",
-                    "뜻",
-                    "desc",
-                )
-                else 72
-            )
-            self._tree.column(col, width=width, minwidth=48, stretch=True)
+            self._tree.heading(col, text=self._column_headings.get(col, col))
+            if col in self._column_widths:
+                width = self._column_widths[col]
+            elif col in (
+                "raw_sentence",
+                "translation",
+                "완성형",
+                "alt_translation",
+                "text",
+                "한자",
+                "뜻",
+                "desc",
+            ):
+                width = 160
+            elif col in ("word", "meaning"):
+                width = 120
+            else:
+                width = 72
+            stretch = col not in ("id", "word", "type", "pos", "masking")
+            self._tree.column(col, width=width, minwidth=48, stretch=stretch)
 
         self._tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")

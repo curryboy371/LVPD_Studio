@@ -94,6 +94,12 @@ def filter_rows_by_pos(rows: list[dict[str, str]], pos_filter: str) -> list[dict
     return [r for r in rows if (r.get("pos") or "").strip() == pos_filter]
 
 
+def filter_rows_by_type(rows: list[dict[str, str]], type_filter: str) -> list[dict[str, str]]:
+    if not type_filter or type_filter == POS_FILTER_ALL:
+        return list(rows)
+    return [r for r in rows if (r.get("type") or "").strip() == type_filter]
+
+
 def filter_rows_by_topic(rows: list[dict[str, str]], topic_filter: str) -> list[dict[str, str]]:
     if not topic_filter or topic_filter == TOPIC_FILTER_ALL:
         return list(rows)
@@ -108,6 +114,17 @@ def unique_pos_values(rows: list[dict[str, str]]) -> list[str]:
         if pos and pos not in seen:
             seen.add(pos)
             out.append(pos)
+    return sorted(out)
+
+
+def unique_type_values(rows: list[dict[str, str]]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for row in rows:
+        word_type = (row.get("type") or "").strip()
+        if word_type and word_type not in seen:
+            seen.add(word_type)
+            out.append(word_type)
     return sorted(out)
 
 
@@ -230,6 +247,11 @@ def find_row_by_id(rows: list[dict[str, str]], row_id: str) -> dict[str, str] | 
 def find_rows_by_word(rows: list[dict[str, str]], hanzi: str) -> list[dict[str, str]]:
     target = hanzi.strip()
     return [r for r in rows if (r.get("word") or "").strip() == target]
+
+
+def find_rows_by_type(rows: list[dict[str, str]], word_type: str) -> list[dict[str, str]]:
+    target = word_type.strip()
+    return [r for r in rows if (r.get("type") or "").strip() == target]
 
 
 def parse_row_id(row: dict[str, str]) -> int | None:

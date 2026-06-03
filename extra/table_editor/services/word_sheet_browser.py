@@ -28,6 +28,7 @@ def _row_dict(row: dict[str, str], sheet: str) -> dict[str, str]:
         "meaning": (row.get("meaning") or "").strip(),
         "en_meaning": (row.get("en_meaning") or "").strip(),
         "pos": (row.get("pos") or "").strip(),
+        "type": (row.get("type") or "").strip(),
         "sheet": sheet,
     }
 
@@ -78,12 +79,25 @@ def get_pos_values(sheet: str) -> list[str]:
     return [POS_FILTER_ALL, *sorted(seen)]
 
 
-def query_words(sheet: str, pos: str) -> list[dict[str, str]]:
-    """시트·품사 필터로 단어 행 목록 (id 오름차순)."""
+def get_type_values(sheet: str) -> list[str]:
+    rows = _load_sheet_rows().get(sheet, [])
+    seen: list[str] = []
+    for row in rows:
+        word_type = (row.get("type") or "").strip()
+        if word_type and word_type not in seen:
+            seen.append(word_type)
+    return [POS_FILTER_ALL, *sorted(seen)]
+
+
+def query_words(sheet: str, pos: str, word_type: str = "") -> list[dict[str, str]]:
+    """시트·품사·종류 필터로 단어 행 목록 (id 오름차순)."""
     rows = list(_load_sheet_rows().get(sheet, []))
     pos_filter = (pos or "").strip()
     if pos_filter and pos_filter != POS_FILTER_ALL:
         rows = [r for r in rows if (r.get("pos") or "").strip() == pos_filter]
+    type_filter = (word_type or "").strip()
+    if type_filter and type_filter != POS_FILTER_ALL:
+        rows = [r for r in rows if (r.get("type") or "").strip() == type_filter]
 
     def _sort_key(r: dict[str, str]) -> tuple[int, str]:
         try:

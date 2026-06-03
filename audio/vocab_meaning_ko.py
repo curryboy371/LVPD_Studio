@@ -43,6 +43,20 @@ def vocab_meaning_timeline_path(word_id: int) -> Path:
     return KO_SOUND_DIR / f"ko_{_cache_stem_for_vocab_word(word_id)}_timeline.json"
 
 
+def resolve_vocab_meaning_ko_audio_path(word_id: int) -> Path | None:
+    """resource/sound/shorts/ko_word_{word_id}_0.mp3 (단어 외우기·단어장 공용)."""
+    from audio.ko_narration import KO_SOUND_DIR
+
+    wid = int(word_id)
+    if wid < 1:
+        return None
+    for name in (f"ko_word_{wid}_0.mp3", f"ko_word_{wid}.mp3"):
+        p = KO_SOUND_DIR / name
+        if p.is_file():
+            return p
+    return None
+
+
 def _repo_relative_audio_path(path: Path) -> str:
     """timeline JSON 저장용 — repo 기준 상대 경로 우선."""
     try:

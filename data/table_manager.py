@@ -241,6 +241,7 @@ def load_words_table_from_csv(
                         pinyin=_str(row.get("pinyin")),
                         masking=_str(row.get("masking")),
                         pos=_normalize_pipe_list(row.get("pos")),
+                        type=_str(row.get("type")),
                         meaning=_normalize_pipe_list(row.get("meaning")),
                         tip=_str(row.get("tip")),
                         tts_type=_str(

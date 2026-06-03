@@ -20,6 +20,12 @@ def test_spaced_display_splits_by_hanzi():
     assert word_pinyin_to_marks_spaced("月", "yuè") == "yuè"
 
 
+def test_lao_shu_concatenated_pinyin_splits_on_hanzi():
+    """lǎoshǔ: 정규식만 쓰면 'lǎ'+'oshǔ'로 o에 성조가 잘못 붙음."""
+    assert word_pinyin_to_marks_spaced("老鼠", "lǎoshǔ") == "lǎo shǔ"
+    assert word_pinyin_to_marks("老鼠", "lǎoshǔ") == "lǎoshǔ"
+
+
 def test_reduplication_uses_pinyin_tones_and_hanzi_spacing():
     assert word_pinyin_to_marks_spaced("妈妈", "māma") == "mā ma"
     assert word_pinyin_to_marks_spaced("哥哥", "gēge") == "gē ge"

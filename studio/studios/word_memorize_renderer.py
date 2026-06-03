@@ -13,7 +13,11 @@ from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
     WordMemorizeBox,
     WordMemorizeLayout,
+    layout_title_line_specs,
+    normalize_title_font,
+    normalize_title_font_pt,
     resolve_title_position,
+    title_color_to_rgb,
     word_memorize_bg_image_path,
     word_memorize_bg_video_path,
 )
@@ -53,6 +57,7 @@ IMG_LIFT = 12
 PINYIN_FONT_PT = 32
 HANZI_FONT_PT = 72
 EN_FONT_PT = 30
+TITLE_LINE_GAP = 10
 TITLE_FONT_PT = 68
 TITLE_COLOR = (255, 255, 255)
 TITLE_SHADOW_COLOR = (0, 0, 0)
@@ -238,6 +243,23 @@ def load_en_meaning_by_id(csv_path: Path) -> dict[int, str]:
     return out
 
 
+def load_ko_meaning_by_id(csv_path: Path) -> dict[int, str]:
+    """words.csv meaning 첫 항목(| 구분) — 카드 뜻 표시용."""
+    out: dict[int, str] = {}
+    if not csv_path.is_file():
+        return out
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                wid = int(float(row.get("id", 0)))
+            except (TypeError, ValueError):
+                continue
+            raw = (row.get("meaning") or "").strip()
+            if raw:
+                out[wid] = raw.split("|")[0].strip()
+    return out
+
+
 def display_pinyin(word: Word) -> str:
     hanzi = (word.word or "").strip()
     raw = (word.pinyin or "").strip()
@@ -337,7 +359,7 @@ class WordMemorizeRenderer:
         self._font_pinyin: pygame.font.Font | None = None
         self._font_hanzi: pygame.font.Font | None = None
         self._font_en: pygame.font.Font | None = None
-        self._font_title: pygame.font.Font | None = None
+        self._font_title_by_key: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
         self._bg_video = LoopingBackgroundVideo()
 
@@ -359,17 +381,36 @@ class WordMemorizeRenderer:
             HANZI_FONT_PT, HANZI_COLOR, weight="bold"
         )
         self._font_en = load_font_korean(EN_FONT_PT, EN_COLOR)
-        self._font_title = load_font_korean(
-            TITLE_FONT_PT, TITLE_COLOR, weight="bold"
-        )
         self._fonts_ready = True
+
+    def _title_font(self, layout: WordMemorizeLayout, *, font_key: str, font_pt: int) -> pygame.font.Font | None:
+        self.ensure_fonts()
+        key = normalize_title_font(font_key)
+        pt = normalize_title_font_pt(font_pt)
+        cache_key = (key, pt)
+        if cache_key in self._font_title_by_key:
+            return self._font_title_by_key[cache_key]
+        from utils.fonts import (
+            load_font_korean,
+            load_font_kr_chinese,
+            load_font_noto_sans_cjk_sc,
+        )
+
+        if key == "noto_sc":
+            font = load_font_noto_sans_cjk_sc(pt, TITLE_COLOR, weight="bold")
+        elif key == "korean":
+            font = load_font_korean(pt, TITLE_COLOR, weight="bold")
+        else:
+            font = load_font_kr_chinese(pt, TITLE_COLOR, weight="bold")
+        self._font_title_by_key[cache_key] = font
+        return font
 
     def draw(
         self,
         surface: pygame.Surface,
         layout: WordMemorizeLayout,
         words_by_id: dict[int, Word],
-        en_by_id: dict[int, str],
+        card_meaning_by_id: dict[int, str],
         *,
         active_box_key: str | None = None,
         dim_inactive: bool = False,
@@ -399,17 +440,17 @@ class WordMemorizeRenderer:
             if word is None:
                 continue
             active = bool(active_box_key and box.box_key == active_box_key)
-            entries.append((box, word, en_by_id.get(wid, ""), active))
+            entries.append((box, word, card_meaning_by_id.get(wid, ""), active))
 
-        for box, word, en_meaning, active in entries:
+        for box, word, card_meaning, active in entries:
             if not active:
                 self._draw_box(
-                    surface, box, word, en_meaning, active=False, anim_time_sec=t_anim
+                    surface, box, word, card_meaning, active=False, anim_time_sec=t_anim
                 )
-        for box, word, en_meaning, _active in entries:
+        for box, word, card_meaning, _active in entries:
             if _active:
                 self._draw_box(
-                    surface, box, word, en_meaning, active=True, anim_time_sec=t_anim
+                    surface, box, word, card_meaning, active=True, anim_time_sec=t_anim
                 )
 
     def _draw_background(
@@ -440,30 +481,48 @@ class WordMemorizeRenderer:
         fw: int,
         fh: int,
     ) -> None:
-        title = (layout.title or "").strip()
-        if not title or self._font_title is None:
+        specs = layout_title_line_specs(layout)
+        if not specs:
             return
-        text = title[:80]
         cx, cy = resolve_title_position(
             frame_width=fw,
             frame_height=fh,
             margin_top_ratio=layout.margin_top_ratio,
             y_offset_px=getattr(layout, "title_y_offset_px", 0),
-            title_x=getattr(layout, "title_x", 0),
-            title_y=getattr(layout, "title_y", 0),
+            title_x=int(getattr(layout, "title_x", 0)),
+            title_y=int(getattr(layout, "title_y", 0)),
         )
-        shadow = self._font_title.render(text, True, TITLE_SHADOW_COLOR)
-        main = self._font_title.render(text, True, TITLE_COLOR)
-        rect = main.get_rect(center=(cx, cy))
-        surface.blit(shadow, rect.move(2, 2))
-        surface.blit(main, rect)
+        gap = TITLE_LINE_GAP
+        rendered: list[tuple[pygame.Surface, pygame.Surface, int]] = []
+        for spec in specs[:8]:
+            font_title = self._title_font(
+                layout, font_key=spec.font, font_pt=spec.font_pt
+            )
+            if font_title is None:
+                continue
+            text = (spec.text or "").strip()[:60]
+            if not text:
+                continue
+            color = title_color_to_rgb(spec.color)
+            shadow = font_title.render(text, True, TITLE_SHADOW_COLOR)
+            main = font_title.render(text, True, color)
+            rendered.append((shadow, main, main.get_height()))
+        if not rendered:
+            return
+        total_h = sum(h for _, _, h in rendered) + gap * (len(rendered) - 1)
+        y = cy - total_h // 2
+        for shadow, main, h in rendered:
+            rect = main.get_rect(midtop=(cx, y))
+            surface.blit(shadow, rect.move(2, 2))
+            surface.blit(main, rect)
+            y += h + gap
 
     def _draw_box(
         self,
         surface: pygame.Surface,
         box: WordMemorizeBox,
         word: Word,
-        en_meaning: str,
+        card_meaning: str,
         *,
         active: bool,
         anim_time_sec: float,
@@ -471,7 +530,7 @@ class WordMemorizeRenderer:
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         if not active:
             self._paint_box(
-                surface, base, word, en_meaning, active=False, anim_time_sec=anim_time_sec
+                surface, base, word, card_meaning, active=False, anim_time_sec=anim_time_sec
             )
             return
 
@@ -482,7 +541,7 @@ class WordMemorizeRenderer:
             layer,
             local,
             word,
-            en_meaning,
+            card_meaning,
             active=True,
             draw_border=False,
             anim_time_sec=anim_time_sec,
@@ -499,7 +558,7 @@ class WordMemorizeRenderer:
         surface: pygame.Surface,
         rect: pygame.Rect,
         word: Word,
-        en_meaning: str,
+        card_meaning: str,
         *,
         active: bool,
         anim_time_sec: float,
@@ -546,7 +605,7 @@ class WordMemorizeRenderer:
             surf = self._font_hanzi.render(hanzi, True, HANZI_COLOR)
             y += self._blit_centered(surface, surf, cx, y) + TEXT_LINE_GAP
 
-        en = (en_meaning or "").strip()
+        en = (card_meaning or "").strip()
         if en and self._font_en is not None and y < text_bottom:
             surf = self._font_en.render(en[:40], True, EN_COLOR)
             y += self._blit_centered(surface, surf, cx, y) + TEXT_LINE_GAP

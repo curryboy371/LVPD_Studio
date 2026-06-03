@@ -152,6 +152,7 @@ class Word(BaseModel):
     pinyin: str = Field(default="", description="성조 병음 (예: píngguǒ)")
     masking: str = Field(default="", description="성조 마스크. 비면 원래 성조, 숫자(0~5)로 음절별 강제")
     pos: str = Field(default="", description="품사 (예: 명사, 동사). 복수 시 | 구분")
+    type: str = Field(default="", description="종류 (예: 과일, 동물). 한글 분류·검색용")
     meaning: str = Field(default="", description="뜻")
     tip: str = Field(default="", description="학습 팁(숏츠 단어 모드 등)")
     tts_type: str = Field(

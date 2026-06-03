@@ -1,4 +1,4 @@
-"""Sidebar word lookup (id / hanzi) for slot editors."""
+"""Sidebar word lookup (id / hanzi / type) for slot editors."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -14,7 +14,7 @@ class WordSearchPanel(ttk.LabelFrame):
         master: tk.Misc,
         *,
         on_pick: Callable[[str], None],
-        hint: str = "word id 입력란에 포커스 후 검색·선택",
+        hint: str = "id · 한자 · 종류(type) 입력 후 검색",
         pick_button_text: str = "슬롯에 넣기",
     ) -> None:
         super().__init__(master, text="단어 검색")
@@ -41,7 +41,7 @@ class WordSearchPanel(ttk.LabelFrame):
         tree_frame = ttk.Frame(self)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 4))
 
-        columns = ("id", "word", "pos")
+        columns = ("id", "word", "type", "meaning")
         self._tree = ttk.Treeview(
             tree_frame,
             columns=columns,
@@ -51,10 +51,12 @@ class WordSearchPanel(ttk.LabelFrame):
         )
         self._tree.heading("id", text="id")
         self._tree.heading("word", text="한자")
-        self._tree.heading("pos", text="pos")
+        self._tree.heading("type", text="종류")
+        self._tree.heading("meaning", text="뜻")
         self._tree.column("id", width=52, minwidth=40, stretch=False)
         self._tree.column("word", width=72, minwidth=48, stretch=False)
-        self._tree.column("pos", width=56, minwidth=40, stretch=True)
+        self._tree.column("type", width=56, minwidth=40, stretch=False)
+        self._tree.column("meaning", width=96, minwidth=48, stretch=True)
 
         scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scroll.set)
@@ -92,7 +94,7 @@ class WordSearchPanel(ttk.LabelFrame):
             if (query or "").strip():
                 messagebox.showinfo(
                     "단어 검색",
-                    f"'{query.strip()}' 와 일치하는 단어가 없습니다.",
+                    f"'{query.strip()}' 와 일치하는 id·한자·종류가 없습니다.",
                     parent=self.winfo_toplevel(),
                 )
             return
@@ -105,7 +107,8 @@ class WordSearchPanel(ttk.LabelFrame):
                 values=(
                     row.get("id", ""),
                     row.get("word", ""),
-                    row.get("pos", ""),
+                    row.get("type", ""),
+                    row.get("meaning", ""),
                 ),
             )
 

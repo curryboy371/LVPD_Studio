@@ -21,6 +21,236 @@ BackgroundType = Literal["image"]
 TITLE_DEFAULT_MIN_Y = 40
 TITLE_RAISE_PX = 24
 
+TITLE_COLOR_CHOICES: tuple[tuple[str, str], ...] = (
+    ("흰색", "#ffffff"),
+    ("노랑", "#ffeb3b"),
+    ("주황", "#ff9800"),
+    ("빨강", "#f44336"),
+    ("분홍", "#ff4081"),
+    ("하늘", "#4fc3f7"),
+    ("민트", "#69f0ae"),
+    ("연보라", "#b388ff"),
+    ("검정", "#212121"),
+    ("회색", "#9e9e9e"),
+)
+DEFAULT_TITLE_COLOR = "#ffffff"
+
+TITLE_FONT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("한글+한자", "kr_cn"),
+    ("한자 (Noto SC)", "noto_sc"),
+    ("한글", "korean"),
+)
+DEFAULT_TITLE_FONT = "kr_cn"
+DEFAULT_TITLE_FONT_PT = 68
+TITLE_FONT_PT_MIN = 20
+TITLE_FONT_PT_MAX = 120
+TITLE_LINE_GAP_FHD = 10
+# 배치 편집기 미리보기 캔버스 스케일 (word_memorize_layout_editor.PREVIEW_WIDTH / SHORTS_WIDTH)
+TITLE_EDITOR_PREVIEW_SCALE = 504 / float(SHORTS_WIDTH)
+
+
+@dataclass
+class TitleLineSpec:
+    text: str = ""
+    color: str = DEFAULT_TITLE_COLOR
+    font: str = DEFAULT_TITLE_FONT
+    font_pt: int = DEFAULT_TITLE_FONT_PT
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text": (self.text or "").strip(),
+            "color": normalize_title_color(self.color),
+            "font": normalize_title_font(self.font),
+            "font_pt": normalize_title_font_pt(self.font_pt),
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> TitleLineSpec:
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(
+            text=str(raw.get("text", "") or ""),
+            color=normalize_title_color(
+                str(raw.get("color", DEFAULT_TITLE_COLOR) or DEFAULT_TITLE_COLOR)
+            ),
+            font=normalize_title_font(
+                str(raw.get("font", DEFAULT_TITLE_FONT) or DEFAULT_TITLE_FONT)
+            ),
+            font_pt=normalize_title_font_pt(raw.get("font_pt", DEFAULT_TITLE_FONT_PT)),
+        )
+
+
+def title_preview_font_pt(font_pt: int | None = None) -> int:
+    """편집기 미리보기 캔버스 픽셀 높이 — FHD pygame size × SCALE (pt = 픽셀)."""
+    return max(
+        6,
+        int(
+            round(
+                normalize_title_font_pt(font_pt) * TITLE_EDITOR_PREVIEW_SCALE
+            )
+        ),
+    )
+
+
+def title_preview_font_for_key(
+    raw: str, *, font_pt: int | None = None
+) -> tuple[str, int, str]:
+    """tk 폰트: (family, size, weight). size는 음수 = 픽셀 (pygame과 동일 단위)."""
+    key = normalize_title_font(raw)
+    family, _, weight = TITLE_PREVIEW_FONTS.get(
+        key, TITLE_PREVIEW_FONTS[DEFAULT_TITLE_FONT]
+    )
+    px = title_preview_font_pt(font_pt)
+    return family, -px, weight
+
+
+def title_line_specs_from_legacy_layout(
+    title: str,
+    *,
+    color: str = DEFAULT_TITLE_COLOR,
+    font: str = DEFAULT_TITLE_FONT,
+    font_pt: int = DEFAULT_TITLE_FONT_PT,
+) -> list[TitleLineSpec]:
+    lines = split_title_lines(title)
+    if not any((ln or "").strip() for ln in lines):
+        return [TitleLineSpec(color=color, font=font, font_pt=font_pt)]
+    return [
+        TitleLineSpec(
+            text=ln,
+            color=color,
+            font=font,
+            font_pt=font_pt,
+        )
+        for ln in lines
+        if (ln or "").strip() or len(lines) == 1
+    ]
+
+
+def layout_title_line_specs(layout: "WordMemorizeLayout") -> list[TitleLineSpec]:
+    if layout.title_lines:
+        return [
+            s
+            for s in layout.title_lines
+            if (s.text or "").strip()
+        ]
+    return title_line_specs_from_legacy_layout(
+        layout.title,
+        color=layout.title_color,
+        font=layout.title_font,
+        font_pt=layout.title_font_pt,
+    )
+
+
+def sync_layout_title_fields(layout: "WordMemorizeLayout") -> None:
+    """title_lines → title 문자열·레거시 전역 필드(첫 줄 기준)."""
+    specs = layout.title_lines
+    layout.title = join_title_lines([s.text for s in specs])
+    active = [s for s in specs if (s.text or "").strip()]
+    first = active[0] if active else TitleLineSpec()
+    layout.title_color = first.color
+    layout.title_font = first.font
+    layout.title_font_pt = first.font_pt
+
+
+TITLE_PREVIEW_FONTS: dict[str, tuple[str, int, str]] = {
+    "kr_cn": ("Noto Sans CJK KR", 11, "bold"),
+    "noto_sc": ("Noto Sans SC", 11, "bold"),
+    "korean": ("Malgun Gothic", 11, "bold"),
+}
+
+
+def list_title_font_labels() -> list[str]:
+    return [label for label, _ in TITLE_FONT_CHOICES]
+
+
+def normalize_title_font(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_TITLE_FONT
+    lowered = text.lower()
+    valid_keys = {key for _, key in TITLE_FONT_CHOICES}
+    if lowered in valid_keys:
+        return lowered
+    for label, key in TITLE_FONT_CHOICES:
+        if text == label:
+            return key
+    return DEFAULT_TITLE_FONT
+
+
+def normalize_title_font_pt(raw: str | int | float | None) -> int:
+    try:
+        n = int(float(raw))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_TITLE_FONT_PT
+    return max(TITLE_FONT_PT_MIN, min(TITLE_FONT_PT_MAX, n))
+
+
+def split_title_lines(title: str) -> list[str]:
+    if not (title or "").strip() and "\n" not in (title or ""):
+        return [""]
+    parts = (title or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return parts if parts else [""]
+
+
+def join_title_lines(lines: list[str]) -> str:
+    trimmed = list(lines)
+    while trimmed and not (trimmed[-1] or "").strip():
+        trimmed.pop()
+    return "\n".join(trimmed)
+
+
+def title_lines_non_empty(title: str) -> list[str]:
+    return [ln.strip() for ln in split_title_lines(title) if ln.strip()]
+
+
+def title_font_key_for_label(label: str) -> str:
+    return normalize_title_font(label)
+
+
+def title_font_label_for_value(raw: str) -> str:
+    key = normalize_title_font(raw)
+    for label, k in TITLE_FONT_CHOICES:
+        if k == key:
+            return label
+    return TITLE_FONT_CHOICES[0][0]
+
+
+def list_title_color_labels() -> list[str]:
+    return [label for label, _ in TITLE_COLOR_CHOICES]
+
+
+def normalize_title_color(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_TITLE_COLOR
+    for label, hx in TITLE_COLOR_CHOICES:
+        if text == label:
+            return hx
+    lowered = text.lower().lstrip("#")
+    if len(lowered) == 6 and all(c in "0123456789abcdef" for c in lowered):
+        return f"#{lowered}"
+    return DEFAULT_TITLE_COLOR
+
+
+def title_color_label_for_value(raw: str) -> str:
+    norm = normalize_title_color(raw)
+    for label, hx in TITLE_COLOR_CHOICES:
+        if normalize_title_color(hx) == norm:
+            return label
+    return TITLE_COLOR_CHOICES[0][0]
+
+
+def title_color_hex_for_label(label: str) -> str:
+    for lbl, hx in TITLE_COLOR_CHOICES:
+        if lbl == label:
+            return hx
+    return DEFAULT_TITLE_COLOR
+
+
+def title_color_to_rgb(raw: str) -> tuple[int, int, int]:
+    hx = normalize_title_color(raw).lstrip("#")
+    return int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16)
+
 
 def default_title_position(
     frame_width: int = SHORTS_WIDTH,
@@ -41,10 +271,11 @@ def default_title_position(
 def clamp_title_position(
     x: int, y: int, frame_width: int = SHORTS_WIDTH, frame_height: int = SHORTS_HEIGHT
 ) -> tuple[int, int]:
-    return (
-        max(0, min(int(x), int(frame_width))),
-        max(TITLE_DEFAULT_MIN_Y, min(int(y), int(frame_height))),
-    )
+    """제목 앵커 — 가로는 항상 중앙, 세로만 조정."""
+    _ = x
+    cx = int(frame_width) // 2
+    cy = max(TITLE_DEFAULT_MIN_Y, min(int(y), int(frame_height)))
+    return cx, cy
 
 
 def resolve_title_position(
@@ -55,17 +286,18 @@ def resolve_title_position(
     title_x: int = 0,
     title_y: int = 0,
 ) -> tuple[int, int]:
-    if int(title_x) <= 0 or int(title_y) <= 0:
-        return default_title_position(
+    cx = int(frame_width) // 2
+    if int(title_y) <= 0:
+        _, y = default_title_position(
             frame_width=frame_width,
             frame_height=frame_height,
             margin_top_ratio=margin_top_ratio,
             y_offset_px=y_offset_px,
         )
-    x, y = clamp_title_position(
-        int(title_x), int(title_y) + int(y_offset_px), frame_width, frame_height
-    )
-    return x, y
+        return cx, y
+    y = int(title_y) + int(y_offset_px)
+    y = max(TITLE_DEFAULT_MIN_Y, min(y, int(frame_height)))
+    return cx, y
 
 
 def list_word_memorize_bg_stems() -> list[str]:
@@ -219,6 +451,10 @@ class WordMemorizeLayout:
     title_x: int = 0
     title_y: int = 0
     title_y_offset_px: int = 0
+    title_color: str = DEFAULT_TITLE_COLOR
+    title_font: str = DEFAULT_TITLE_FONT
+    title_font_pt: int = DEFAULT_TITLE_FONT_PT
+    title_lines: list[TitleLineSpec] = field(default_factory=list)
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -239,6 +475,8 @@ class WordMemorizeLayout:
         return max(b.order for b in self.boxes) + 1
 
     def to_dict(self) -> dict[str, Any]:
+        sync_layout_title_fields(self)
+        self.title_x = int(self.frame_width) // 2
         return {
             "version": LAYOUT_VERSION,
             "frame_width": self.frame_width,
@@ -251,6 +489,10 @@ class WordMemorizeLayout:
             "title_x": int(self.title_x),
             "title_y": int(self.title_y),
             "title_y_offset_px": int(self.title_y_offset_px),
+            "title_color": normalize_title_color(self.title_color),
+            "title_font": normalize_title_font(self.title_font),
+            "title_font_pt": normalize_title_font_pt(self.title_font_pt),
+            "title_lines": [s.to_dict() for s in self.title_lines],
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -283,7 +525,32 @@ class WordMemorizeLayout:
             title_x=int(data.get("title_x", 0) or 0),
             title_y=int(data.get("title_y", 0) or 0),
             title_y_offset_px=int(data.get("title_y_offset_px", 0) or 0),
+            title_color=normalize_title_color(
+                str(data.get("title_color", DEFAULT_TITLE_COLOR) or DEFAULT_TITLE_COLOR)
+            ),
+            title_font=normalize_title_font(
+                str(data.get("title_font", DEFAULT_TITLE_FONT) or DEFAULT_TITLE_FONT)
+            ),
+            title_font_pt=normalize_title_font_pt(
+                data.get("title_font_pt", DEFAULT_TITLE_FONT_PT)
+            ),
         )
+        raw_lines = data.get("title_lines")
+        if isinstance(raw_lines, list) and raw_lines:
+            layout.title_lines = [
+                TitleLineSpec.from_dict(item)
+                for item in raw_lines
+                if isinstance(item, dict)
+            ]
+        else:
+            layout.title_lines = title_line_specs_from_legacy_layout(
+                layout.title,
+                color=layout.title_color,
+                font=layout.title_font,
+                font_pt=layout.title_font_pt,
+            )
+        sync_layout_title_fields(layout)
+        layout.title_x = int(layout.frame_width) // 2
         boxes: list[WordMemorizeBox] = []
         for raw in data.get("boxes") or []:
             if not isinstance(raw, dict):

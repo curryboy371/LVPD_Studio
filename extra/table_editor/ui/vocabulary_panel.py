@@ -19,15 +19,42 @@ from extra.table_editor.services.global_table_cache import invalidate_global_tab
 from extra.table_editor.services.search import (
     allocate_next_word_id,
     filter_rows_by_pos,
+    filter_rows_by_type,
     find_row_by_id,
+    find_rows_by_type,
     find_rows_by_word,
     parse_search_query,
     unique_pos_values,
+    unique_type_values,
 )
 from extra.table_editor.services.word_autofill import apply_new_word_defaults
 from extra.table_editor.ui.id_picker_dialog import IdPickerDialog
 from extra.table_editor.ui.row_editor_dialog import RowEditorDialog
 from extra.table_editor.ui.table_panel import TablePanel
+
+_WORDS_DISPLAY_COLUMNS = [
+    "id",
+    "word",
+    "meaning",
+    "pinyin",
+    "type",
+    "pos",
+]
+
+_WORDS_COLUMN_WIDTHS = {
+    "id": 56,
+    "word": 72,
+    "meaning": 140,
+    "pinyin": 96,
+    "type": 56,
+    "pos": 56,
+}
+
+_WORDS_COLUMN_HEADINGS = {
+    "word": "한자",
+    "meaning": "뜻",
+    "type": "종류",
+}
 
 
 class VocabularyPanel(ttk.Frame):
@@ -82,12 +109,20 @@ class VocabularyPanel(ttk.Frame):
         self._pos_combo.pack(side=tk.LEFT, padx=(4, 12))
         self._pos_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_filter())
 
+        ttk.Label(top, text="type:").pack(side=tk.LEFT)
+        self._type_var = tk.StringVar(value=POS_FILTER_ALL)
+        self._type_combo = ttk.Combobox(
+            top, textvariable=self._type_var, state="readonly", width=16
+        )
+        self._type_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._type_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_filter())
+
         ttk.Button(top, text="삭제", command=self._delete_row).pack(side=tk.RIGHT, padx=4)
         ttk.Button(top, text="새로 만들기", command=self._new_row).pack(side=tk.RIGHT, padx=4)
 
         search_frame = ttk.Frame(self)
         search_frame.pack(fill=tk.X, padx=8, pady=(0, 6))
-        ttk.Label(search_frame, text="검색 (id / 한자):").pack(side=tk.LEFT)
+        ttk.Label(search_frame, text="검색 (id / 한자 / type):").pack(side=tk.LEFT)
         self._search_var = tk.StringVar()
         self._search_entry = ttk.Entry(search_frame, textvariable=self._search_var, width=40)
         self._search_entry.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
@@ -96,6 +131,9 @@ class VocabularyPanel(ttk.Frame):
         self._table = TablePanel(
             self,
             WORDS_FIELDNAMES,
+            display_columns=_WORDS_DISPLAY_COLUMNS,
+            column_widths=_WORDS_COLUMN_WIDTHS,
+            column_headings=_WORDS_COLUMN_HEADINGS,
             on_double_click=self._edit_row,
         )
         self._table.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
@@ -206,6 +244,7 @@ class VocabularyPanel(ttk.Frame):
     def _reload_sheet(self) -> None:
         self._all_rows = self._store.get_sheet_rows(self._current_sheet)
         self._update_pos_combo()
+        self._update_type_combo()
         self._apply_filter()
 
     def _update_pos_combo(self) -> None:
@@ -214,6 +253,12 @@ class VocabularyPanel(ttk.Frame):
         if self._pos_var.get() not in values:
             self._pos_var.set(POS_FILTER_ALL)
 
+    def _update_type_combo(self) -> None:
+        values = [POS_FILTER_ALL] + unique_type_values(self._all_rows)
+        self._type_combo["values"] = values
+        if self._type_var.get() not in values:
+            self._type_var.set(POS_FILTER_ALL)
+
     def _on_sheet_changed(self) -> None:
         self._flush_current_sheet()
         self._current_sheet = self._sheet_var.get()
@@ -221,6 +266,7 @@ class VocabularyPanel(ttk.Frame):
 
     def _apply_filter(self) -> None:
         filtered = filter_rows_by_pos(self._all_rows, self._pos_var.get())
+        filtered = filter_rows_by_type(filtered, self._type_var.get())
         self._table.set_rows(filtered)
 
     def _run_search(self) -> None:
@@ -237,18 +283,26 @@ class VocabularyPanel(ttk.Frame):
                 messagebox.showinfo("검색", f"id {value} 를 찾을 수 없습니다.", parent=self)
                 return
             self._pos_var.set(POS_FILTER_ALL)
+            self._type_var.set(POS_FILTER_ALL)
             self._apply_filter()
             self._table.select_row_by_id(value)
             self._on_status(f"id {value} 선택")
             return
         matches = find_rows_by_word(sheet_rows, value)
         if not matches:
-            self._on_status(f"한자 '{value}' 없음")
-            messagebox.showinfo("검색", f"한자 '{value}' 와 일치하는 항목이 없습니다.", parent=self)
+            matches = find_rows_by_type(sheet_rows, value)
+        if not matches:
+            self._on_status(f"'{value}' 없음 (한자·type)")
+            messagebox.showinfo(
+                "검색",
+                f"'{value}' 와 일치하는 한자·type 항목이 없습니다.",
+                parent=self,
+            )
             return
         if len(matches) == 1:
             rid = matches[0].get("id", "")
             self._pos_var.set(POS_FILTER_ALL)
+            self._type_var.set(POS_FILTER_ALL)
             self._apply_filter()
             self._table.select_row_by_id(rid)
             self._on_status(f"한자 '{value}' → id {rid}")
@@ -257,6 +311,7 @@ class VocabularyPanel(ttk.Frame):
         def on_pick(row: dict[str, str]) -> None:
             rid = row.get("id", "")
             self._pos_var.set(POS_FILTER_ALL)
+            self._type_var.set(POS_FILTER_ALL)
             self._apply_filter()
             self._table.select_row_by_id(rid)
             self._on_status(f"한자 '{value}' → id {rid}")
@@ -336,6 +391,7 @@ class VocabularyPanel(ttk.Frame):
         self._store.set_sheet_rows(self._current_sheet, self._all_rows)
         self._on_dirty_change(True)
         self._update_pos_combo()
+        self._update_type_combo()
         self._apply_filter()
         self._on_status(f"삭제: id={rid} (시트: {self._current_sheet})")
 
@@ -361,6 +417,7 @@ class VocabularyPanel(ttk.Frame):
             self._store.set_sheet_rows(self._current_sheet, self._all_rows)
             self._on_dirty_change(True)
             self._update_pos_combo()
+            self._update_type_combo()
             self._apply_filter()
             self._table.update_row(values, original_id=original_id)
             self._on_status(f"{'추가' if new else '수정'}: id {values.get('id', '')}")
