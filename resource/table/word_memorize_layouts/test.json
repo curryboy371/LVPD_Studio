@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "mandara"
+  },
+  "title": "",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#ffffff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "selection_highlight": "laser",
+  "row_highlight": "none",
+  "use_base_slot": true,
+  "bg_music_path": "",
+  "boxes": [
+    {
+      "word_id": "1000",
+      "order": 1,
+      "x": 392,
+      "y": 825,
+      "w": 280,
+      "h": 160,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "1001",
+      "order": 2,
+      "x": 430,
+      "y": 1293,
+      "w": 280,
+      "h": 160,
+      "box_key": "box_2"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.1125,
+  "margin_bottom_ratio": 0.13177083333333334
+}

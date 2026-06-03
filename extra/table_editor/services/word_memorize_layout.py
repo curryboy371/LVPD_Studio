@@ -14,11 +14,25 @@ DEFAULT_MARGIN_TOP_RATIO = 0.1125
 DEFAULT_MARGIN_BOTTOM_RATIO = 0.13177083333333334
 DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_layouts"
 WORD_MEMORIZE_BG_DIR = get_repo_root() / "resource" / "BG"
+WORD_MEMORIZE_LASER_BEAM = get_repo_root() / "resource" / "image" / "icon" / "laser.png"
 DEFAULT_WORD_MEMORIZE_BG_STEM = "3and3"
+
+
+def word_memorize_laser_beam_path() -> Path:
+    """가로 빔 PNG — 왼쪽 꼬리, 오른쪽 머리 (0° 기준)."""
+    return WORD_MEMORIZE_LASER_BEAM
+
+
+def word_memorize_laser_sprite_path() -> Path:
+    return word_memorize_laser_beam_path()
+
+
+def word_memorize_laser_ready_path() -> Path:
+    return word_memorize_laser_beam_path()
 _BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 BackgroundType = Literal["image"]
-SelectionHighlightType = Literal["gradient", "red_border"]
+SelectionHighlightType = Literal["gradient", "red_border", "laser"]
 RowHighlightType = Literal["none", "neon_glow", "brackets", "bracket_one", "left_bar"]
 TITLE_DEFAULT_MIN_Y = 40
 TITLE_RAISE_PX = 24
@@ -51,6 +65,7 @@ TITLE_LINE_GAP_FHD = 10
 SELECTION_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
     ("그라데이션", "gradient"),
     ("빨간 테두리", "red_border"),
+    ("레이저", "laser"),
 )
 DEFAULT_SELECTION_HIGHLIGHT: SelectionHighlightType = "gradient"
 ROW_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
@@ -61,6 +76,8 @@ ROW_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
     ("왼쪽 세로 바", "left_bar"),
 )
 DEFAULT_ROW_HIGHLIGHT: RowHighlightType = "none"
+# 카드 선택 하이라이트(레이저·그라데이션·확대)가 프레임 밖으로 나가지 않도록 좌우 여백
+FRAME_SIDE_GUTTER = 10
 # 배치 편집기 미리보기 캔버스 스케일 (word_memorize_layout_editor.PREVIEW_WIDTH / SHORTS_WIDTH)
 TITLE_EDITOR_PREVIEW_SCALE = 504 / float(SHORTS_WIDTH)
 
@@ -69,6 +86,23 @@ CARD_LINE_GAP_FHD = 4
 CARD_CONTENT_REFERENCE_INNER_H = 140
 CARD_IMG_BOTTOM_PAD_FHD = 8
 CARD_ITEM_GAP_MIN = 0
+# Base 슬롯(#1 카드) — 병음·한자·뜻만, 일반 카드보다 큰 글자
+BASE_SLOT_PINYIN_PT_FHD = 42
+BASE_SLOT_HANZI_PT_FHD = 104
+BASE_SLOT_MEANING_PT_FHD = 44
+BASE_SLOT_LINE_GAP_FHD = 0
+# base 슬롯 전용 글자색 (RGB)
+BASE_SLOT_PINYIN_COLOR = (255, 255, 255)
+BASE_SLOT_PINYIN_BG_COLOR = (255, 152, 0)
+BASE_SLOT_PINYIN_BG_PAD_X_FHD = 16
+BASE_SLOT_PINYIN_BG_PAD_Y_FHD = 5
+BASE_SLOT_PINYIN_BG_RADIUS_FHD = 10
+BASE_SLOT_HANZI_COLOR = (255, 235, 59)
+BASE_SLOT_MEANING_COLOR = (255, 255, 255)
+BASE_SLOT_MEANING_BG_COLOR = (76, 175, 80)
+BASE_SLOT_MEANING_PAD_X_FHD = 16
+BASE_SLOT_MEANING_PAD_Y_FHD = 3
+BASE_SLOT_MEANING_BG_RADIUS_FHD = 10
 
 
 def default_card_item_gap(inner_height: int) -> float:
@@ -552,7 +586,9 @@ class WordMemorizeBox:
     ) -> None:
         self.w = max(min_w, int(self.w))
         self.h = max(min_h, int(self.h))
-        self.x = max(0, min(int(self.x), frame_w - self.w))
+        side = FRAME_SIDE_GUTTER
+        max_x = max(side, frame_w - self.w - side)
+        self.x = max(side, min(int(self.x), max_x))
         self.y = max(0, min(int(self.y), frame_h - self.h))
 
 
@@ -593,20 +629,23 @@ def find_non_overlapping_position(
     w: int,
     h: int,
     *,
-    prefer_x: int = 40,
+    prefer_x: int | None = None,
     prefer_y: int = 120,
     step: int = 40,
 ) -> tuple[int, int]:
     """프레임 안에서 기존 박스와 겹치지 않는 (x, y)를 찾는다."""
     fw, fh = layout.frame_width, layout.frame_height
+    side = FRAME_SIDE_GUTTER
+    if prefer_x is None:
+        prefer_x = side
     w = max(80, int(w))
     h = max(60, int(h))
-    if w > fw or h > fh:
-        return 0, 0
+    if w > fw - 2 * side or h > fh:
+        return side, 0
 
     candidates: list[tuple[int, int]] = [(prefer_x, prefer_y)]
     for y in range(40, max(41, fh - h + 1), step):
-        for x in range(40, max(41, fw - w + 1), step):
+        for x in range(side, max(side + 1, fw - w - side + 1), step):
             if (x, y) not in candidates:
                 candidates.append((x, y))
 
@@ -625,7 +664,7 @@ def find_non_overlapping_position(
         trial.clamp_to_frame(fw, fh)
         if not box_overlaps_any(trial, layout.boxes, ignore_key=trial.box_key):
             return trial.x, trial.y
-    return max(0, fw - w - 40), max(0, fh - h - 40)
+    return max(side, fw - w - side), max(0, fh - h - 40)
 
 
 @dataclass
@@ -645,6 +684,10 @@ class WordMemorizeLayout:
     selection_highlight: SelectionHighlightType = DEFAULT_SELECTION_HIGHLIGHT
     # 재생 중인 단어와 y·h가 같은 줄 강조 (카드 효과와 별도)
     row_highlight: RowHighlightType = DEFAULT_ROW_HIGHLIGHT
+    # True: #1 카드는 이미지·테두리 없이 병음·한자·뜻만 크게
+    use_base_slot: bool = False
+    # True: 일반 word 카드 흰 배경·테두리 (False면 글자·이미지만)
+    use_card_background: bool = True
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -685,6 +728,8 @@ class WordMemorizeLayout:
             "title_lines": [s.to_dict() for s in self.title_lines],
             "selection_highlight": normalize_selection_highlight(self.selection_highlight),
             "row_highlight": normalize_row_highlight(self.row_highlight),
+            "use_base_slot": bool(self.use_base_slot),
+            "use_card_background": bool(self.use_card_background),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -748,6 +793,8 @@ class WordMemorizeLayout:
         ).strip()
         layout.selection_highlight = normalize_selection_highlight(raw_highlight)
         layout.row_highlight = normalize_row_highlight(data.get("row_highlight", "none"))
+        layout.use_base_slot = bool(data.get("use_base_slot", False))
+        layout.use_card_background = bool(data.get("use_card_background", True))
         if raw_highlight.lower() in ("row_band",) or raw_highlight == "가로줄":
             if layout.row_highlight == "none":
                 layout.row_highlight = "neon_glow"
@@ -797,6 +844,28 @@ class WordMemorizeLayout:
             str(data.get("bg_music_path", "") or "")
         )
         return layout
+
+
+def layout_use_base_slot(layout: WordMemorizeLayout) -> bool:
+    return bool(getattr(layout, "use_base_slot", False))
+
+
+def layout_use_card_background(layout: WordMemorizeLayout) -> bool:
+    return bool(getattr(layout, "use_card_background", True))
+
+
+def base_slot_order(layout: WordMemorizeLayout) -> int | None:
+    if not layout.boxes:
+        return None
+    return min(b.order for b in layout.boxes)
+
+
+def is_base_slot_box(box: WordMemorizeBox, layout: WordMemorizeLayout) -> bool:
+    """가장 앞선 순번(order 최소) 카드 — base 슬롯 레이아웃 대상."""
+    if not layout_use_base_slot(layout):
+        return False
+    first = base_slot_order(layout)
+    return first is not None and int(box.order) == int(first)
 
 
 def save_layout(path: Path, layout: WordMemorizeLayout) -> None:

@@ -1,9 +1,11 @@
 """단어 외우기 배치 — 격자 정렬·콘텐츠 여백."""
 from __future__ import annotations
 
-from extra.table_editor.services.word_memorize_layout import WordMemorizeLayout
+from extra.table_editor.services.word_memorize_layout import (
+    FRAME_SIDE_GUTTER,
+    WordMemorizeLayout,
+)
 
-GRID_SIDE_GUTTER = 24
 GRID_GAP = 16
 MARGIN_SHRINK_STEP_PX = 48
 MIN_USABLE_HEIGHT = 120
@@ -15,8 +17,8 @@ def content_rect_fhd(layout: WordMemorizeLayout) -> tuple[int, int, int, int]:
     y0 = int(round(layout.margin_top_ratio * fh))
     y1 = int(round((1.0 - layout.margin_bottom_ratio) * fh))
     y1 = max(y0 + MIN_USABLE_HEIGHT, min(y1, fh))
-    x0 = GRID_SIDE_GUTTER
-    x1 = max(x0 + 80, fw - GRID_SIDE_GUTTER)
+    x0 = FRAME_SIDE_GUTTER
+    x1 = max(x0 + 80, fw - FRAME_SIDE_GUTTER)
     return x0, y0, x1, y1
 
 

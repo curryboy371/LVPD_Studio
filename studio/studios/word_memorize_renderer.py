@@ -11,6 +11,22 @@ import pygame
 from core.paths import get_repo_root
 from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
+    BASE_SLOT_HANZI_COLOR,
+    BASE_SLOT_HANZI_PT_FHD,
+    BASE_SLOT_LINE_GAP_FHD,
+    BASE_SLOT_MEANING_BG_COLOR,
+    BASE_SLOT_MEANING_BG_RADIUS_FHD,
+    BASE_SLOT_MEANING_COLOR,
+    BASE_SLOT_MEANING_PAD_X_FHD,
+    BASE_SLOT_MEANING_PAD_Y_FHD,
+    BASE_SLOT_MEANING_PT_FHD,
+    BASE_SLOT_PINYIN_BG_COLOR,
+    BASE_SLOT_PINYIN_BG_PAD_X_FHD,
+    BASE_SLOT_PINYIN_BG_PAD_Y_FHD,
+    BASE_SLOT_PINYIN_BG_RADIUS_FHD,
+    BASE_SLOT_PINYIN_COLOR,
+    BASE_SLOT_PINYIN_PT_FHD,
+    CARD_CONTENT_REFERENCE_INNER_H,
     CARD_IMG_BOTTOM_PAD_FHD,
     RowHighlightType,
     WordMemorizeBox,
@@ -19,7 +35,9 @@ from extra.table_editor.services.word_memorize_layout import (
     boxes_in_row_group,
     default_card_item_gap,
     find_box_by_runtime_key,
+    is_base_slot_box,
     layout_card_content_vertical,
+    layout_use_card_background,
     layout_title_line_specs,
     normalize_row_highlight,
     normalize_selection_highlight,
@@ -29,6 +47,11 @@ from extra.table_editor.services.word_memorize_layout import (
     title_color_to_rgb,
     word_memorize_bg_image_path,
     word_memorize_bg_video_path,
+)
+from studio.studios.word_memorize_laser import (
+    draw_laser_center_to_card,
+    draw_laser_impact_border,
+    laser_impact_elapsed_sec,
 )
 from utils.pinyin_masking import (
     get_masked_pinyin_marks,
@@ -470,8 +493,12 @@ def _draw_active_highlight(
     *,
     highlight_type: str,
     anim_time_sec: float,
+    word_elapsed_sec: float = 0.0,
+    word_duration_sec: float = 0.0,
 ) -> None:
     kind = normalize_selection_highlight(highlight_type)
+    if kind == "laser":
+        return
     if kind == "red_border":
         _draw_red_active_border(surface, rect, anim_time_sec=anim_time_sec)
     else:
@@ -608,6 +635,7 @@ class WordMemorizeRenderer:
         self._font_pinyin: pygame.font.Font | None = None
         self._font_hanzi: pygame.font.Font | None = None
         self._font_en: pygame.font.Font | None = None
+        self._base_font_cache: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._font_title_by_key: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
         self._bg_video = LoopingBackgroundVideo()
@@ -666,6 +694,8 @@ class WordMemorizeRenderer:
         anim_time_sec: float | None = None,
         config: Any | None = None,
         use_video_background: bool = False,
+        active_word_elapsed_sec: float = 0.0,
+        active_word_duration_sec: float = 0.0,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -680,6 +710,13 @@ class WordMemorizeRenderer:
         self._draw_title(surface, layout, fw, fh)
 
         active_anchor = find_box_by_runtime_key(layout, active_box_key or "")
+        active_is_base = (
+            active_anchor is not None
+            and is_base_slot_box(active_anchor, layout)
+        )
+        card_highlight = normalize_selection_highlight(
+            getattr(layout, "selection_highlight", "gradient")
+        )
         row_highlight_type = normalize_row_highlight(
             getattr(layout, "row_highlight", "none")
         )
@@ -704,6 +741,8 @@ class WordMemorizeRenderer:
             else:
                 inactive.append((box, word, card_meaning))
 
+        word_timing = (active_word_elapsed_sec, active_word_duration_sec)
+
         for box, word, card_meaning in inactive:
             self._draw_box(
                 surface,
@@ -713,15 +752,39 @@ class WordMemorizeRenderer:
                 layout=layout,
                 active=False,
                 anim_time_sec=t_anim,
+                word_elapsed_sec=0.0,
+                word_duration_sec=0.0,
             )
 
-        if row_highlight_type != "none" and active_anchor is not None:
+        if (
+            row_highlight_type != "none"
+            and active_anchor is not None
+            and not active_is_base
+        ):
             draw_row_highlight(
                 surface,
                 row_highlight_type,
                 layout,
                 active_anchor,
                 anim_time_sec=t_anim,
+            )
+
+        if (
+            card_highlight == "laser"
+            and active_anchor is not None
+            and active_cards
+            and not active_is_base
+        ):
+            cx = int(active_anchor.x + active_anchor.w / 2)
+            cy = int(active_anchor.y + active_anchor.h / 2)
+            draw_laser_center_to_card(
+                surface,
+                frame_width=fw,
+                frame_height=fh,
+                card_center=(cx, cy),
+                elapsed_sec=word_timing[0],
+                duration_sec=word_timing[1],
+                loop_preview=word_timing[1] <= 0,
             )
 
         for box, word, card_meaning in active_cards:
@@ -733,6 +796,8 @@ class WordMemorizeRenderer:
                 layout=layout,
                 active=True,
                 anim_time_sec=t_anim,
+                word_elapsed_sec=word_timing[0],
+                word_duration_sec=word_timing[1],
             )
 
     def _draw_background(
@@ -799,6 +864,169 @@ class WordMemorizeRenderer:
             surface.blit(main, rect)
             y += h + gap
 
+    def _base_slot_font(
+        self, role: str, pt: int, *, weight: str = "regular"
+    ) -> pygame.font.Font | None:
+        key = (role, pt, weight)
+        if key in self._base_font_cache:
+            return self._base_font_cache[key]
+        from utils.fonts import load_font_korean, load_font_noto_sans_cjk_sc
+
+        self.ensure_fonts()
+        if role == "meaning":
+            font = load_font_korean(pt, BASE_SLOT_MEANING_COLOR)
+        elif role == "hanzi":
+            font = load_font_noto_sans_cjk_sc(
+                pt,
+                BASE_SLOT_HANZI_COLOR,
+                weight="bold" if weight == "bold" else "regular",
+            )
+        else:
+            font = load_font_noto_sans_cjk_sc(pt, BASE_SLOT_PINYIN_COLOR)
+        self._base_font_cache[key] = font
+        return font
+
+    def _base_slot_font_pts(self, inner_h: int) -> tuple[int, int, int]:
+        scale = max(1.12, min(1.5, inner_h / 120.0))
+        return (
+            max(36, int(BASE_SLOT_PINYIN_PT_FHD * scale)),
+            max(80, int(BASE_SLOT_HANZI_PT_FHD * scale)),
+            max(32, int(BASE_SLOT_MEANING_PT_FHD * scale)),
+        )
+
+    def _base_slot_scale(self, inner_h: int) -> float:
+        return max(1.12, min(1.5, inner_h / 120.0))
+
+    def _render_base_pinyin_badge(
+        self, font: pygame.font.Font, text: str, *, inner_h: int
+    ) -> pygame.Surface:
+        """병음 — 주황 배경 + 흰 글자."""
+        text_surf = font.render(text, True, BASE_SLOT_PINYIN_COLOR)
+        scale = self._base_slot_scale(inner_h)
+        pad_x = max(8, int(BASE_SLOT_PINYIN_BG_PAD_X_FHD * scale))
+        pad_y = max(2, int(BASE_SLOT_PINYIN_BG_PAD_Y_FHD * scale))
+        radius = max(4, int(BASE_SLOT_PINYIN_BG_RADIUS_FHD * scale))
+        badge = pygame.Surface(
+            (text_surf.get_width() + pad_x * 2, text_surf.get_height() + pad_y * 2),
+            pygame.SRCALPHA,
+        )
+        pygame.draw.rect(
+            badge,
+            (*BASE_SLOT_PINYIN_BG_COLOR, 255),
+            badge.get_rect(),
+            border_radius=radius,
+        )
+        badge.blit(text_surf, (pad_x, pad_y))
+        return badge
+
+    def _render_base_meaning_badge(
+        self, font: pygame.font.Font, text: str, *, inner_h: int
+    ) -> pygame.Surface:
+        """뜻 — 초록 배경 + 흰 글자 (병음 배지와 동일 방식)."""
+        text_surf = font.render(text, True, BASE_SLOT_MEANING_COLOR)
+        scale = self._base_slot_scale(inner_h)
+        pad_x = max(8, int(BASE_SLOT_MEANING_PAD_X_FHD * scale))
+        pad_y = max(2, int(BASE_SLOT_MEANING_PAD_Y_FHD * scale))
+        radius = max(4, int(BASE_SLOT_MEANING_BG_RADIUS_FHD * scale))
+        badge = pygame.Surface(
+            (text_surf.get_width() + pad_x * 2, text_surf.get_height() + pad_y * 2),
+            pygame.SRCALPHA,
+        )
+        pygame.draw.rect(
+            badge,
+            (*BASE_SLOT_MEANING_BG_COLOR, 255),
+            badge.get_rect(),
+            border_radius=radius,
+        )
+        badge.blit(text_surf, (pad_x, pad_y))
+        return badge
+
+    def _paint_base_slot_box(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        word: Word,
+        card_meaning: str,
+    ) -> None:
+        """#1 슬롯 — 배경·테두리·이미지 없이 병음·한자·뜻만 크게."""
+        pad = 8
+        inner = rect.inflate(-pad * 2, -pad * 2)
+        cx = inner.centerx
+        pt_p, pt_h, pt_m = self._base_slot_font_pts(inner.height)
+        font_p = self._base_slot_font("pinyin", pt_p)
+        font_h = self._base_slot_font("hanzi", pt_h, weight="bold")
+        font_m = self._base_slot_font("meaning", pt_m)
+
+        line_heights: list[int] = []
+        line_surfs: list[pygame.Surface] = []
+
+        pinyin = display_pinyin(word)
+        if pinyin and font_p is not None:
+            surf = self._render_base_pinyin_badge(
+                font_p, pinyin[:48], inner_h=inner.height
+            )
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
+
+        hanzi = (word.word or "").strip()
+        if hanzi and font_h is not None:
+            surf = font_h.render(hanzi, True, BASE_SLOT_HANZI_COLOR)
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
+
+        meaning = (card_meaning or "").strip()
+        if meaning and font_m is not None:
+            surf = self._render_base_meaning_badge(
+                font_m, meaning[:40], inner_h=inner.height
+            )
+            line_heights.append(surf.get_height())
+            line_surfs.append(surf)
+
+        gap = max(
+            0.0,
+            BASE_SLOT_LINE_GAP_FHD * inner.height / CARD_CONTENT_REFERENCE_INNER_H,
+        )
+        _start, line_ys, _image_y = layout_card_content_vertical(
+            inner.height,
+            line_heights,
+            0,
+            default_gap=gap,
+            bottom_pad=0,
+        )
+        for surf, y_off in zip(line_surfs, line_ys):
+            self._blit_centered(surface, surf, cx, inner.top + y_off)
+
+    def _draw_base_slot_active_border(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        *,
+        highlight_type: str,
+        anim_time_sec: float,
+        word_elapsed_sec: float,
+        word_duration_sec: float,
+    ) -> None:
+        """Base 슬롯 재생 중 — 레이저 빔 없이 테두리만 (레이저 모드는 네온 충격 테두리)."""
+        kind = normalize_selection_highlight(highlight_type)
+        if kind == "laser":
+            loop_preview = word_duration_sec <= 0
+            impact_t = laser_impact_elapsed_sec(
+                word_elapsed_sec, loop_preview=loop_preview
+            )
+            draw_laser_impact_border(
+                surface,
+                rect,
+                impact_elapsed_sec=impact_t,
+                border_radius=ACTIVE_BORDER_RADIUS,
+            )
+            return
+        _draw_active_highlight(
+            surface,
+            rect,
+            highlight_type=highlight_type,
+            anim_time_sec=anim_time_sec,
+        )
+
     def _draw_box(
         self,
         surface: pygame.Surface,
@@ -809,11 +1037,27 @@ class WordMemorizeRenderer:
         layout: WordMemorizeLayout,
         active: bool,
         anim_time_sec: float,
+        word_elapsed_sec: float = 0.0,
+        word_duration_sec: float = 0.0,
     ) -> None:
         highlight_type = normalize_selection_highlight(
             getattr(layout, "selection_highlight", "gradient")
         )
+        is_laser = highlight_type == "laser"
         base = pygame.Rect(box.x, box.y, box.w, box.h)
+        if is_base_slot_box(box, layout):
+            self._paint_base_slot_box(surface, base, word, card_meaning)
+            if active:
+                self._draw_base_slot_active_border(
+                    surface,
+                    base,
+                    highlight_type=highlight_type,
+                    anim_time_sec=anim_time_sec,
+                    word_elapsed_sec=word_elapsed_sec,
+                    word_duration_sec=word_duration_sec,
+                )
+            return
+
         if not active:
             self._paint_box(
                 surface,
@@ -823,6 +1067,32 @@ class WordMemorizeRenderer:
                 highlight_type=highlight_type,
                 active=False,
                 anim_time_sec=anim_time_sec,
+                use_card_background=layout_use_card_background(layout),
+            )
+            return
+
+        use_card_bg = layout_use_card_background(layout)
+        if is_laser:
+            self._paint_box(
+                surface,
+                base,
+                word,
+                card_meaning,
+                highlight_type=highlight_type,
+                active=True,
+                draw_border=False,
+                anim_time_sec=anim_time_sec,
+                use_card_background=use_card_bg,
+            )
+            loop_preview = word_duration_sec <= 0
+            impact_t = laser_impact_elapsed_sec(
+                word_elapsed_sec, loop_preview=loop_preview
+            )
+            draw_laser_impact_border(
+                surface,
+                base,
+                impact_elapsed_sec=impact_t,
+                border_radius=ACTIVE_BORDER_RADIUS,
             )
             return
 
@@ -838,6 +1108,7 @@ class WordMemorizeRenderer:
             active=True,
             draw_border=False,
             anim_time_sec=anim_time_sec,
+            use_card_background=use_card_bg,
         )
         sw = max(1, int(base.width * ACTIVE_CARD_SCALE))
         sh = max(1, int(base.height * ACTIVE_CARD_SCALE))
@@ -849,6 +1120,8 @@ class WordMemorizeRenderer:
             dest,
             highlight_type=highlight_type,
             anim_time_sec=anim_time_sec,
+            word_elapsed_sec=word_elapsed_sec,
+            word_duration_sec=word_duration_sec,
         )
 
     def _paint_box(
@@ -862,23 +1135,25 @@ class WordMemorizeRenderer:
         active: bool,
         anim_time_sec: float,
         draw_border: bool = True,
+        use_card_background: bool = True,
     ) -> None:
-        pygame.draw.rect(surface, BOX_FILL, rect, border_radius=ACTIVE_BORDER_RADIUS)
-        if active and draw_border:
-            _draw_active_highlight(
-                surface,
-                rect,
-                highlight_type=highlight_type,
-                anim_time_sec=anim_time_sec,
-            )
-        elif not active:
-            pygame.draw.rect(
-                surface,
-                BOX_OUTLINE,
-                rect,
-                width=1,
-                border_radius=ACTIVE_BORDER_RADIUS,
-            )
+        if use_card_background:
+            pygame.draw.rect(surface, BOX_FILL, rect, border_radius=ACTIVE_BORDER_RADIUS)
+            if active and draw_border and highlight_type != "laser":
+                _draw_active_highlight(
+                    surface,
+                    rect,
+                    highlight_type=highlight_type,
+                    anim_time_sec=anim_time_sec,
+                )
+            elif not active:
+                pygame.draw.rect(
+                    surface,
+                    BOX_OUTLINE,
+                    rect,
+                    width=1,
+                    border_radius=ACTIVE_BORDER_RADIUS,
+                )
 
         pad = 10
         inner = rect.inflate(-pad * 2, -pad * 2)

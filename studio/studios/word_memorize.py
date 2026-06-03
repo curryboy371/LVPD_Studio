@@ -65,6 +65,8 @@ class WordMemorizeStudio(IStudio):
         self._active_key: str | None = None
         self._queued_zh_path: Path | None = None
         self._queued_zh_len = 0.0
+        self._active_word_elapsed_sec = 0.0
+        self._active_word_duration_sec = 0.0
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -174,6 +176,8 @@ class WordMemorizeStudio(IStudio):
         self._active_key = None
         self._queued_zh_path = None
         self._queued_zh_len = 0.0
+        self._active_word_elapsed_sec = 0.0
+        self._active_word_duration_sec = 0.0
         self._done = False
 
     def get_title(self) -> str:
@@ -206,6 +210,8 @@ class WordMemorizeStudio(IStudio):
             return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
         self._renderer.tick_background_video(dt)
+        if self._phase == "word":
+            self._active_word_elapsed_sec += dt
         self._timer += dt
         if self._timer < self._hold_sec:
             return
@@ -236,6 +242,8 @@ class WordMemorizeStudio(IStudio):
         self._seq_index = index
         self._phase = "word"
         self._active_key = self._box_active_key(box)
+        self._active_word_elapsed_sec = 0.0
+        self._active_word_duration_sec = self._word_play_duration_sec(box)
         self._queued_zh_path: Path | None = None
         self._queued_zh_len = 0.0
         en_len, zh_path, zh_len = self._word_tts_paths(box)
@@ -322,6 +330,40 @@ class WordMemorizeStudio(IStudio):
         except Exception:
             return 0.0
 
+    def _word_tts_durations(
+        self, box: WordMemorizeBox
+    ) -> tuple[float, Path | None, float]:
+        """(첫 TTS 길이, 한자 경로, 한자 길이) — 재생 없이 길이만."""
+        from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
+        from audio.word_memorize_en import resolve_word_memorize_en_audio_path
+        from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
+
+        try:
+            wid = int(box.word_id)
+        except (TypeError, ValueError):
+            return 0.0, None, 0.0
+
+        if self._meaning_lang == "ko":
+            meaning_path = resolve_vocab_meaning_ko_audio_path(wid)
+        else:
+            meaning_path = resolve_word_memorize_en_audio_path(wid)
+        zh_path = resolve_word_memorize_zh_audio_path(wid)
+        zh_len = self._audio_duration(zh_path)
+        meaning_len = self._audio_duration(meaning_path)
+        return meaning_len, zh_path, zh_len
+
+    def _word_play_duration_sec(self, box: WordMemorizeBox) -> float:
+        """단어 1개 재생 구간(뜻/영어 + 한자) 총 길이 — 레이저 스프라이트 동기화용."""
+        en_len, _, zh_len = self._word_tts_durations(box)
+        total = 0.0
+        if en_len > 0:
+            total += max(0.0, en_len - TTS_ZH_LEAD_BEFORE_EN_END_SEC)
+            if zh_len > 0:
+                total += max(0.0, zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC)
+        elif zh_len > 0:
+            total += max(0.0, zh_len - TTS_NEXT_WORD_LEAD_BEFORE_ZH_END_SEC)
+        return max(total, 0.15)
+
     def _word_tts_paths(
         self, box: WordMemorizeBox
     ) -> tuple[float, Path | None, float]:
@@ -400,15 +442,22 @@ class WordMemorizeStudio(IStudio):
                 words_by_id[wid] = w
 
         highlight = self._phase == "word" and self._active_key is not None
+        active_box_key: str | None = self._active_key if highlight else None
         self._renderer.draw(
             screen,
             self._layout,
             words_by_id,
             self._card_meaning_by_id,
-            active_box_key=self._active_key if highlight else None,
+            active_box_key=active_box_key,
             dim_inactive=False,
             config=config,
             use_video_background=True,
+            active_word_elapsed_sec=(
+                self._active_word_elapsed_sec if highlight else 0.0
+            ),
+            active_word_duration_sec=(
+                self._active_word_duration_sec if highlight else 0.0
+            ),
         )
 
     def get_recording_prefix(self) -> Optional[str]:

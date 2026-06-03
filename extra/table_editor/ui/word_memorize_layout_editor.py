@@ -15,6 +15,7 @@ from extra.table_editor.services.word_memorize_grid import (
 )
 from extra.table_editor.services.word_memorize_layout import (
     CARD_IMG_BOTTOM_PAD_FHD,
+    FRAME_SIDE_GUTTER,
     DEFAULT_LAYOUTS_DIR,
     WORD_MEMORIZE_BG_DIR,
     WordMemorizeBox,
@@ -25,6 +26,18 @@ from extra.table_editor.services.word_memorize_layout import (
     box_overlaps_any,
     clamp_title_position,
     box_runtime_key,
+    BASE_SLOT_HANZI_COLOR,
+    BASE_SLOT_LINE_GAP_FHD,
+    BASE_SLOT_MEANING_BG_COLOR,
+    BASE_SLOT_MEANING_COLOR,
+    BASE_SLOT_MEANING_PAD_X_FHD,
+    BASE_SLOT_MEANING_PAD_Y_FHD,
+    BASE_SLOT_PINYIN_BG_COLOR,
+    BASE_SLOT_PINYIN_BG_PAD_X_FHD,
+    BASE_SLOT_PINYIN_BG_PAD_Y_FHD,
+    BASE_SLOT_PINYIN_COLOR,
+    CARD_CONTENT_REFERENCE_INNER_H,
+    is_base_slot_box,
     layout_card_content_vertical,
     layout_title_line_specs,
     resolve_title_position,
@@ -99,10 +112,24 @@ HANDLE_DRAW = 8
 BOX_PINYIN_FONT = ("Noto Sans SC", 13)
 BOX_HANZI_FONT = ("Noto Sans SC", 18, "bold")
 BOX_EN_FONT = ("Segoe UI", 10)
+BOX_BASE_PINYIN_FONT = ("Noto Sans SC", 18)
+BOX_BASE_HANZI_FONT = ("Noto Sans SC", 44, "bold")
+BOX_BASE_EN_FONT = ("Segoe UI", 15)
 BOX_BADGE_FONT = ("Segoe UI", 11, "bold")
 BOX_PINYIN_COLOR = "#c62828"
 BOX_HANZI_COLOR = "#212121"
 BOX_EN_COLOR = "#4caf50"
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+BOX_BASE_PINYIN_COLOR = _rgb_to_hex(BASE_SLOT_PINYIN_COLOR)
+BOX_BASE_PINYIN_BG_COLOR = _rgb_to_hex(BASE_SLOT_PINYIN_BG_COLOR)
+BOX_BASE_HANZI_COLOR = _rgb_to_hex(BASE_SLOT_HANZI_COLOR)
+BOX_BASE_MEANING_COLOR = _rgb_to_hex(BASE_SLOT_MEANING_COLOR)
+BOX_BASE_MEANING_BG_COLOR = _rgb_to_hex(BASE_SLOT_MEANING_BG_COLOR)
 TITLE_MARKER_W_FHD = 360
 TITLE_MARKER_H_FHD = 64
 TITLE_MARKER_FILL = "#eceff1"
@@ -394,6 +421,24 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             foreground="#666",
             wraplength=280,
         ).pack(anchor="w", padx=6, pady=(4, 6))
+        self._use_base_slot_var = tk.BooleanVar(
+            value=bool(getattr(self._layout, "use_base_slot", False))
+        )
+        ttk.Checkbutton(
+            highlight_frame,
+            text="Base 슬롯 사용 (#1 — 병음·한자·뜻, 크게)",
+            variable=self._use_base_slot_var,
+            command=self._on_use_base_slot_changed,
+        ).pack(anchor="w", padx=6, pady=(0, 4))
+        self._use_card_background_var = tk.BooleanVar(
+            value=bool(getattr(self._layout, "use_card_background", True))
+        )
+        ttk.Checkbutton(
+            highlight_frame,
+            text="단어 카드 배경 (흰 박스)",
+            variable=self._use_card_background_var,
+            command=self._on_use_card_background_changed,
+        ).pack(anchor="w", padx=6, pady=(0, 6))
 
         grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
         grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
@@ -865,7 +910,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
     def _default_box_rect(self) -> tuple[int, int, int, int]:
         n = len(self._layout.boxes)
-        x = 40 + (n % 3) * 120
+        x = FRAME_SIDE_GUTTER + (n % 3) * 120
         y = 120 + (n // 3) * 140
         return x, y, DEFAULT_BOX_W, DEFAULT_BOX_H
 
@@ -1198,6 +1243,20 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._mark_dirty()
             self._redraw_canvas()
 
+    def _on_use_base_slot_changed(self) -> None:
+        val = bool(self._use_base_slot_var.get())
+        if val != bool(getattr(self._layout, "use_base_slot", False)):
+            self._layout.use_base_slot = val
+            self._mark_dirty()
+            self._redraw_canvas()
+
+    def _on_use_card_background_changed(self) -> None:
+        val = bool(self._use_card_background_var.get())
+        if val != bool(getattr(self._layout, "use_card_background", True)):
+            self._layout.use_card_background = val
+            self._mark_dirty()
+            self._redraw_canvas()
+
     def _sync_selection_highlight_combo(self) -> None:
         self._selection_highlight_var.set(
             selection_highlight_label_for_value(
@@ -1206,6 +1265,10 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._row_highlight_var.set(
             row_highlight_label_for_value(getattr(self._layout, "row_highlight", "none"))
+        )
+        self._use_base_slot_var.set(bool(getattr(self._layout, "use_base_slot", False)))
+        self._use_card_background_var.set(
+            bool(getattr(self._layout, "use_card_background", True))
         )
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
@@ -1908,6 +1971,121 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         if photo is not None and img_h > 0 and image_y is not None:
             c.create_image(cx, base_y + image_y, anchor="n", image=photo, tags=tags)
 
+    def _draw_box_content_base(
+        self,
+        c: tk.Canvas,
+        box: WordMemorizeBox,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        details: dict[str, str],
+    ) -> None:
+        """Base 슬롯(#1): 병음·한자·뜻만 크게 (이미지 없음)."""
+        cx = (x1 + x2) // 2
+        inner_w = max(24, x2 - x1 - BOX_CONTENT_PAD * 2)
+        pad_top = BOX_CONTENT_PAD + 6
+        inner_h = max(1, (y2 - y1) - pad_top - BOX_CONTENT_PAD)
+        base_y = y1 + pad_top
+        tags = ("box", box.box_key)
+
+        line_heights: list[int] = []
+        line_specs: list[tuple[str, tuple[str, ...], str, str]] = []
+        ref_inner = max(1, int(round(CARD_CONTENT_REFERENCE_INNER_H * SCALE)))
+        scale = max(1.12, min(1.5, inner_h / ref_inner))
+        badge_pad_x = max(4, int(BASE_SLOT_PINYIN_BG_PAD_X_FHD * SCALE * scale))
+        badge_pad_y = max(2, int(BASE_SLOT_PINYIN_BG_PAD_Y_FHD * SCALE * scale))
+        meaning_pad_x = max(4, int(BASE_SLOT_MEANING_PAD_X_FHD * SCALE * scale))
+        meaning_pad_y = max(2, int(BASE_SLOT_MEANING_PAD_Y_FHD * SCALE * scale))
+
+        pinyin = self._display_pinyin(details)
+        if pinyin:
+            text_h = self._measure_canvas_text_height(
+                c, pinyin[:48], BOX_BASE_PINYIN_FONT, width=inner_w
+            )
+            line_heights.append(text_h + badge_pad_y * 2)
+            line_specs.append(
+                (pinyin[:48], BOX_BASE_PINYIN_FONT, BOX_BASE_PINYIN_COLOR, "pinyin")
+            )
+
+        hanzi = (details.get("word") or "?").strip() or "?"
+        line_heights.append(
+            self._measure_canvas_text_height(
+                c, hanzi, BOX_BASE_HANZI_FONT, width=inner_w
+            )
+        )
+        line_specs.append((hanzi, BOX_BASE_HANZI_FONT, BOX_BASE_HANZI_COLOR, ""))
+
+        meaning = (details.get("meaning") or details.get("en_meaning") or "").strip()
+        if meaning:
+            text_h = self._measure_canvas_text_height(
+                c, meaning[:40], BOX_BASE_EN_FONT, width=inner_w
+            )
+            line_heights.append(text_h + meaning_pad_y * 2)
+            line_specs.append(
+                (meaning[:40], BOX_BASE_EN_FONT, BOX_BASE_MEANING_COLOR, "meaning")
+            )
+
+        gap = max(
+            0.0,
+            BASE_SLOT_LINE_GAP_FHD * SCALE * inner_h / ref_inner,
+        )
+        _start, line_ys, _image_y = layout_card_content_vertical(
+            inner_h,
+            line_heights,
+            0,
+            default_gap=gap,
+            bottom_pad=0,
+        )
+        tk_font_cache: dict[tuple[str, ...], tkfont.Font] = {}
+        for (text, font_spec, fill, badge), y_off in zip(line_specs, line_ys):
+            y = base_y + y_off
+            if badge in ("pinyin", "meaning"):
+                pad_x = badge_pad_x if badge == "pinyin" else meaning_pad_x
+                pad_y = badge_pad_y if badge == "pinyin" else meaning_pad_y
+                f = tk_font_cache.setdefault(
+                    font_spec, tkfont.Font(family=font_spec[0], size=font_spec[1])
+                )
+                text_w = f.measure(text)
+                text_h = f.metrics("linespace")
+                bx1 = cx - (text_w // 2 + pad_x)
+                bx2 = cx + (text_w // 2 + pad_x)
+                by2 = y + text_h + pad_y * 2
+                bg_fill = (
+                    BOX_BASE_PINYIN_BG_COLOR
+                    if badge == "pinyin"
+                    else BOX_BASE_MEANING_BG_COLOR
+                )
+                c.create_rectangle(
+                    bx1,
+                    y,
+                    bx2,
+                    by2,
+                    fill=bg_fill,
+                    outline="",
+                    tags=tags,
+                )
+                c.create_text(
+                    cx,
+                    y + pad_y,
+                    text=text,
+                    anchor="n",
+                    fill=fill,
+                    font=font_spec,
+                    tags=tags,
+                )
+            else:
+                c.create_text(
+                    cx,
+                    y,
+                    text=text,
+                    anchor="n",
+                    fill=fill,
+                    font=font_spec,
+                    width=inner_w,
+                    tags=tags,
+                )
+
     def _row_preview_y_span(self, anchor: WordMemorizeBox) -> tuple[int, int]:
         _, y1, _, y2 = self._screen_rect(anchor)
         return y1, y2
@@ -2028,24 +2206,44 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         for box in self._layout.sorted_boxes():
             is_selected = box_runtime_key(box) == (self._selected_key or "")
             x1, y1, x2, y2 = self._screen_rect(box)
-            if is_selected and card_highlight == "red_border":
-                outline = "#f44336"
-                width = 3
-            elif is_selected:
-                outline = "#4fc3f7"
-                width = 3
-            else:
-                outline = "#90a4ae"
-                width = 1
-            c.create_rectangle(
-                x1, y1, x2, y2,
-                outline=outline,
-                width=width,
-                fill="#ffffff",
-                tags=("box", box.box_key),
-            )
             details = lookup_word_details(box.word_id)
-            self._draw_box_content(c, box, x1, y1, x2, y2, details)
+            if is_base_slot_box(box, self._layout):
+                guide_outline = "#00acc1" if is_selected else "#80deea"
+                c.create_rectangle(
+                    x1, y1, x2, y2,
+                    outline=guide_outline,
+                    width=2 if is_selected else 1,
+                    dash=(5, 4),
+                    fill="",
+                    tags=("box", box.box_key),
+                )
+                self._draw_box_content_base(c, box, x1, y1, x2, y2, details)
+            else:
+                if is_selected and card_highlight == "red_border":
+                    outline = "#f44336"
+                    width = 3
+                elif is_selected and card_highlight == "laser":
+                    outline = "#00e5ff"
+                    width = 3
+                elif is_selected:
+                    outline = "#4fc3f7"
+                    width = 3
+                else:
+                    outline = "#90a4ae"
+                    width = 1
+                card_fill = (
+                    "#ffffff"
+                    if bool(getattr(self._layout, "use_card_background", True))
+                    else ""
+                )
+                c.create_rectangle(
+                    x1, y1, x2, y2,
+                    outline=outline,
+                    width=width,
+                    fill=card_fill,
+                    tags=("box", box.box_key),
+                )
+                self._draw_box_content(c, box, x1, y1, x2, y2, details)
             badge = f"#{box.order}"
             c.create_text(
                 x1 + 6, y1 + 6,
