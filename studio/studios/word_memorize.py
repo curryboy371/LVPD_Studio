@@ -32,10 +32,12 @@ logger = logging.getLogger(__name__)
 INTRO_HOLD_SEC = 0.8
 END_HOLD_SEC = 0.6
 TTS_MISSING_HOLD_SEC = 1.2
-# 첫 TTS 종료 TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC 초 전에 둘째 TTS 시작
+# 첫 TTS 종료 N초 전에 둘째 TTS 시작 (겹침)
 TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC = 0.8
-# 둘째 TTS 종료 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC 초 전에 다음 단어 시작
+# ko/en: 둘째=한자 — 꼬리 N초 전에 다음 단어(뜻 TTS) 시작
 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
+# zh: 둘째=한국어 뜻 — 한자보다 길어서 꼬리를 더 잘라 다음 한자로 전환
+TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.8
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 
@@ -52,11 +54,17 @@ def _normalize_meaning_lang(raw: str) -> MeaningLang:
 
 
 class WordMemorizeStudio(IStudio):
-    def __init__(self, *, layout_path: str, meaning_lang: MeaningLang = "ko") -> None:
+    def __init__(
+        self,
+        *,
+        layout_path: str,
+        meaning_lang: MeaningLang = "ko",
+        show_images: bool = True,
+    ) -> None:
         self._layout_path = Path(layout_path)
         self._layout = load_layout(self._layout_path)
         self._meaning_lang = _normalize_meaning_lang(str(meaning_lang))
-        self._renderer = WordMemorizeRenderer()
+        self._renderer = WordMemorizeRenderer(show_images=show_images)
         self._renderer.set_background(
             self._layout.background_value, self._meaning_lang
         )
@@ -256,16 +264,15 @@ class WordMemorizeStudio(IStudio):
         self._queued_second_path: Path | None = None
         self._queued_second_len = 0.0
         first_len, second_path, second_len = self._word_tts_paths(box)
+        second_lead, next_lead = self._word_tts_leads()
         self._word_substep = "first"
         if first_len > 0:
-            self._hold_sec = max(0.0, first_len - TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC)
+            self._hold_sec = max(0.0, first_len - second_lead)
             self._queued_second_path = second_path
             self._queued_second_len = second_len
         elif second_len > 0:
             self._word_substep = "second"
-            self._hold_sec = max(
-                0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC
-            )
+            self._hold_sec = max(0.0, second_len - next_lead)
             self._queued_second_path = None
             self._queued_second_len = 0.0
         else:
@@ -276,12 +283,10 @@ class WordMemorizeStudio(IStudio):
     def _advance_word_step(self) -> None:
         if self._word_substep == "first":
             self._word_substep = "second"
+            _, next_lead = self._word_tts_leads()
             if self._queued_second_path is not None and self._queued_second_len > 0:
                 self._play_audio(self._queued_second_path)
-                self._hold_sec = max(
-                    0.0,
-                    self._queued_second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC,
-                )
+                self._hold_sec = max(0.0, self._queued_second_len - next_lead)
             else:
                 self._hold_sec = 0.0
             self._queued_second_path = None
@@ -345,6 +350,15 @@ class WordMemorizeStudio(IStudio):
             return TTS_EN_PLAYBACK_VOLUME
         return 1.0
 
+    def _word_tts_leads(self) -> tuple[float, float]:
+        """(첫→둘째 겹침 초, 둘째→다음 단어 앞당김 초)."""
+        second_lead = TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC
+        if self._meaning_lang == "zh":
+            next_lead = TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC
+        else:
+            next_lead = TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC
+        return second_lead, next_lead
+
     def _word_tts_pair(
         self, box: WordMemorizeBox
     ) -> tuple[Path | None, Path | None, str, str, str, str]:
@@ -400,15 +414,14 @@ class WordMemorizeStudio(IStudio):
     def _word_play_duration_sec(self, box: WordMemorizeBox) -> float:
         """단어 1개 재생 구간(첫·둘째 TTS) 총 길이 — 레이저 스프라이트 동기화용."""
         first_len, _, second_len = self._word_tts_durations(box)
+        second_lead, next_lead = self._word_tts_leads()
         total = 0.0
         if first_len > 0:
-            total += max(0.0, first_len - TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC)
+            total += max(0.0, first_len - second_lead)
             if second_len > 0:
-                total += max(
-                    0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC
-                )
+                total += max(0.0, second_len - next_lead)
         elif second_len > 0:
-            total += max(0.0, second_len - TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC)
+            total += max(0.0, second_len - next_lead)
         return max(total, 0.15)
 
     def _word_tts_paths(

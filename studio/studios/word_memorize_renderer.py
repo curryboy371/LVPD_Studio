@@ -45,6 +45,7 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_title_font_pt,
     resolve_title_position,
     title_color_to_rgb,
+    _is_zh_meaning_lang,
     resolve_word_memorize_bg_image_path,
     resolve_word_memorize_bg_video_path,
 )
@@ -99,6 +100,8 @@ IMG_LIFT = 12
 PINYIN_FONT_PT = 32
 HANZI_FONT_PT = 72
 EN_FONT_PT = 30
+ZH_HANZI_SCALE = 0.8
+ZH_MEANING_SCALE = 1.2
 TITLE_LINE_GAP = 10
 TITLE_FONT_PT = 68
 TITLE_COLOR = (255, 255, 255)
@@ -629,8 +632,11 @@ class LoopingBackgroundVideo:
 
 
 class WordMemorizeRenderer:
-    def __init__(self, repo_root: Path | None = None) -> None:
+    def __init__(
+        self, repo_root: Path | None = None, *, show_images: bool = True
+    ) -> None:
         self._repo = (repo_root or get_repo_root()).resolve()
+        self._show_images = bool(show_images)
         self._fonts_ready = False
         self._font_pinyin: pygame.font.Font | None = None
         self._font_hanzi: pygame.font.Font | None = None
@@ -644,11 +650,32 @@ class WordMemorizeRenderer:
 
     def set_background(self, layout_stem: str, meaning_lang: str = "ko") -> None:
         self._bg_layout_stem = (layout_stem or "").strip()
-        self._bg_meaning_lang = (meaning_lang or "ko").strip().lower()
+        new_lang = (meaning_lang or "ko").strip().lower()
+        if new_lang != self._bg_meaning_lang:
+            self._invalidate_fonts()
+        self._bg_meaning_lang = new_lang
         video = resolve_word_memorize_bg_video_path(
             self._bg_layout_stem, meaning_lang=self._bg_meaning_lang
         )
         self._bg_video.set_path(video if video.is_file() else None)
+
+    def _invalidate_fonts(self) -> None:
+        self._fonts_ready = False
+        self._font_pinyin = None
+        self._font_hanzi = None
+        self._font_en = None
+        self._base_font_cache.clear()
+
+    def _zh_card_font_pts(self) -> tuple[int, int, str]:
+        """중국어 모드: 한자 20% 축소, 한국어 뜻 20% 확대·굵게."""
+        hanzi_pt = HANZI_FONT_PT
+        meaning_pt = EN_FONT_PT
+        meaning_weight = "regular"
+        if _is_zh_meaning_lang(self._bg_meaning_lang):
+            hanzi_pt = max(1, int(round(HANZI_FONT_PT * ZH_HANZI_SCALE)))
+            meaning_pt = max(1, int(round(EN_FONT_PT * ZH_MEANING_SCALE)))
+            meaning_weight = "bold"
+        return hanzi_pt, meaning_pt, meaning_weight
 
     def tick_background_video(self, dt_sec: float) -> None:
         self._bg_video.tick(dt_sec)
@@ -658,12 +685,15 @@ class WordMemorizeRenderer:
             return
         from utils.fonts import load_font_korean, load_font_noto_sans_cjk_sc
 
+        hanzi_pt, meaning_pt, meaning_weight = self._zh_card_font_pts()
         # 병음·한자: Noto Sans CJK SC (간체 고딕, 성조·한자 균형)
         self._font_pinyin = load_font_noto_sans_cjk_sc(PINYIN_FONT_PT, PINYIN_COLOR)
         self._font_hanzi = load_font_noto_sans_cjk_sc(
-            HANZI_FONT_PT, HANZI_COLOR, weight="bold"
+            hanzi_pt, HANZI_COLOR, weight="bold"
         )
-        self._font_en = load_font_korean(EN_FONT_PT, EN_COLOR)
+        self._font_en = load_font_korean(
+            meaning_pt, EN_COLOR, weight=meaning_weight
+        )
         self._fonts_ready = True
 
     def _title_font(self, layout: WordMemorizeLayout, *, font_key: str, font_pt: int) -> pygame.font.Font | None:
@@ -886,7 +916,12 @@ class WordMemorizeRenderer:
 
         self.ensure_fonts()
         if role == "meaning":
-            font = load_font_korean(pt, BASE_SLOT_MEANING_COLOR)
+            meaning_weight = (
+                "bold" if _is_zh_meaning_lang(self._bg_meaning_lang) else "regular"
+            )
+            font = load_font_korean(
+                pt, BASE_SLOT_MEANING_COLOR, weight=meaning_weight
+            )
         elif role == "hanzi":
             font = load_font_noto_sans_cjk_sc(
                 pt,
@@ -900,11 +935,13 @@ class WordMemorizeRenderer:
 
     def _base_slot_font_pts(self, inner_h: int) -> tuple[int, int, int]:
         scale = max(1.12, min(1.5, inner_h / 120.0))
-        return (
-            max(36, int(BASE_SLOT_PINYIN_PT_FHD * scale)),
-            max(80, int(BASE_SLOT_HANZI_PT_FHD * scale)),
-            max(32, int(BASE_SLOT_MEANING_PT_FHD * scale)),
-        )
+        pt_p = max(36, int(BASE_SLOT_PINYIN_PT_FHD * scale))
+        pt_h = max(80, int(BASE_SLOT_HANZI_PT_FHD * scale))
+        pt_m = max(32, int(BASE_SLOT_MEANING_PT_FHD * scale))
+        if _is_zh_meaning_lang(self._bg_meaning_lang):
+            pt_h = max(1, int(round(pt_h * ZH_HANZI_SCALE)))
+            pt_m = max(1, int(round(pt_m * ZH_MEANING_SCALE)))
+        return pt_p, pt_h, pt_m
 
     def _base_slot_scale(self, inner_h: int) -> float:
         return max(1.12, min(1.5, inner_h / 120.0))
@@ -1171,7 +1208,7 @@ class WordMemorizeRenderer:
         inner = rect.inflate(-pad * 2, -pad * 2)
         cx = inner.centerx
 
-        img_path = _resolve_image_path(self._repo, word)
+        img_path = _resolve_image_path(self._repo, word) if self._show_images else None
         img_surf: pygame.Surface | None = None
         img_h = 0
         if img_path is not None:

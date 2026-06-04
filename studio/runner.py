@@ -671,6 +671,15 @@ def _parse_shorts_clip_types_arg(raw: str) -> Optional[list[str]]:
     return parts or None
 
 
+def _parse_word_memorize_show_images(raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw or "on").strip().lower()
+    if s in ("0", "false", "no", "off", "none"):
+        return False
+    return True
+
+
 def _create_studio(
     name: str,
     csv_path: str | None,
@@ -725,8 +734,13 @@ def _create_studio(
         meaning_lang = str(kw.pop("meaning_lang", "ko") or "ko").strip().lower()
         if meaning_lang not in ("ko", "en", "zh"):
             meaning_lang = "ko"
+        show_images = _parse_word_memorize_show_images(
+            kw.pop("show_images", kw.pop("word_images", "on"))
+        )
         return WordMemorizeStudio(
-            layout_path=layout_path, meaning_lang=meaning_lang  # type: ignore[arg-type]
+            layout_path=layout_path,
+            meaning_lang=meaning_lang,  # type: ignore[arg-type]
+            show_images=show_images,
         )
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
@@ -764,6 +778,13 @@ def main() -> None:
         default="ko",
         choices=("ko", "en", "zh"),
         help="word_memorize: 카드 뜻·TTS 순서 (ko=한→중, en=영→중, zh=중→한·BG/ch MP4). 기본 ko.",
+    )
+    parser.add_argument(
+        "--word-images",
+        type=str,
+        default="on",
+        choices=("on", "off"),
+        help="word_memorize: 카드 단어 그림 표시 (on/off). off면 img_path 이미지 미출력. 기본 on.",
     )
     parser.add_argument(
         "--csv",
@@ -907,6 +928,9 @@ def main() -> None:
             sys.exit(1)
         studio_kw["layout_path"] = str(layout_file.resolve())
         studio_kw["meaning_lang"] = str(getattr(args, "meaning_lang", "ko") or "ko")
+        studio_kw["show_images"] = _parse_word_memorize_show_images(
+            getattr(args, "word_images", "on")
+        )
 
     if args.studio == "shorts":
         from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY, normalize_clip_type
