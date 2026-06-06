@@ -39,6 +39,7 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_card_content_vertical,
     layout_use_card_background,
     layout_title_line_specs,
+    is_laser_selection_highlight,
     normalize_row_highlight,
     normalize_selection_highlight,
     normalize_title_font,
@@ -501,7 +502,7 @@ def _draw_active_highlight(
     word_duration_sec: float = 0.0,
 ) -> None:
     kind = normalize_selection_highlight(highlight_type)
-    if kind == "laser":
+    if is_laser_selection_highlight(kind):
         return
     if kind == "red_border":
         _draw_red_active_border(surface, rect, anim_time_sec=anim_time_sec)
@@ -846,7 +847,7 @@ class WordMemorizeRenderer:
         self._blit_scorch_layer(surface, fw, fh)
 
         if (
-            card_highlight == "laser"
+            is_laser_selection_highlight(card_highlight)
             and active_anchor is not None
             and active_cards
             and not active_is_base
@@ -868,6 +869,7 @@ class WordMemorizeRenderer:
                 loop_preview=word_timing[1] <= 0,
                 scorch_surface=scorch,
                 scorch_prev_length_px=self._scorch_prev_length_px,
+                laser_variant=card_highlight,
             )
 
         for box, word, card_meaning in active_cards:
@@ -1101,7 +1103,7 @@ class WordMemorizeRenderer:
     ) -> None:
         """Base 슬롯 재생 중 — 레이저 빔 없이 테두리만 (레이저 모드는 네온 충격 테두리)."""
         kind = normalize_selection_highlight(highlight_type)
-        if kind == "laser":
+        if is_laser_selection_highlight(kind):
             loop_preview = word_duration_sec <= 0
             impact_t = laser_impact_elapsed_sec(
                 word_elapsed_sec, loop_preview=loop_preview
@@ -1111,6 +1113,7 @@ class WordMemorizeRenderer:
                 rect,
                 impact_elapsed_sec=impact_t,
                 border_radius=ACTIVE_BORDER_RADIUS,
+                laser_variant=kind,
             )
             return
         _draw_active_highlight(
@@ -1136,7 +1139,7 @@ class WordMemorizeRenderer:
         highlight_type = normalize_selection_highlight(
             getattr(layout, "selection_highlight", "gradient")
         )
-        is_laser = highlight_type == "laser"
+        is_laser = is_laser_selection_highlight(highlight_type)
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         if is_base_slot_box(box, layout):
             self._paint_base_slot_box(surface, base, word, card_meaning)
@@ -1186,6 +1189,7 @@ class WordMemorizeRenderer:
                 base,
                 impact_elapsed_sec=impact_t,
                 border_radius=ACTIVE_BORDER_RADIUS,
+                laser_variant=highlight_type,
             )
             return
 
@@ -1232,7 +1236,7 @@ class WordMemorizeRenderer:
     ) -> None:
         if use_card_background:
             pygame.draw.rect(surface, BOX_FILL, rect, border_radius=ACTIVE_BORDER_RADIUS)
-            if active and draw_border and highlight_type != "laser":
+            if active and draw_border and not is_laser_selection_highlight(highlight_type):
                 _draw_active_highlight(
                     surface,
                     rect,

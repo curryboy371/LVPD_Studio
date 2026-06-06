@@ -42,6 +42,8 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_title_line_specs,
     resolve_title_position,
     find_non_overlapping_position,
+    is_laser_selection_highlight,
+    laser_preview_outline_hex,
     layout_has_overlaps,
     list_word_memorize_bg_stems,
     list_title_color_labels,
@@ -2222,8 +2224,8 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 if is_selected and card_highlight == "red_border":
                     outline = "#f44336"
                     width = 3
-                elif is_selected and card_highlight == "laser":
-                    outline = "#00e5ff"
+                elif is_selected and is_laser_selection_highlight(card_highlight):
+                    outline = laser_preview_outline_hex(card_highlight)
                     width = 3
                 elif is_selected:
                     outline = "#4fc3f7"

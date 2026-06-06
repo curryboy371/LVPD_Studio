@@ -15,27 +15,55 @@ DEFAULT_MARGIN_BOTTOM_RATIO = 0.13177083333333334
 DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_layouts"
 WORD_MEMORIZE_BG_DIR = get_repo_root() / "resource" / "BG"
 WORD_MEMORIZE_BG_CH_DIR = WORD_MEMORIZE_BG_DIR / "ch"
-WORD_MEMORIZE_LASER_BEAM = get_repo_root() / "resource" / "image" / "icon" / "laser.png"
+WORD_MEMORIZE_LASER_ICON_DIR = get_repo_root() / "resource" / "image" / "icon"
+DEFAULT_LASER_VARIANT = "laser_b"
+LASER_SELECTION_KEYS = frozenset({"laser_b", "laser_g", "laser_p", "laser_y"})
+LASER_BORDER_COLORS: dict[str, tuple[int, int, int]] = {
+    "laser_b": (0, 229, 255),
+    "laser_g": (57, 255, 136),
+    "laser_p": (186, 104, 255),
+    "laser_y": (255, 235, 59),
+}
+LASER_PREVIEW_OUTLINE_HEX: dict[str, str] = {
+    "laser_b": "#00e5ff",
+    "laser_g": "#39ff88",
+    "laser_p": "#ba68ff",
+    "laser_y": "#ffeb3b",
+}
 DEFAULT_WORD_MEMORIZE_BG_STEM = "3and3"
 # 배치 JSON stem 과 ch/ 폴더 파일명이 다른 경우 (예: mandara → mandala.mp4)
 _BG_CH_VIDEO_STEM_ALIASES: dict[str, str] = {"mandara": "mandala"}
 
 
-def word_memorize_laser_beam_path() -> Path:
-    """가로 빔 PNG — 왼쪽 꼬리, 오른쪽 머리 (0° 기준)."""
-    return WORD_MEMORIZE_LASER_BEAM
+def word_memorize_laser_beam_path(variant: str | None = None) -> Path:
+    """가로 빔 PNG — laser_b/g/p/y.png (왼쪽 꼬리, 오른쪽 머리)."""
+    key = (variant or DEFAULT_LASER_VARIANT).strip().lower()
+    if key == "laser":
+        key = DEFAULT_LASER_VARIANT
+    if key not in LASER_SELECTION_KEYS:
+        key = DEFAULT_LASER_VARIANT
+    return WORD_MEMORIZE_LASER_ICON_DIR / f"{key}.png"
 
 
-def word_memorize_laser_sprite_path() -> Path:
-    return word_memorize_laser_beam_path()
+def word_memorize_laser_sprite_path(variant: str | None = None) -> Path:
+    return word_memorize_laser_beam_path(variant)
 
 
-def word_memorize_laser_ready_path() -> Path:
-    return word_memorize_laser_beam_path()
+def word_memorize_laser_ready_path(variant: str | None = None) -> Path:
+    return word_memorize_laser_beam_path(variant)
+
+
 _BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 BackgroundType = Literal["image"]
-SelectionHighlightType = Literal["gradient", "red_border", "laser"]
+SelectionHighlightType = Literal[
+    "gradient",
+    "red_border",
+    "laser_b",
+    "laser_g",
+    "laser_p",
+    "laser_y",
+]
 RowHighlightType = Literal["none", "neon_glow", "brackets", "bracket_one", "left_bar"]
 TITLE_DEFAULT_MIN_Y = 40
 TITLE_RAISE_PX = 24
@@ -68,7 +96,10 @@ TITLE_LINE_GAP_FHD = 10
 SELECTION_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
     ("그라데이션", "gradient"),
     ("빨간 테두리", "red_border"),
-    ("레이저", "laser"),
+    ("레이저 (파랑)", "laser_b"),
+    ("레이저 (초록)", "laser_g"),
+    ("레이저 (보라)", "laser_p"),
+    ("레이저 (노랑)", "laser_y"),
 )
 DEFAULT_SELECTION_HIGHLIGHT: SelectionHighlightType = "gradient"
 ROW_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
@@ -308,6 +339,8 @@ def normalize_selection_highlight(raw: str) -> SelectionHighlightType:
     lowered = text.lower()
     if lowered == "row_band" or text == "가로줄":
         return DEFAULT_SELECTION_HIGHLIGHT
+    if lowered == "laser":
+        return "laser_b"
     valid_keys = {key for _, key in SELECTION_HIGHLIGHT_CHOICES}
     if lowered in valid_keys:
         return lowered  # type: ignore[return-value]
@@ -323,6 +356,29 @@ def selection_highlight_label_for_value(raw: str) -> str:
         if k == key:
             return label
     return SELECTION_HIGHLIGHT_CHOICES[0][0]
+
+
+def is_laser_selection_highlight(kind: str) -> bool:
+    return normalize_selection_highlight(kind) in LASER_SELECTION_KEYS
+
+
+def normalize_laser_variant(raw: str) -> str:
+    key = normalize_selection_highlight(raw)
+    if key in LASER_SELECTION_KEYS:
+        return key
+    return DEFAULT_LASER_VARIANT
+
+
+def laser_border_color(kind: str) -> tuple[int, int, int]:
+    key = normalize_selection_highlight(kind)
+    return LASER_BORDER_COLORS.get(key, LASER_BORDER_COLORS[DEFAULT_LASER_VARIANT])
+
+
+def laser_preview_outline_hex(kind: str) -> str:
+    key = normalize_selection_highlight(kind)
+    return LASER_PREVIEW_OUTLINE_HEX.get(
+        key, LASER_PREVIEW_OUTLINE_HEX[DEFAULT_LASER_VARIANT]
+    )
 
 
 def list_row_highlight_labels() -> list[str]:

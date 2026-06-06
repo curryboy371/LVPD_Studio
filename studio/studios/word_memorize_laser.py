@@ -1,4 +1,4 @@
-"""단어 외우기 — 레이저 카드 하이라이트 (icon/laser.png 가로 빔).
+"""단어 외우기 — 레이저 카드 하이라이트 (icon/laser_b|g|p|y.png 가로 빔).
 
 리소스는 가로로 누운 형태(왼쪽=꼬리, 오른쪽=머리). 프레임 중앙(꼬리)에서
 카드 중심(머리) 방향으로 거리만큼 가로 스케일 후 atan2 각도로 회전한다.
@@ -10,7 +10,12 @@ import random
 
 import pygame
 
-from extra.table_editor.services.word_memorize_layout import word_memorize_laser_beam_path
+from extra.table_editor.services.word_memorize_layout import (
+    DEFAULT_LASER_VARIANT,
+    laser_border_color,
+    normalize_laser_variant,
+    word_memorize_laser_beam_path,
+)
 
 # 단어 읽기(TTS) 길이와 무관 — 이 구간에 카드까지 도달(이후 hold 펄스)
 # 0.28s는 30fps 기준 ~8프레임이라 거의 정지처럼 보였음
@@ -27,7 +32,6 @@ LASER_HIT_START_SEC = LASER_SHOOT_SEC * (
 )
 SHOCK_PULSE_PERIOD_SEC = 0.10
 SHOCK_PULSE_COUNT = 3
-LASER_BORDER_COLOR = (0, 229, 255)
 LASER_BORDER_THIN = 3
 LASER_BORDER_THICK = 12
 LASER_BORDER_ALPHA_DIM = 85
@@ -49,7 +53,7 @@ SCORCH_PARTICLE_SPREAD_PX = 5
 SCORCH_MARK_RGBA = (170, 170, 175, 105)  # 연한 회색, 고정 (랜덤 없음)
 SCORCH_PARTICLE_CHANCE = 0.3
 
-_BEAM_CACHE: pygame.Surface | None = None
+_BEAM_CACHE: dict[str, pygame.Surface] = {}
 
 
 def _laser_alpha(alpha: int) -> int:
@@ -83,18 +87,19 @@ def _beam_thickness_px(sprite: pygame.Surface) -> int:
     return max(6, int(sh * BEAM_THICKNESS_RATIO))
 
 
-def _load_beam() -> pygame.Surface | None:
-    global _BEAM_CACHE
-    if _BEAM_CACHE is not None:
-        return _BEAM_CACHE
-    path = word_memorize_laser_beam_path()
+def _load_beam(laser_variant: str = DEFAULT_LASER_VARIANT) -> pygame.Surface | None:
+    key = normalize_laser_variant(laser_variant)
+    cached = _BEAM_CACHE.get(key)
+    if cached is not None:
+        return cached
+    path = word_memorize_laser_beam_path(key)
     if not path.is_file():
         return None
     try:
-        _BEAM_CACHE = _boost_beam_opacity(pygame.image.load(str(path)))
+        _BEAM_CACHE[key] = _boost_beam_opacity(pygame.image.load(str(path)))
     except Exception:
-        _BEAM_CACHE = None
-    return _BEAM_CACHE
+        return None
+    return _BEAM_CACHE[key]
 
 
 def _normalized_t(
@@ -162,6 +167,7 @@ def draw_laser_impact_border(
     *,
     impact_elapsed_sec: float,
     border_radius: int = 8,
+    laser_variant: str = DEFAULT_LASER_VARIANT,
 ) -> None:
     """카드 테두리 네온 쇼크 — 닿는 순간 0.1초×3회 번쩍, 이후 다음 카드까지 유지."""
     if impact_elapsed_sec <= 0:
@@ -177,7 +183,7 @@ def draw_laser_impact_border(
     )
     inner = pygame.Rect(pad, pad, rect.width, rect.height)
     rad = max(0, min(border_radius, rect.width // 2, rect.height // 2))
-    color = LASER_BORDER_COLOR
+    color = laser_border_color(laser_variant)
 
     for i in range(3, 0, -1):
         expand = i * 2
@@ -405,12 +411,13 @@ def draw_laser_center_to_card(
     loop_preview: bool = False,
     scorch_surface: pygame.Surface | None = None,
     scorch_prev_length_px: float = 0.0,
+    laser_variant: str = DEFAULT_LASER_VARIANT,
 ) -> float:
     """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사.
 
     scorch_surface가 주어지면 빔 경로에 그을림을 누적하고, 갱신된 prev_length를 반환한다.
     """
-    beam_src = _load_beam()
+    beam_src = _load_beam(laser_variant)
     if beam_src is None:
         return scorch_prev_length_px
 
