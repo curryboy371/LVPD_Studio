@@ -614,6 +614,15 @@ def _is_zh_meaning_lang(meaning_lang: str) -> bool:
     return (meaning_lang or "").strip().lower() in ("zh", "ch", "cn")
 
 
+def _is_ko_meaning_lang(meaning_lang: str) -> bool:
+    return (meaning_lang or "ko").strip().lower() == "ko"
+
+
+def _card_meaning_font_bold(meaning_lang: str) -> bool:
+    """카드 뜻(한국어) — ko·zh 모드에서 굵게."""
+    return _is_ko_meaning_lang(meaning_lang) or _is_zh_meaning_lang(meaning_lang)
+
+
 def _word_memorize_bg_ch_video_candidates(stem: str) -> list[Path]:
     """중국어 모드: resource/BG/ch/{stem}.mp4 후보 (동일 stem, 별칭 stem)."""
     base = normalize_word_memorize_bg_stem(stem)

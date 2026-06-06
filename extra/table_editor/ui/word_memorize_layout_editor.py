@@ -4,7 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Literal
 
 from core.paths import SHORTS_HEIGHT, SHORTS_WIDTH, get_repo_root
@@ -529,6 +529,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._order_list.bind(
             "<Double-Button-1>", lambda _e: self._move_display_to_holding()
         )
+        self._order_list.bind("<Button-3>", self._on_order_list_right_click)
 
         order_btns = ttk.Frame(order_frame)
         order_btns.pack(fill=tk.X, padx=4, pady=(0, 6))
@@ -1131,6 +1132,37 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._mark_dirty()
         self._update_window_title()
 
+    def _apply_box_word_id(self, box: WordMemorizeBox, new_id: str) -> bool:
+        """배치된 box의 word id 교체. 성공 시 True."""
+        old_id = (box.word_id or "").strip()
+        new_id = (new_id or "").strip()
+        if not new_id or new_id == old_id:
+            return False
+        if any(
+            (b.word_id or "").strip() == new_id
+            for b in self._layout.boxes
+            if b.box_key != box.box_key
+        ):
+            messagebox.showwarning(
+                "id 중복",
+                f"id {new_id} 는 이미 이 배치의 다른 칸에 사용 중입니다.",
+                parent=self,
+            )
+            return False
+        if not lookup_word_details(new_id).get("word", "").strip():
+            messagebox.showwarning(
+                "단어장 없음",
+                f"words.xlsx에 id {new_id} 가 없습니다.",
+                parent=self,
+            )
+            return False
+        box.word_id = new_id
+        self._mark_dirty()
+        self._refresh_order_list()
+        self._sync_order_list_selection()
+        self._redraw_canvas()
+        return True
+
     def _change_selected_word_id(self) -> None:
         box = self._selected_box()
         if box is None:
@@ -1145,34 +1177,38 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             replace_word_id=old_id,
             dialog_title="단어 id 변경",
         )
-        if not new_id:
+        if new_id:
+            self._apply_box_word_id(box, new_id)
+
+    def _replace_word_id_by_input(self) -> None:
+        box = self._selected_box()
+        if box is None:
             return
-        new_id = new_id.strip()
-        if new_id == old_id:
+        old_id = (box.word_id or "").strip()
+        new_id = simpledialog.askstring(
+            "word id 교체",
+            f"새 word id를 입력하세요.\n현재 id: {old_id}",
+            parent=self,
+        )
+        if new_id:
+            self._apply_box_word_id(box, new_id)
+
+    def _on_order_list_right_click(self, event: tk.Event) -> None:
+        idx = self._order_list.nearest(event.y)
+        if idx < 0 or idx >= self._order_list.size():
             return
-        if any(
-            (b.word_id or "").strip() == new_id
-            for b in self._layout.boxes
-            if b.box_key != box.box_key
-        ):
-            messagebox.showwarning(
-                "id 중복",
-                f"id {new_id} 는 이미 이 배치의 다른 칸에 사용 중입니다.",
-                parent=self,
-            )
-            return
-        if not lookup_word_details(new_id).get("word", "").strip():
-            messagebox.showwarning(
-                "단어장 없음",
-                f"words.xlsx에 id {new_id} 가 없습니다.",
-                parent=self,
-            )
-            return
-        box.word_id = new_id
-        self._mark_dirty()
-        self._refresh_order_list()
-        self._sync_order_list_selection()
-        self._redraw_canvas()
+        self._order_list.selection_clear(0, tk.END)
+        self._order_list.selection_set(idx)
+        self._on_order_list_select()
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label="다른 word id로 교체…",
+            command=self._replace_word_id_by_input,
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def _delete_selected(self) -> None:
         box = self._selected_box()

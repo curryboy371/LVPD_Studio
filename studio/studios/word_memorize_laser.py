@@ -36,6 +36,10 @@ LASER_BORDER_THIN = 3
 LASER_BORDER_THICK = 12
 LASER_BORDER_ALPHA_DIM = 85
 LASER_BORDER_ALPHA_BRIGHT = 255
+# base 슬롯 한자 — 충격 후 up/down 반복 (테두리 대신)
+LASER_HANZI_SCALE_MIN = 1.0
+LASER_HANZI_SCALE_PEAK = 1.18
+LASER_HANZI_PULSE_PERIOD_SEC = 0.70
 # ADD는 어두운 픽셀이 잘 안 쌓여 흐릿해 보임 — 알파 합성으로 선명하게
 LASER_BLEND_FLAGS = 0
 LASER_ALPHA_RATIO = 1.0
@@ -159,6 +163,22 @@ def _shock_border_style(impact_elapsed_sec: float) -> tuple[int, int, int]:
     alpha = int(150 + 70 * breathe)
     glow = int(28 + 50 * breathe)
     return width, alpha, glow
+
+
+def laser_impact_hanzi_scale(impact_elapsed_sec: float) -> float:
+    """base 슬롯 한자 scale — 레이저 적중 후 up/down 무한 반복 (주기 끝=down)."""
+    if impact_elapsed_sec <= 0:
+        return LASER_HANZI_SCALE_MIN
+
+    period = max(0.04, LASER_HANZI_PULSE_PERIOD_SEC)
+    local = impact_elapsed_sec % period
+    half = period * 0.5
+    lo, hi = LASER_HANZI_SCALE_MIN, LASER_HANZI_SCALE_PEAK
+    if local < half:
+        k = local / half
+        return lo + (hi - lo) * k
+    k = (local - half) / half
+    return hi - (hi - lo) * k
 
 
 def draw_laser_impact_border(

@@ -47,6 +47,7 @@ from extra.table_editor.services.word_memorize_layout import (
     resolve_title_position,
     title_color_to_rgb,
     _is_zh_meaning_lang,
+    _card_meaning_font_bold,
     resolve_word_memorize_bg_image_path,
     resolve_word_memorize_bg_video_path,
 )
@@ -55,6 +56,7 @@ from studio.studios.word_memorize_laser import (
     draw_laser_center_to_card,
     draw_laser_impact_border,
     laser_impact_elapsed_sec,
+    laser_impact_hanzi_scale,
 )
 from utils.pinyin_masking import (
     get_masked_pinyin_marks,
@@ -705,14 +707,13 @@ class WordMemorizeRenderer:
         self._base_font_cache.clear()
 
     def _zh_card_font_pts(self) -> tuple[int, int, str]:
-        """중국어 모드: 한자 20% 축소, 한국어 뜻 20% 확대·굵게."""
+        """zh: 한자 축소·뜻 확대·굵게 / ko: 한국어 뜻 굵게 / en: 영어 뜻 일반."""
         hanzi_pt = HANZI_FONT_PT
         meaning_pt = EN_FONT_PT
-        meaning_weight = "regular"
+        meaning_weight = "bold" if _card_meaning_font_bold(self._bg_meaning_lang) else "regular"
         if _is_zh_meaning_lang(self._bg_meaning_lang):
             hanzi_pt = max(1, int(round(HANZI_FONT_PT * ZH_HANZI_SCALE)))
             meaning_pt = max(1, int(round(EN_FONT_PT * ZH_MEANING_SCALE)))
-            meaning_weight = "bold"
         return hanzi_pt, meaning_pt, meaning_weight
 
     def tick_background_video(self, dt_sec: float) -> None:
@@ -963,7 +964,7 @@ class WordMemorizeRenderer:
         self.ensure_fonts()
         if role == "meaning":
             meaning_weight = (
-                "bold" if _is_zh_meaning_lang(self._bg_meaning_lang) else "regular"
+                "bold" if _card_meaning_font_bold(self._bg_meaning_lang) else "regular"
             )
             font = load_font_korean(
                 pt, BASE_SLOT_MEANING_COLOR, weight=meaning_weight
@@ -1042,6 +1043,8 @@ class WordMemorizeRenderer:
         rect: pygame.Rect,
         word: Word,
         card_meaning: str,
+        *,
+        hanzi_scale: float = 1.0,
     ) -> None:
         """#1 슬롯 — 배경·테두리·이미지 없이 병음·한자·뜻만 크게."""
         pad = 8
@@ -1054,6 +1057,8 @@ class WordMemorizeRenderer:
 
         line_heights: list[int] = []
         line_surfs: list[pygame.Surface] = []
+        hanzi_line_idx: int | None = None
+        hanzi_draw_surf: pygame.Surface | None = None
 
         pinyin = display_pinyin(word)
         if pinyin and font_p is not None:
@@ -1066,8 +1071,13 @@ class WordMemorizeRenderer:
         hanzi = (word.word or "").strip()
         if hanzi and font_h is not None:
             surf = font_h.render(hanzi, True, BASE_SLOT_HANZI_COLOR)
+            hanzi_line_idx = len(line_surfs)
             line_heights.append(surf.get_height())
             line_surfs.append(surf)
+            if abs(hanzi_scale - 1.0) > 1e-4:
+                sw = max(1, int(round(surf.get_width() * hanzi_scale)))
+                sh = max(1, int(round(surf.get_height() * hanzi_scale)))
+                hanzi_draw_surf = pygame.transform.smoothscale(surf, (sw, sh))
 
         meaning = (card_meaning or "").strip()
         if meaning and font_m is not None:
@@ -1088,8 +1098,14 @@ class WordMemorizeRenderer:
             default_gap=gap,
             bottom_pad=0,
         )
-        for surf, y_off in zip(line_surfs, line_ys):
-            self._blit_centered(surface, surf, cx, inner.top + y_off)
+        for i, (surf, y_off) in enumerate(zip(line_surfs, line_ys)):
+            y_top = inner.top + y_off
+            if i == hanzi_line_idx and hanzi_draw_surf is not None:
+                slot_cy = y_top + surf.get_height() // 2
+                draw_y = slot_cy - hanzi_draw_surf.get_height() // 2
+                self._blit_centered(surface, hanzi_draw_surf, cx, draw_y)
+            else:
+                self._blit_centered(surface, surf, cx, y_top)
 
     def _draw_base_slot_active_border(
         self,
@@ -1098,23 +1114,12 @@ class WordMemorizeRenderer:
         *,
         highlight_type: str,
         anim_time_sec: float,
-        word_elapsed_sec: float,
-        word_duration_sec: float,
+        word_elapsed_sec: float = 0.0,
+        word_duration_sec: float = 0.0,
     ) -> None:
-        """Base 슬롯 재생 중 — 레이저 빔 없이 테두리만 (레이저 모드는 네온 충격 테두리)."""
+        """Base 슬롯 재생 중 — 레이저는 한자 scale(페인트 시), 그 외 테두리 하이라이트."""
         kind = normalize_selection_highlight(highlight_type)
         if is_laser_selection_highlight(kind):
-            loop_preview = word_duration_sec <= 0
-            impact_t = laser_impact_elapsed_sec(
-                word_elapsed_sec, loop_preview=loop_preview
-            )
-            draw_laser_impact_border(
-                surface,
-                rect,
-                impact_elapsed_sec=impact_t,
-                border_radius=ACTIVE_BORDER_RADIUS,
-                laser_variant=kind,
-            )
             return
         _draw_active_highlight(
             surface,
@@ -1142,7 +1147,16 @@ class WordMemorizeRenderer:
         is_laser = is_laser_selection_highlight(highlight_type)
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         if is_base_slot_box(box, layout):
-            self._paint_base_slot_box(surface, base, word, card_meaning)
+            hanzi_scale = 1.0
+            if active and is_laser:
+                loop_preview = word_duration_sec <= 0
+                impact_t = laser_impact_elapsed_sec(
+                    word_elapsed_sec, loop_preview=loop_preview
+                )
+                hanzi_scale = laser_impact_hanzi_scale(impact_t)
+            self._paint_base_slot_box(
+                surface, base, word, card_meaning, hanzi_scale=hanzi_scale
+            )
             if active:
                 self._draw_base_slot_active_border(
                     surface,
