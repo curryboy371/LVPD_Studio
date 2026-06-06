@@ -100,6 +100,7 @@ class WordMemorizeStudio(IStudio):
             logger.warning("단어 외우기: 배치에 표시할 단어가 없습니다 — %s", self._layout_path)
         self._init_bg_player()
         self._reset_playback()
+        self._renderer.reset_scorch_layer()
 
     def _init_bg_player(self) -> None:
         from studio.shorts.bg_audio import ShortsBackgroundPlayer

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 import pygame
 
@@ -33,12 +34,20 @@ LASER_BORDER_ALPHA_DIM = 85
 LASER_BORDER_ALPHA_BRIGHT = 255
 # ADD는 어두운 픽셀이 잘 안 쌓여 흐릿해 보임 — 알파 합성으로 선명하게
 LASER_BLEND_FLAGS = 0
-LASER_ALPHA_RATIO = 0.75
+LASER_ALPHA_RATIO = 1.0
 # 테두리 교차점에서 카드 안쪽으로 빔·도달을 조금 더 당김 (px)
 LASER_CARD_OVERSHOOT_PX = 3
-BEAM_ALPHA_BOOST = 1.55
-BEAM_MIN_VISIBLE_ALPHA = 200
 BEAM_THICKNESS_RATIO = 0.68
+# 레이저 경로 그을림(문신) — 레이저보다 얇·연한 파티클 스탬프
+SCORCH_ORIGIN_OFFSET_PX = 200
+SCORCH_WIDTH_RATIO = 0.52  # 레이저 두께 대비
+SCORCH_SAMPLE_SPACING_PX = 8
+SCORCH_JITTER_PX = 2
+SCORCH_OUTER_RADIUS = (4, 7)
+SCORCH_INNER_RADIUS = (2, 4)
+SCORCH_PARTICLE_SPREAD_PX = 5
+SCORCH_MARK_RGBA = (170, 170, 175, 105)  # 연한 회색, 고정 (랜덤 없음)
+SCORCH_PARTICLE_CHANCE = 0.3
 
 _BEAM_CACHE: pygame.Surface | None = None
 
@@ -57,7 +66,7 @@ def _ensure_srcalpha(surf: pygame.Surface) -> pygame.Surface:
 
 
 def _boost_beam_opacity(surf: pygame.Surface) -> pygame.Surface:
-    """PNG 알파(평균 ~176)를 올려 빔이 흐릿하지 않게."""
+    """PNG 알파(평균 ~176)를 255로 올려 빔을 선명·불투명하게."""
     out = _ensure_srcalpha(surf.copy())
     w, h = out.get_size()
     for y in range(h):
@@ -65,9 +74,7 @@ def _boost_beam_opacity(surf: pygame.Surface) -> pygame.Surface:
             r, g, b, a = out.get_at((x, y))
             if a < 8:
                 continue
-            boosted = min(255, int(a * BEAM_ALPHA_BOOST))
-            a_out = max(boosted, BEAM_MIN_VISIBLE_ALPHA) if a >= 24 else boosted
-            out.set_at((x, y), (r, g, b, a_out))
+            out.set_at((x, y), (r, g, b, 255))
     return out
 
 
@@ -216,12 +223,85 @@ def _hold_beam_pulse(elapsed_sec: float) -> tuple[float, int]:
     """(길이 배율, 알파) — TTS 대기 중에도 빔이 살아 있게."""
     t = elapsed_sec * HOLD_BEAM_PULSE_HZ
     length_scale = 1.0 + HOLD_BEAM_LENGTH_WOBBLE * math.sin(t)
-    alpha = int(215 + 40 * (0.5 + 0.5 * math.sin(t * 1.35 + 0.6)))
-    return length_scale, max(160, min(255, alpha))
+    return length_scale, 255
 
 
 def _aim_angle_rad(dx: float, dy: float) -> float:
     return math.atan2(dy, dx)
+
+
+def draw_scorch_mark(surface: pygame.Surface, pos: tuple[int, int]) -> None:
+    """연한 회색 고정색 — 외곽·중심·파티클 동일 색."""
+    x, y = pos
+    outer_r = random.randint(*SCORCH_OUTER_RADIUS)
+    pygame.draw.circle(surface, SCORCH_MARK_RGBA, (x, y), outer_r)
+    inner_r = random.randint(*SCORCH_INNER_RADIUS)
+    pygame.draw.circle(surface, SCORCH_MARK_RGBA, (x, y), inner_r)
+    if random.random() < SCORCH_PARTICLE_CHANCE:
+        spread = SCORCH_PARTICLE_SPREAD_PX
+        p_x = x + random.randint(-spread, spread)
+        p_y = y + random.randint(-spread, spread)
+        pygame.draw.circle(surface, SCORCH_MARK_RGBA, (p_x, p_y), 1)
+
+
+def stamp_beam_scorch(
+    scorch_surface: pygame.Surface,
+    origin: tuple[float, float],
+    target: tuple[float, float],
+    *,
+    start_dist_px: float,
+    end_dist_px: float,
+    beam_thickness_px: int,
+) -> None:
+    """origin→target [start_dist, end_dist] — 고정 간격·약한 지터 파티클 스탬프."""
+    start = max(SCORCH_ORIGIN_OFFSET_PX, start_dist_px)
+    end = max(start, end_dist_px)
+    if end - start < 0.5:
+        return
+
+    ox, oy = origin
+    dx = target[0] - ox
+    dy = target[1] - oy
+    total = math.hypot(dx, dy)
+    if total < 1e-6:
+        return
+
+    ux, uy = dx / total, dy / total
+    perp_x, perp_y = -uy, ux
+    half_w = max(2, int(beam_thickness_px * SCORCH_WIDTH_RATIO * 0.5))
+
+    dist = start
+    while dist <= end:
+        px = ox + ux * dist
+        py = oy + uy * dist
+        j_perp = random.uniform(-SCORCH_JITTER_PX, SCORCH_JITTER_PX)
+        j_perp = max(-half_w, min(half_w, j_perp))
+        sx = int(px + perp_x * j_perp)
+        sy = int(py + perp_y * j_perp)
+        draw_scorch_mark(scorch_surface, (sx, sy))
+        dist += SCORCH_SAMPLE_SPACING_PX
+
+
+def stamp_beam_scorch_full_path(
+    scorch_surface: pygame.Surface,
+    origin: tuple[float, float],
+    target: tuple[float, float],
+    *,
+    beam_thickness_px: int,
+) -> None:
+    """중앙 offset부터 목표까지 경로 전체 — 얇은 파티클 스탬프."""
+    ox, oy = origin
+    distance = math.hypot(target[0] - ox, target[1] - oy)
+    if distance <= SCORCH_ORIGIN_OFFSET_PX:
+        return
+    stamp_beam_scorch(
+        scorch_surface,
+        origin,
+        target,
+        start_dist_px=SCORCH_ORIGIN_OFFSET_PX,
+        end_dist_px=distance,
+        beam_thickness_px=beam_thickness_px,
+    )
 
 
 def laser_target_on_card_border(
@@ -323,11 +403,16 @@ def draw_laser_center_to_card(
     elapsed_sec: float,
     duration_sec: float,
     loop_preview: bool = False,
-) -> None:
-    """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사."""
+    scorch_surface: pygame.Surface | None = None,
+    scorch_prev_length_px: float = 0.0,
+) -> float:
+    """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사.
+
+    scorch_surface가 주어지면 빔 경로에 그을림을 누적하고, 갱신된 prev_length를 반환한다.
+    """
     beam_src = _load_beam()
     if beam_src is None:
-        return
+        return scorch_prev_length_px
 
     origin = (frame_width * 0.5, frame_height * 0.5)
     target = laser_target_on_card_border(origin, card_rect)
@@ -335,11 +420,13 @@ def draw_laser_center_to_card(
     dy = target[1] - origin[1]
     distance = math.hypot(dx, dy)
     if distance < 16:
-        return
+        return scorch_prev_length_px
 
+    beam_th = _beam_thickness_px(beam_src)
     angle = _aim_angle_rad(dx, dy)
     t = _normalized_t(elapsed_sec, duration_sec, loop_preview=loop_preview)
     phase, phase_t = _phase_at(t)
+    prev_len = scorch_prev_length_px
 
     if phase == "charge":
         pulse = 0.88 + 0.12 * math.sin(elapsed_sec * 12.0)
@@ -356,7 +443,7 @@ def draw_laser_center_to_card(
             angle_rad=angle,
             alpha=_laser_alpha(255),
         )
-        return
+        return prev_len
 
     beam_alpha = _laser_alpha(255)
     if phase == "propagate":
@@ -375,3 +462,34 @@ def draw_laser_center_to_card(
         angle_rad=angle,
         alpha=beam_alpha,
     )
+
+    if scorch_surface is not None:
+        if phase == "propagate":
+            stamp_beam_scorch(
+                scorch_surface,
+                origin,
+                target,
+                start_dist_px=prev_len,
+                end_dist_px=length,
+                beam_thickness_px=beam_th,
+            )
+            prev_len = max(prev_len, length)
+            if length >= distance - 1.0:
+                stamp_beam_scorch_full_path(
+                    scorch_surface,
+                    origin,
+                    target,
+                    beam_thickness_px=beam_th,
+                )
+                prev_len = distance
+        else:
+            if prev_len < distance - 0.5:
+                stamp_beam_scorch_full_path(
+                    scorch_surface,
+                    origin,
+                    target,
+                    beam_thickness_px=beam_th,
+                )
+            prev_len = distance
+
+    return prev_len

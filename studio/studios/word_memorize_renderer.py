@@ -50,6 +50,7 @@ from extra.table_editor.services.word_memorize_layout import (
     resolve_word_memorize_bg_video_path,
 )
 from studio.studios.word_memorize_laser import (
+    SCORCH_ORIGIN_OFFSET_PX,
     draw_laser_center_to_card,
     draw_laser_impact_border,
     laser_impact_elapsed_sec,
@@ -647,6 +648,42 @@ class WordMemorizeRenderer:
         self._bg_video = LoopingBackgroundVideo()
         self._bg_layout_stem = ""
         self._bg_meaning_lang = "ko"
+        self._scorch_layer: pygame.Surface | None = None
+        self._scorch_layer_size: tuple[int, int] = (0, 0)
+        self._scorch_prev_length_px: float = float(SCORCH_ORIGIN_OFFSET_PX)
+        self._scorch_active_key: str | None = None
+
+    def reset_scorch_layer(self) -> None:
+        """재생 세션 시작 시 그을림 누적 레이어 초기화."""
+        self._scorch_layer = None
+        self._scorch_layer_size = (0, 0)
+        self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
+        self._scorch_active_key = None
+
+    def _ensure_scorch_layer(self, fw: int, fh: int) -> pygame.Surface:
+        if (
+            self._scorch_layer is not None
+            and self._scorch_layer_size == (fw, fh)
+        ):
+            return self._scorch_layer
+        self._scorch_layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
+        self._scorch_layer.fill((0, 0, 0, 0))
+        self._scorch_layer_size = (fw, fh)
+        self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
+        self._scorch_active_key = None
+        return self._scorch_layer
+
+    def _blit_scorch_layer(self, surface: pygame.Surface, fw: int, fh: int) -> None:
+        if self._scorch_layer is None:
+            return
+        if self._scorch_layer_size != (fw, fh):
+            return
+        surface.blit(self._scorch_layer, (0, 0))
+
+    def _sync_scorch_active_key(self, active_box_key: str | None) -> None:
+        if active_box_key != self._scorch_active_key:
+            self._scorch_active_key = active_box_key
+            self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
 
     def set_background(self, layout_stem: str, meaning_lang: str = "ko") -> None:
         self._bg_layout_stem = (layout_stem or "").strip()
@@ -805,13 +842,18 @@ class WordMemorizeRenderer:
                 anim_time_sec=t_anim,
             )
 
+        # 누적 문신 → 레이저(위) → 활성 카드 순 (레이저 구간에 문신 잔상 X)
+        self._blit_scorch_layer(surface, fw, fh)
+
         if (
             card_highlight == "laser"
             and active_anchor is not None
             and active_cards
             and not active_is_base
         ):
-            draw_laser_center_to_card(
+            self._sync_scorch_active_key(active_box_key)
+            scorch = self._ensure_scorch_layer(fw, fh)
+            self._scorch_prev_length_px = draw_laser_center_to_card(
                 surface,
                 frame_width=fw,
                 frame_height=fh,
@@ -824,6 +866,8 @@ class WordMemorizeRenderer:
                 elapsed_sec=word_timing[0],
                 duration_sec=word_timing[1],
                 loop_preview=word_timing[1] <= 0,
+                scorch_surface=scorch,
+                scorch_prev_length_px=self._scorch_prev_length_px,
             )
 
         for box, word, card_meaning in active_cards:
