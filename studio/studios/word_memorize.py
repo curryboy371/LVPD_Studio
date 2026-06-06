@@ -36,8 +36,8 @@ TTS_MISSING_HOLD_SEC = 1.2
 TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC = 0.8
 # ko/en: 둘째=한자 — 꼬리 N초 전에 다음 단어(뜻 TTS) 시작
 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
-# zh: 둘째=한국어 뜻 — 한자보다 길어서 꼬리를 더 잘라 다음 한자로 전환
-TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.8
+# zh: 둘째=한국어 뜻 — 다음 한자로 전환 (ko/en과 동일 0.5s)
+TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 
