@@ -360,20 +360,16 @@ class MainPanel(ttk.Frame):
         )
         if not picked:
             return
-        mode, layout_path, meaning_lang, show_images = picked
+        mode, layout_path, meaning_lang = picked
         stem = Path(layout_path).stem
         self._arg_var.set(stem)
-        self._dispatch_word_memorize(
-            mode, layout_path, meaning_lang, show_images=show_images
-        )
+        self._dispatch_word_memorize(mode, layout_path, meaning_lang)
 
     def _dispatch_word_memorize(
         self,
         mode: str,
         layout_path: str,
         meaning_lang: str = "ko",
-        *,
-        show_images: bool = True,
     ) -> None:
         stem = Path(layout_path).stem
         lang = (meaning_lang or "ko").strip().lower()
@@ -391,8 +387,6 @@ class MainPanel(ttk.Frame):
             layout_path,
             "--meaning-lang",
             lang,
-            "--word-images",
-            "on" if show_images else "off",
         ]
         if mode == "record":
             max_sec = _RECORD_MAX_SEC.get(("word_memorize", ""), 600)

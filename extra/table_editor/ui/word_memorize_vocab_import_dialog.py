@@ -8,6 +8,7 @@ from typing import Callable
 from extra.table_editor.config import POS_FILTER_ALL
 from extra.table_editor.services.word_sheet_browser import (
     clear_word_sheet_browser_cache,
+    default_words_sheet,
     get_pos_values,
     get_sheet_names,
     get_type_values,
@@ -111,7 +112,7 @@ class WordMemorizeVocabImportDialog(tk.Toplevel):
         ttk.Button(btn_row, text="닫기", command=self.destroy).pack(side=tk.RIGHT)
 
         if sheets:
-            self._sheet_var.set(sheets[0])
+            self._sheet_var.set(default_words_sheet(sheets))
             self._on_sheet_changed()
         else:
             messagebox.showwarning(

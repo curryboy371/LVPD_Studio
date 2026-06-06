@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "mandala_w"
+  },
+  "title": "",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#ffffff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "selection_highlight": "laser_p",
+  "row_highlight": "none",
+  "use_base_slot": true,
+  "use_card_background": false,
+  "bg_music_path": "resource/sound/bg_short/신디드럼.mp3",
+  "boxes": [
+    {
+      "word_id": "20093",
+      "order": 1,
+      "x": 400,
+      "y": 724,
+      "w": 280,
+      "h": 383,
+      "box_key": "box_1"
+    },
+    {
+      "word_id": "20087",
+      "order": 2,
+      "x": 10,
+      "y": 156,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_2"
+    },
+    {
+      "word_id": "20095",
+      "order": 3,
+      "x": 421,
+      "y": 157,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_3"
+    },
+    {
+      "word_id": "20088",
+      "order": 4,
+      "x": 790,
+      "y": 158,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_4"
+    },
+    {
+      "word_id": "20091",
+      "order": 5,
+      "x": 790,
+      "y": 731,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_6"
+    },
+    {
+      "word_id": "20092",
+      "order": 6,
+      "x": 790,
+      "y": 1310,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_9"
+    },
+    {
+      "word_id": "20156",
+      "order": 7,
+      "x": 404,
+      "y": 1318,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_8"
+    },
+    {
+      "word_id": "20096",
+      "order": 8,
+      "x": 10,
+      "y": 1327,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_7"
+    },
+    {
+      "word_id": "20089",
+      "order": 9,
+      "x": 10,
+      "y": 716,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_5"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.08020833333333334,
+  "margin_bottom_ratio": 0.1015625
+}

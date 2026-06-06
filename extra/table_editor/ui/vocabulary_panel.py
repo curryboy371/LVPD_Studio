@@ -28,6 +28,7 @@ from extra.table_editor.services.search import (
     unique_type_values,
 )
 from extra.table_editor.services.word_autofill import apply_new_word_defaults
+from extra.table_editor.services.word_sheet_browser import default_words_sheet
 from extra.table_editor.ui.id_picker_dialog import IdPickerDialog
 from extra.table_editor.ui.row_editor_dialog import RowEditorDialog
 from extra.table_editor.ui.table_panel import TablePanel
@@ -150,7 +151,7 @@ class VocabularyPanel(ttk.Frame):
         if not names:
             raise ValueError("시트가 없습니다.")
         self._sheet_combo["values"] = names
-        self._current_sheet = names[0]
+        self._current_sheet = default_words_sheet(names)
         self._sheet_var.set(self._current_sheet)
         self._reload_sheet()
         self._on_dirty_change(False)

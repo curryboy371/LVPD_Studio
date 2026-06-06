@@ -11,6 +11,17 @@ from extra.table_editor.services.word_lookup import _normalize_id
 
 _sheet_rows: dict[str, list[dict[str, str]]] | None = None
 
+DEFAULT_WORDS_SHEET = "명사"
+
+
+def default_words_sheet(sheet_names: list[str]) -> str:
+    """단어장 UI 초기 시트. 명사가 있으면 우선, 없으면 첫 시트."""
+    if not sheet_names:
+        return ""
+    if DEFAULT_WORDS_SHEET in sheet_names:
+        return DEFAULT_WORDS_SHEET
+    return sheet_names[0]
+
 
 def clear_word_sheet_browser_cache() -> None:
     global _sheet_rows

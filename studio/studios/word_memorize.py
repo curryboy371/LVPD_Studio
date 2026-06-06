@@ -53,18 +53,26 @@ def _normalize_meaning_lang(raw: str) -> MeaningLang:
     return "ko"
 
 
+def _recording_lang_tag(meaning_lang: MeaningLang) -> str:
+    """녹화 파일명용 언어 코드 (ko / en / ch)."""
+    if meaning_lang == "en":
+        return "en"
+    if meaning_lang == "zh":
+        return "ch"
+    return "ko"
+
+
 class WordMemorizeStudio(IStudio):
     def __init__(
         self,
         *,
         layout_path: str,
         meaning_lang: MeaningLang = "ko",
-        show_images: bool = True,
     ) -> None:
         self._layout_path = Path(layout_path)
         self._layout = load_layout(self._layout_path)
         self._meaning_lang = _normalize_meaning_lang(str(meaning_lang))
-        self._renderer = WordMemorizeRenderer(show_images=show_images)
+        self._renderer = WordMemorizeRenderer(show_images=bool(self._layout.show_images))
         self._renderer.set_background(
             self._layout.background_value, self._meaning_lang
         )
@@ -515,7 +523,8 @@ class WordMemorizeStudio(IStudio):
 
     def get_recording_prefix(self) -> Optional[str]:
         stem = self._layout_path.stem.replace(" ", "_")
-        return f"여포판다_단어외우기_{stem}"
+        lang = _recording_lang_tag(self._meaning_lang)
+        return f"여포판다_단어외우기_{stem}_{lang}"
 
     def should_stop_recording(self) -> bool:
         return self._done

@@ -67,22 +67,26 @@
 @sheet 명사
 @pos 명사
 
+@type guan
+
 # meaning	en_meaning	word	pinyin
-월요일	Monday	星期一	xīngqīyī
-화요일	Tuesday	星期二	xīngqī'èr
-수요일	Wednesday	星期三	xīngqīsān
-목요일	Thursday	星期四	xīngqīsì
-금요일	Friday	星期五	xīngqīwǔ
-토요일	Saturday	星期六	xīngqīliù
-일요일	Sunday	星期天	xīngqītiān
-오늘	Today	今天	jīntiān
-내일	Tomorrow	明天	míngtiān
-엄마	Mother	妈妈	māma
-아빠	Father	爸爸	bàba
-오빠/형	Older Brother	哥哥	gēge
-언니/누나	Older Sister	姐姐	jiějie
-남동생	Younger Brother	弟弟	dìdi
-여동생	Younger Sister	妹妹	mèimei
-할아버지	Grandfather	爷爷	yéye
-할머니	Grandmother	奶奶	nǎinai
-아이, 자녀	Child	孩子	háizi
+박물관	museum	博物馆	bówùguǎn
+호텔	hotel	宾馆	bīnguǎn
+대사관	embassy	大使馆	dàshǐguǎn
+도서관	library	图书馆	túshūguǎn
+체육관	gymnasium	体育馆	tǐyùguǎn
+식당	restaurant	饭馆	fànguǎn
+미술관	art museum	美术馆	měishùguǎn
+과학관	science museum	科学馆	kēxuéguǎn
+
+@type dian
+
+# meaning	en_meaning	word	pinyin
+TV	television	电视	diànshì
+컴퓨터	computer	电脑	diànnǎo
+전화기	telephone	电话	diànhuà
+냉장고	refrigerator	电冰箱	diànbīngxiāng
+선풍기	electric fan	电风扇	diànfēngshàn
+배터리	battery	电池	diànchí
+밥솥	rice cooker	电饭煲	diànfànbāo
+전동차	electric vehicle	电动车	diàndòngchē

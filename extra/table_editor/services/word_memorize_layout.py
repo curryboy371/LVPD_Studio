@@ -799,6 +799,8 @@ class WordMemorizeLayout:
     use_base_slot: bool = False
     # True: 일반 word 카드 흰 배경·테두리 (False면 글자·이미지만)
     use_card_background: bool = True
+    # True: 카드에 단어 그림(img_path) 표시
+    show_images: bool = True
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -841,6 +843,7 @@ class WordMemorizeLayout:
             "row_highlight": normalize_row_highlight(self.row_highlight),
             "use_base_slot": bool(self.use_base_slot),
             "use_card_background": bool(self.use_card_background),
+            "show_images": bool(self.show_images),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "boxes": [
                 {
@@ -906,6 +909,7 @@ class WordMemorizeLayout:
         layout.row_highlight = normalize_row_highlight(data.get("row_highlight", "none"))
         layout.use_base_slot = bool(data.get("use_base_slot", False))
         layout.use_card_background = bool(data.get("use_card_background", True))
+        layout.show_images = bool(data.get("show_images", True))
         if raw_highlight.lower() in ("row_band",) or raw_highlight == "가로줄":
             if layout.row_highlight == "none":
                 layout.row_highlight = "neon_glow"

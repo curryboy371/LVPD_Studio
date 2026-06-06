@@ -203,6 +203,8 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._title_selected = False
         self._next_box_num = 1
         self._box_photos: dict[str, object] = {}
+        self._bg_photo: object | None = None
+        self._bg_photo_key: str | None = None
         self._dirty = False
         self._margin_drag: MarginDragMode = ""
 
@@ -440,6 +442,15 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             text="단어 카드 배경 (흰 박스)",
             variable=self._use_card_background_var,
             command=self._on_use_card_background_changed,
+        ).pack(anchor="w", padx=6, pady=(0, 4))
+        self._show_images_var = tk.BooleanVar(
+            value=bool(getattr(self._layout, "show_images", True))
+        )
+        ttk.Checkbutton(
+            highlight_frame,
+            text="단어 그림 표시 (img_path)",
+            variable=self._show_images_var,
+            command=self._on_show_images_changed,
         ).pack(anchor="w", padx=6, pady=(0, 6))
 
         grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
@@ -1295,6 +1306,13 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._mark_dirty()
             self._redraw_canvas()
 
+    def _on_show_images_changed(self) -> None:
+        val = bool(self._show_images_var.get())
+        if val != bool(getattr(self._layout, "show_images", True)):
+            self._layout.show_images = val
+            self._mark_dirty()
+            self._redraw_canvas()
+
     def _sync_selection_highlight_combo(self) -> None:
         self._selection_highlight_var.set(
             selection_highlight_label_for_value(
@@ -1308,6 +1326,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._use_card_background_var.set(
             bool(getattr(self._layout, "use_card_background", True))
         )
+        self._show_images_var.set(bool(getattr(self._layout, "show_images", True)))
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.bg_music_path = normalize_vocab_bg_path(
@@ -1513,6 +1532,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._layout.background_type = "image"
             self._layout.background_value = stem
             self._mark_dirty()
+            self._invalidate_bg_cache()
             self._redraw_canvas()
             dlg.destroy()
 
@@ -1713,7 +1733,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             y_off = int(getattr(self._layout, "title_y_offset_px", 0))
             self._layout.title_x = fw // 2
             self._layout.title_y = int(ny) - y_off
-            self._redraw_canvas()
+            self._redraw_title_drag()
             return
         if not self._drag_mode or not self._drag_start or not self._drag_box_snapshot:
             return
@@ -1730,7 +1750,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             if self._try_set_box_rect(
                 box, snap.x + dx, snap.y + dy, snap.w, snap.h
             ):
-                self._redraw_canvas()
+                self._redraw_drag_overlay(box.box_key)
             return
 
         x1, y1, x2, y2 = snap.x, snap.y, snap.x + snap.w, snap.y + snap.h
@@ -1748,19 +1768,33 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         nw = min(x2 - x1, fw - nx)
         nh = min(y2 - y1, fh - ny)
         if self._try_set_box_rect(box, nx, ny, nw, nh):
-            self._redraw_canvas()
+            self._redraw_drag_overlay(box.box_key)
 
     def _on_canvas_release(self, _event: tk.Event) -> None:
         if self._drag_mode:
             self._mark_dirty()
+            self._redraw_canvas()
         self._drag_mode = ""
         self._drag_start = None
         self._drag_box_snapshot = None
         self._title_drag_snapshot = None
 
+    def _invalidate_canvas_caches(self) -> None:
+        self._box_photos.clear()
+        self._bg_photo = None
+        self._bg_photo_key = None
+
+    def _invalidate_bg_cache(self) -> None:
+        self._bg_photo = None
+        self._bg_photo_key = None
+
     def _draw_background(self) -> None:
         c = self._canvas
         c.delete("bg")
+        bg_key = normalize_word_memorize_bg_stem(self._layout.background_value)
+        if self._bg_photo is not None and self._bg_photo_key == bg_key:
+            c.create_image(0, 0, anchor="nw", image=self._bg_photo, tags="bg")
+            return
         path = word_memorize_bg_image_path(self._layout.background_value)
         if path.is_file():
             try:
@@ -1769,10 +1803,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 img = Image.open(path).convert("RGB")
                 img = img.resize((PREVIEW_WIDTH, PREVIEW_HEIGHT), Image.Resampling.LANCZOS)
                 self._bg_photo = ImageTk.PhotoImage(img)
+                self._bg_photo_key = bg_key
                 c.create_image(0, 0, anchor="nw", image=self._bg_photo, tags="bg")
                 return
             except Exception:
-                pass
+                self._invalidate_bg_cache()
         c.create_rectangle(
             0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT,
             fill="#333", outline="", tags="bg",
@@ -1943,7 +1978,9 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
         box_h = max(1, y2 - y1)
         img_max = int(min(inner_w, box_h * BOX_IMG_MAX_RATIO))
-        photo = self._load_box_photo(box.box_key, details, box.word_id, img_max)
+        photo = None
+        if bool(getattr(self._layout, "show_images", True)):
+            photo = self._load_box_photo(box.box_key, details, box.word_id, img_max)
         img_h = photo.height() if photo is not None else 0
 
         line_heights: list[int] = []
@@ -2227,70 +2264,93 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 tags=tags,
             )
 
-    def _redraw_canvas(self) -> None:
-        c = self._canvas
-        c.delete("all")
-        self._box_photos.clear()
-        self._draw_background()
-        self._draw_shorts_zone_guides()
-
+    def _draw_box(self, c: tk.Canvas, box: WordMemorizeBox) -> None:
+        is_selected = box_runtime_key(box) == (self._selected_key or "")
+        x1, y1, x2, y2 = self._screen_rect(box)
+        details = lookup_word_details(box.word_id)
         card_highlight = normalize_selection_highlight(
             getattr(self._layout, "selection_highlight", "")
         )
+        if is_base_slot_box(box, self._layout):
+            guide_outline = "#00acc1" if is_selected else "#80deea"
+            c.create_rectangle(
+                x1, y1, x2, y2,
+                outline=guide_outline,
+                width=2 if is_selected else 1,
+                dash=(5, 4),
+                fill="",
+                tags=("box", box.box_key),
+            )
+            self._draw_box_content_base(c, box, x1, y1, x2, y2, details)
+        else:
+            if is_selected and card_highlight == "red_border":
+                outline = "#f44336"
+                width = 3
+            elif is_selected and is_laser_selection_highlight(card_highlight):
+                outline = laser_preview_outline_hex(card_highlight)
+                width = 3
+            elif is_selected:
+                outline = "#4fc3f7"
+                width = 3
+            else:
+                outline = "#90a4ae"
+                width = 1
+            card_fill = (
+                "#ffffff"
+                if bool(getattr(self._layout, "use_card_background", True))
+                else ""
+            )
+            c.create_rectangle(
+                x1, y1, x2, y2,
+                outline=outline,
+                width=width,
+                fill=card_fill,
+                tags=("box", box.box_key),
+            )
+            self._draw_box_content(c, box, x1, y1, x2, y2, details)
+        badge = f"#{box.order}"
+        c.create_text(
+            x1 + 6, y1 + 6,
+            text=badge,
+            anchor="nw",
+            fill="#1565c0",
+            font=BOX_BADGE_FONT,
+            tags=("box", box.box_key),
+        )
+
+    def _redraw_drag_overlay(self, box_key: str) -> None:
+        """드래그 중 이동·리사이즈 박스와 핸들만 갱신."""
+        c = self._canvas
+        c.delete("handle")
+        c.delete("row_highlight")
+        c.delete(box_key)
+        selected = self._selected_box()
+        if selected is not None:
+            self._draw_row_highlight_preview(c, selected)
+        box = self._box_by_key(box_key)
+        if box is not None:
+            self._draw_box(c, box)
+            if box_runtime_key(box) == (self._selected_key or ""):
+                self._draw_handles(box)
+
+    def _redraw_title_drag(self) -> None:
+        c = self._canvas
+        c.delete("title")
+        c.delete("title_hit")
+        self._draw_title_preview()
+
+    def _redraw_canvas(self) -> None:
+        c = self._canvas
+        c.delete("all")
+        self._draw_background()
+        self._draw_shorts_zone_guides()
+
         selected = self._selected_box()
         if selected is not None:
             self._draw_row_highlight_preview(c, selected)
 
         for box in self._layout.sorted_boxes():
-            is_selected = box_runtime_key(box) == (self._selected_key or "")
-            x1, y1, x2, y2 = self._screen_rect(box)
-            details = lookup_word_details(box.word_id)
-            if is_base_slot_box(box, self._layout):
-                guide_outline = "#00acc1" if is_selected else "#80deea"
-                c.create_rectangle(
-                    x1, y1, x2, y2,
-                    outline=guide_outline,
-                    width=2 if is_selected else 1,
-                    dash=(5, 4),
-                    fill="",
-                    tags=("box", box.box_key),
-                )
-                self._draw_box_content_base(c, box, x1, y1, x2, y2, details)
-            else:
-                if is_selected and card_highlight == "red_border":
-                    outline = "#f44336"
-                    width = 3
-                elif is_selected and is_laser_selection_highlight(card_highlight):
-                    outline = laser_preview_outline_hex(card_highlight)
-                    width = 3
-                elif is_selected:
-                    outline = "#4fc3f7"
-                    width = 3
-                else:
-                    outline = "#90a4ae"
-                    width = 1
-                card_fill = (
-                    "#ffffff"
-                    if bool(getattr(self._layout, "use_card_background", True))
-                    else ""
-                )
-                c.create_rectangle(
-                    x1, y1, x2, y2,
-                    outline=outline,
-                    width=width,
-                    fill=card_fill,
-                    tags=("box", box.box_key),
-                )
-                self._draw_box_content(c, box, x1, y1, x2, y2, details)
-            badge = f"#{box.order}"
-            c.create_text(
-                x1 + 6, y1 + 6,
-                text=badge,
-                anchor="nw",
-                fill="#1565c0",
-                font=BOX_BADGE_FONT,
-                tags=("box", box.box_key),
-            )
+            self._draw_box(c, box)
 
         box = self._selected_box()
         if box is not None:
@@ -2365,6 +2425,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._selected_key = None
         self._next_box_num = 1
         self._clear_dirty()
+        self._invalidate_canvas_caches()
         self._redraw_canvas()
         self._refresh_holding_list()
         self._refresh_order_list()
@@ -2403,6 +2464,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 box.box_key = self._new_box_key()
         self._next_box_num = max_num + 1
         self._clear_dirty()
+        self._invalidate_canvas_caches()
         self._redraw_canvas()
         self._refresh_holding_list()
         self._refresh_order_list()
