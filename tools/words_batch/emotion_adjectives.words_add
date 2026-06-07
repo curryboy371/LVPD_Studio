@@ -1,0 +1,21 @@
+@sheet 형용사
+@pos 형용사
+@type 감정
+
+# meaning	en_meaning	word	pinyin
+기쁘다	Happy	高兴	gāoxìng
+즐겁다	Joyful	快乐	kuàilè
+신나다	Excited	兴奋	xīngfèn
+감동하다	Moved	感动	gǎndòng
+안심하다	Relieved	放心	fàngxīn
+만족하다	Satisfied	满意	mǎnyì
+편안하다	Comfortable	舒服	shūfu
+홀가분하다	Relaxed	轻松	qīngsōng
+화나다	Angry	生气	shēngqì
+슬프다	Sad	难过	nánguò
+상심하다	Heartbroken	伤心	shāngxīn
+걱정하다	Worried	担心	dānxīn
+긴장하다	Nervous	紧张	jǐnzhāng
+피곤하다	Tired	累	lèi
+무섭다	Afraid	害怕	hàipà
+부끄럽다	Shy	害羞	hàixiū

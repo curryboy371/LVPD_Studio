@@ -1,0 +1,14 @@
+@sheet 명사
+@pos 명사
+@type dian
+
+# meaning	en_meaning	word	pinyin
+상점	store	商店	shāngdiàn
+식당	restaurant	饭店	fàndiàn
+서점	bookstore	书店	shūdiàn
+호텔	hotel	酒店	jiǔdiàn
+꽃집	flower shop	花店	huādiàn
+편의점	convenience store	便利店	biànlìdiàn
+약국	pharmacy	药店	yàodiàn
+의류점	clothing store	服装店	fúzhuāngdiàn
+안경점	optical shop	眼镜店	yǎnjìngdiàn
