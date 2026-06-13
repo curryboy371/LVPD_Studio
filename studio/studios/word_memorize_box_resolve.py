@@ -5,9 +5,11 @@ from data.models import Word
 from data.table_manager import get_word, get_word_by_hanzi
 from extra.table_editor.services.word_memorize_layout import (
     WordMemorizeBox,
+    box_card_type,
     box_cta_audio_path,
     box_cta_hanzi,
     box_cta_caption,
+    card_type_cta_audio_rel,
 )
 
 
@@ -53,11 +55,15 @@ def resolve_box_card_meaning(
 
 def box_uses_cta_audio(box: WordMemorizeBox) -> bool:
     """CTA 타입 고정 mp3 사용 여부."""
-    return box_cta_audio_path(box) is not None
+    return bool(card_type_cta_audio_rel(box_card_type(box)))
 
 
-def active_cta_caption_for_box(box: WordMemorizeBox | None) -> str:
+def active_cta_caption_for_box(
+    box: WordMemorizeBox | None,
+    *,
+    meaning_lang: str = "ko",
+) -> str:
     """CTA 음성 재생 중 표시할 자막 — 없으면 빈 문자열."""
     if box is None or not box_uses_cta_audio(box):
         return ""
-    return box_cta_caption(box)
+    return box_cta_caption(box, meaning_lang=meaning_lang)

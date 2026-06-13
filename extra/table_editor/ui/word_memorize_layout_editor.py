@@ -96,7 +96,9 @@ from extra.table_editor.services.word_memorize_layout import (
     sync_layout_game_tile_fields,
     sync_layout_game_particle_fields,
     sync_layout_title_fields,
+    sync_layout_title_fields_zh,
     sync_layout_subtitle_fields,
+    sync_layout_subtitle_fields_zh,
     swap_box_rects,
     subtitle_line_specs_from_legacy_layout,
     normalize_card_background_color,
@@ -183,6 +185,7 @@ TITLE_MARKER_H_FHD = 64
 TITLE_MARKER_FILL = "#eceff1"
 TITLE_MARKER_OUTLINE = "#78909c"
 TITLE_MARKER_OUTLINE_SEL = "#4fc3f7"
+TITLE_SUBTITLE_LANG_LABELS = ("한국어", "중국어")
 BOX_CONTENT_PAD = 8
 BOX_LINE_GAP = 3
 BOX_IMG_BOTTOM_PAD = 6
@@ -256,6 +259,8 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._game_pick_preview_photo: object | None = None
         self._box_trap_preview_photo: object | None = None
         self._show_tile_canvas_preview = True
+        self._title_edit_lang = "ko"
+        self._subtitle_edit_lang = "ko"
         self._dirty = False
         self._margin_drag: MarginDragMode = ""
 
@@ -423,6 +428,19 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         title_lines_hdr = ttk.Frame(title_in)
         title_lines_hdr.pack(fill=tk.X)
         ttk.Label(title_lines_hdr, text="줄").pack(side=tk.LEFT)
+        ttk.Label(title_lines_hdr, text="언어").pack(side=tk.LEFT, padx=(8, 0))
+        self._title_lang_var = tk.StringVar(value="한국어")
+        self._title_lang_combo = ttk.Combobox(
+            title_lines_hdr,
+            textvariable=self._title_lang_var,
+            values=list(TITLE_SUBTITLE_LANG_LABELS),
+            state="readonly",
+            width=7,
+        )
+        self._title_lang_combo.pack(side=tk.LEFT, padx=(4, 0))
+        self._title_lang_combo.bind(
+            "<<ComboboxSelected>>", self._on_title_lang_changed, add="+"
+        )
         ttk.Button(
             title_lines_hdr, text="+", width=3, command=self._add_title_line
         ).pack(side=tk.RIGHT, padx=(2, 0))
@@ -479,6 +497,19 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         subtitle_lines_hdr = ttk.Frame(subtitle_in)
         subtitle_lines_hdr.pack(fill=tk.X)
         ttk.Label(subtitle_lines_hdr, text="줄").pack(side=tk.LEFT)
+        ttk.Label(subtitle_lines_hdr, text="언어").pack(side=tk.LEFT, padx=(8, 0))
+        self._subtitle_lang_var = tk.StringVar(value="한국어")
+        self._subtitle_lang_combo = ttk.Combobox(
+            subtitle_lines_hdr,
+            textvariable=self._subtitle_lang_var,
+            values=list(TITLE_SUBTITLE_LANG_LABELS),
+            state="readonly",
+            width=7,
+        )
+        self._subtitle_lang_combo.pack(side=tk.LEFT, padx=(4, 0))
+        self._subtitle_lang_combo.bind(
+            "<<ComboboxSelected>>", self._on_subtitle_lang_changed, add="+"
+        )
         ttk.Button(
             subtitle_lines_hdr, text="+", width=3, command=self._add_subtitle_line
         ).pack(side=tk.RIGHT, padx=(2, 0))
@@ -2109,15 +2140,68 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._redraw_canvas()
 
+    def _title_lang_from_ui(self) -> str:
+        return "zh" if (self._title_lang_var.get() or "").strip() == "중국어" else "ko"
+
+    def _subtitle_lang_from_ui(self) -> str:
+        return (
+            "zh" if (self._subtitle_lang_var.get() or "").strip() == "중국어" else "ko"
+        )
+
+    def _store_title_specs_for_lang(
+        self, lang: str, specs: list[TitleLineSpec]
+    ) -> None:
+        if lang == "zh":
+            self._layout.title_lines_zh = specs
+            sync_layout_title_fields_zh(self._layout)
+        else:
+            self._layout.title_lines = specs
+            sync_layout_title_fields(self._layout)
+
+    def _store_subtitle_specs_for_lang(
+        self, lang: str, specs: list[SubtitleLineSpec]
+    ) -> None:
+        if lang == "zh":
+            self._layout.subtitle_lines_zh = specs
+            sync_layout_subtitle_fields_zh(self._layout)
+        else:
+            self._layout.subtitle_lines = specs
+            sync_layout_subtitle_fields(self._layout)
+
+    def _on_title_lang_changed(self, _event: tk.Event | None = None) -> None:
+        new_lang = self._title_lang_from_ui()
+        if new_lang == self._title_edit_lang:
+            return
+        self._store_title_specs_for_lang(
+            self._title_edit_lang, self._collect_title_line_specs()
+        )
+        self._title_edit_lang = new_lang
+        self._rebuild_title_line_entries()
+        self._redraw_canvas()
+
+    def _on_subtitle_lang_changed(self, _event: tk.Event | None = None) -> None:
+        new_lang = self._subtitle_lang_from_ui()
+        if new_lang == self._subtitle_edit_lang:
+            return
+        self._store_subtitle_specs_for_lang(
+            self._subtitle_edit_lang, self._collect_subtitle_line_specs()
+        )
+        self._subtitle_edit_lang = new_lang
+        self._rebuild_subtitle_line_entries()
+        self._invalidate_game_tile_layer_cache()
+        self._redraw_canvas()
+
     def _title_specs_for_preview(self) -> list[TitleLineSpec]:
-        return layout_title_line_specs(self._layout)
+        return layout_title_line_specs(
+            self._layout, meaning_lang=self._title_edit_lang
+        )
 
     def _flush_title_from_ui(self) -> None:
         if not self._title_line_rows:
             return
-        specs = self._collect_title_line_specs()
-        self._layout.title_lines = specs
-        sync_layout_title_fields(self._layout)
+        self._store_title_specs_for_lang(
+            self._title_edit_lang, self._collect_title_line_specs()
+        )
         self._layout.title_x = int(self._layout.frame_width) // 2
 
     def _title_preview_font(self, spec: TitleLineSpec) -> tkfont.Font:
@@ -2158,7 +2242,17 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             child.destroy()
         self._title_line_rows = []
         if specs is None:
-            if self._layout.title_lines:
+            if self._title_edit_lang == "zh":
+                if self._layout.title_lines_zh:
+                    specs = list(self._layout.title_lines_zh)
+                else:
+                    specs = title_line_specs_from_legacy_layout(
+                        getattr(self._layout, "title_zh", ""),
+                        color=self._layout.title_color,
+                        font=self._layout.title_font,
+                        font_pt=self._layout.title_font_pt,
+                    )
+            elif self._layout.title_lines:
                 specs = list(self._layout.title_lines)
             else:
                 specs = title_line_specs_from_legacy_layout(
@@ -2258,20 +2352,24 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._redraw_canvas()
 
     def _sync_title_var(self) -> None:
+        self._title_edit_lang = "ko"
+        self._title_lang_var.set("한국어")
         self._rebuild_title_line_entries()
         self._title_y_offset_var.set(
             str(int(getattr(self._layout, "title_y_offset_px", 0)))
         )
 
     def _subtitle_specs_for_preview(self) -> list[SubtitleLineSpec]:
-        return layout_subtitle_line_specs(self._layout)
+        return layout_subtitle_line_specs(
+            self._layout, meaning_lang=self._subtitle_edit_lang
+        )
 
     def _flush_subtitle_from_ui(self) -> None:
         if not self._subtitle_line_rows:
             return
-        specs = self._collect_subtitle_line_specs()
-        self._layout.subtitle_lines = specs
-        sync_layout_subtitle_fields(self._layout)
+        self._store_subtitle_specs_for_lang(
+            self._subtitle_edit_lang, self._collect_subtitle_line_specs()
+        )
 
     def _text_tile_combo_display(self, stem: str) -> str:
         val = normalize_word_memorize_game_text_tile(stem)
@@ -2298,7 +2396,16 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             child.destroy()
         self._subtitle_line_rows = []
         if specs is None:
-            if self._layout.subtitle_lines:
+            if self._subtitle_edit_lang == "zh":
+                if self._layout.subtitle_lines_zh:
+                    specs = list(self._layout.subtitle_lines_zh)
+                else:
+                    specs = subtitle_line_specs_from_legacy_layout(
+                        getattr(self._layout, "subtitle_zh", ""),
+                        font=self._layout.subtitle_font,
+                        text_tile=layout_subtitle_text_tile(self._layout),
+                    )
+            elif self._layout.subtitle_lines:
                 specs = list(self._layout.subtitle_lines)
             else:
                 specs = subtitle_line_specs_from_legacy_layout(
@@ -2417,6 +2524,8 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._redraw_canvas()
 
     def _sync_subtitle_var(self) -> None:
+        self._subtitle_edit_lang = "ko"
+        self._subtitle_lang_var.set("한국어")
         self._rebuild_subtitle_line_entries()
         tile_stem = layout_subtitle_text_tile(self._layout)
         self._subtitle_text_tile_var.set(
@@ -2794,7 +2903,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         from studio.studios.word_memorize_tile_text import subtitle_bake_cache_token
 
         stems = layout_game_tiles(self._layout)
-        sub_token = "::".join(subtitle_bake_cache_token(self._layout))
+        sub_token = "::".join(
+            subtitle_bake_cache_token(
+                self._layout, meaning_lang=self._subtitle_edit_lang
+            )
+        )
         stems_token = ",".join(stems)
         return (
             f"{stems_token}:{layout_game_tile_seed(self._layout)}:"
@@ -2910,6 +3023,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 tile_px=tile_px,
                 frame_width=PREVIEW_WIDTH,
                 frame_height=PREVIEW_HEIGHT,
+                meaning_lang=self._subtitle_edit_lang,
             )
             raw = pygame.image.tobytes(layer, "RGBA")
             pil_layer = Image.frombytes("RGBA", layer.get_size(), raw)
@@ -3592,8 +3706,12 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._write_layout(Path(path))
 
     def _write_layout(self, path: Path) -> None:
-        self._flush_title_from_ui()
-        self._flush_subtitle_from_ui()
+        self._store_title_specs_for_lang(
+            self._title_edit_lang, self._collect_title_line_specs()
+        )
+        self._store_subtitle_specs_for_lang(
+            self._subtitle_edit_lang, self._collect_subtitle_line_specs()
+        )
         self._flush_game_tiles_from_ui()
         self._flush_game_particles_from_ui()
         self._layout.renumber_orders()

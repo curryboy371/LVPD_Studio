@@ -363,7 +363,46 @@ class MainPanel(ttk.Frame):
         mode, layout_path, meaning_lang = picked
         stem = Path(layout_path).stem
         self._arg_var.set(stem)
+        if mode == "summary":
+            self._run_word_memorize_summary(layout_path, meaning_lang)
+            return
         self._dispatch_word_memorize(mode, layout_path, meaning_lang)
+
+    def _run_word_memorize_summary(
+        self,
+        layout_path: str,
+        meaning_lang: str = "ko",
+    ) -> None:
+        """배치 단어 목록을 텍스트로 정리해 release에 저장 후 연다."""
+        from extra.table_editor.services.word_memorize_summary import (
+            build_word_memorize_summary_from_path,
+            write_and_open_summary_text,
+        )
+
+        stem = Path(layout_path).stem
+        lang = (meaning_lang or "ko").strip().lower()
+        if lang not in ("ko", "en", "zh"):
+            lang = "ko"
+        try:
+            text = build_word_memorize_summary_from_path(
+                layout_path, meaning_lang=lang
+            )
+            out_path = write_and_open_summary_text(text, stem=stem)
+        except OSError as ex:
+            messagebox.showerror(
+                "정리 실패",
+                f"텍스트 파일을 저장·열 수 없습니다.\n\n{ex}",
+                parent=self.winfo_toplevel(),
+            )
+            return
+        except Exception as ex:
+            messagebox.showerror(
+                "정리 실패",
+                f"배치를 읽거나 정리할 수 없습니다.\n\n{ex}",
+                parent=self.winfo_toplevel(),
+            )
+            return
+        self._on_status(f"단어 외우기 정리: {out_path}")
 
     def _dispatch_word_memorize(
         self,

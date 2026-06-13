@@ -144,6 +144,7 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
+        self._tiles_fully_restored = False
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -266,6 +267,7 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
+        self._tiles_fully_restored = False
         self._done = False
         self._active_effect_sound_until.clear()
 
@@ -580,6 +582,7 @@ class WordMemorizeStudio(IStudio):
         """타일 복구 완료 — 종료."""
         self._trap_regrow_elapsed_sec = 0.0
         self._word_substep = ""
+        self._tiles_fully_restored = True
         self._phase = "outro"
         self._active_key = None
         self._hold_sec = self._outro_hold_sec()
@@ -803,7 +806,7 @@ class WordMemorizeStudio(IStudio):
             card_type_label_for_value,
         )
 
-        cta_path = box_cta_audio_path(box)
+        cta_path = box_cta_audio_path(box, meaning_lang=self._meaning_lang)
         if cta_path is not None:
             label = card_type_label_for_value(box_card_type(box))
             return (cta_path, None, label, "", cta_path.name, "")
@@ -859,7 +862,7 @@ class WordMemorizeStudio(IStudio):
         if box_uses_cta_audio(box):
             from extra.table_editor.services.word_memorize_layout import box_cta_audio_path
 
-            path = box_cta_audio_path(box)
+            path = box_cta_audio_path(box, meaning_lang=self._meaning_lang)
             if path is not None:
                 return max(self._audio_duration(path), 0.15)
         first_len, _, second_len = self._word_tts_durations(box)
@@ -956,7 +959,10 @@ class WordMemorizeStudio(IStudio):
         revealed = frozenset(self._revealed_keys) if pick_mining else frozenset()
         cta_caption = ""
         if highlight and self._word_substep == "first":
-            cta_caption = active_cta_caption_for_box(self._active_mining_box())
+            cta_caption = active_cta_caption_for_box(
+                self._active_mining_box(),
+                meaning_lang=self._meaning_lang,
+            )
         use_mining_elapsed = (
             highlight and pick_mining and self._word_substep == "mining"
         )
@@ -1012,6 +1018,7 @@ class WordMemorizeStudio(IStudio):
             ),
             cta_caption_text=cta_caption,
             meaning_lang=self._meaning_lang,
+            tiles_fully_restored=self._tiles_fully_restored,
         )
 
     def get_recording_prefix(self) -> Optional[str]:

@@ -153,12 +153,17 @@ def measure_subtitle_line(text: str, font_pt: int, font_key: str) -> tuple[int, 
     return surf.get_width(), surf.get_height()
 
 
-def subtitle_bake_cache_token(layout: WordMemorizeLayout) -> tuple[str, ...]:
+def subtitle_bake_cache_token(
+    layout: WordMemorizeLayout,
+    *,
+    meaning_lang: str = "ko",
+) -> tuple[str, ...]:
     """타일 베이스 캐시에 포함할 부제목 식별자."""
-    specs = layout_subtitle_line_specs(layout)
+    specs = layout_subtitle_line_specs(layout, meaning_lang=meaning_lang)
     if not specs:
-        return ("",)
+        return (meaning_lang, "")
     parts: list[str] = [
+        meaning_lang,
         str(int(getattr(layout, "subtitle_y_offset_px", 0))),
         f"{layout.margin_top_ratio:.6f}",
         f"{layout.margin_bottom_ratio:.6f}",
@@ -417,9 +422,10 @@ def apply_tile_subtitle(
     font_pt: int | None = None,
     frame_width: int | None = None,
     frame_height: int | None = None,
+    meaning_lang: str = "ko",
 ) -> None:
     """타일 레이어 위 부제목 — 글자 위치의 배경 타일을 text_tile로 교체."""
-    specs = layout_subtitle_line_specs(layout)
+    specs = layout_subtitle_line_specs(layout, meaning_lang=meaning_lang)
     if not specs or tile_px <= 0:
         return
 

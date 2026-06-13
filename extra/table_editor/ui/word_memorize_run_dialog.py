@@ -4,14 +4,16 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-
-from extra.table_editor.ui.studio_run_dialog import (
-    _MODE_BY_LABEL,
-    _MODE_LABELS,
-    _RUN_MODES,
-)
 from extra.table_editor.services.word_memorize_layouts import normalize_layout_filename
 from extra.table_editor.ui.window_placement import center_toplevel_on_parent
+
+_WORD_MEMORIZE_RUN_MODES: tuple[tuple[str, str], ...] = (
+    ("debug", "미리보기 (F5 debug)"),
+    ("record", "녹화 (record)"),
+    ("summary", "정리 (텍스트)"),
+)
+_MODE_LABELS = {key: label for key, label in _WORD_MEMORIZE_RUN_MODES}
+_MODE_BY_LABEL = {label: key for key, label in _WORD_MEMORIZE_RUN_MODES}
 
 _MEANING_LANG_LABELS: dict[str, str] = {
     "ko": "한국어",
@@ -37,7 +39,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
 
         ttk.Label(
             self,
-            text="저장된 배치(JSON)를 고른 뒤 미리보기 또는 녹화를 실행합니다.",
+            text="저장된 배치(JSON)를 고른 뒤 미리보기·녹화·정리를 실행합니다.",
             wraplength=400,
         ).pack(padx=16, pady=(14, 8), anchor="w")
 
@@ -78,7 +80,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
         mode_frame = ttk.LabelFrame(self, text="실행 방식")
         mode_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
         self._mode_var = tk.StringVar(value=_MODE_LABELS["debug"])
-        for _key, label in _RUN_MODES:
+        for _key, label in _WORD_MEMORIZE_RUN_MODES:
             ttk.Radiobutton(
                 mode_frame,
                 text=label,

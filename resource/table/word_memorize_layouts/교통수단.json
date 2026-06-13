@@ -4,9 +4,9 @@
   "frame_height": 1920,
   "background": {
     "type": "image",
-    "value": "bg_black"
+    "value": "blue"
   },
-  "title": "교통수단을 알아보자!",
+  "title": "30초 만에 끝내는 교통수단 단어",
   "title_x": 540,
   "title_y": 103,
   "title_y_offset_px": 0,
@@ -15,19 +15,69 @@
   "title_font_pt": 68,
   "title_lines": [
     {
-      "text": "교통수단을 알아보자!",
+      "text": "30초 만에 끝내는 교통수단 단어",
       "color": "#ffffff",
       "font": "kr_cn",
       "font_pt": 68
     }
   ],
+  "title_zh": "30秒交通工具词汇挑战",
+  "title_lines_zh": [
+    {
+      "text": "30秒交通工具词汇挑战",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "subtitle": "택시, 버스의\n중국어는 알지?",
+  "subtitle_text_tile": "white",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "택시, 버스의",
+      "font": "kr_cn",
+      "text_tile": "white"
+    },
+    {
+      "text": "중국어는 알지?",
+      "font": "kr_cn",
+      "text_tile": "black"
+    }
+  ],
+  "subtitle_zh": "你知道韩语的\n出租车和公交车怎么说吗?",
+  "subtitle_lines_zh": [
+    {
+      "text": "你知道韩语的",
+      "font": "kr_cn",
+      "text_tile": "black"
+    },
+    {
+      "text": "出租车和公交车怎么说吗?",
+      "font": "kr_cn",
+      "text_tile": "white"
+    }
+  ],
   "selection_highlight": "gradient",
   "row_highlight": "none",
   "use_base_slot": false,
-  "use_card_background": true,
+  "use_card_background": false,
   "card_background_color": "#eceae8",
   "show_images": true,
   "bg_music_path": "resource/sound/bg_short/Cobblestone_Balcony.mp3",
+  "game_tile": "tile_000_000",
+  "game_tiles": [
+    "tile_000_000",
+    "tile_002_002"
+  ],
+  "game_tile_seed": 380381505,
+  "game_particle": "particle_000",
+  "game_particles": [
+    "particle_000",
+    "particle_001"
+  ],
+  "game_pick": "pick1",
   "boxes": [
     {
       "word_id": "20178",
@@ -36,7 +86,8 @@
       "y": 194,
       "w": 319,
       "h": 341,
-      "box_key": "box_12"
+      "box_key": "box_12",
+      "card_type": ""
     },
     {
       "word_id": "20168",
@@ -45,34 +96,38 @@
       "y": 194,
       "w": 319,
       "h": 341,
-      "box_key": "box_2"
+      "box_key": "box_2",
+      "card_type": ""
     },
     {
       "word_id": "20169",
       "order": 3,
-      "x": 728,
-      "y": 194,
+      "x": 380,
+      "y": 1265,
       "w": 319,
       "h": 341,
-      "box_key": "box_3"
+      "box_key": "box_3",
+      "card_type": ""
     },
     {
       "word_id": "20170",
       "order": 4,
-      "x": 32,
-      "y": 551,
+      "x": 728,
+      "y": 908,
       "w": 319,
       "h": 341,
-      "box_key": "box_4"
+      "box_key": "box_4",
+      "card_type": ""
     },
     {
       "word_id": "20171",
       "order": 5,
-      "x": 380,
-      "y": 551,
+      "x": 728,
+      "y": 1265,
       "w": 319,
       "h": 341,
-      "box_key": "box_5"
+      "box_key": "box_5",
+      "card_type": ""
     },
     {
       "word_id": "20172",
@@ -81,7 +136,8 @@
       "y": 551,
       "w": 319,
       "h": 341,
-      "box_key": "box_6"
+      "box_key": "box_6",
+      "card_type": ""
     },
     {
       "word_id": "20173",
@@ -90,7 +146,8 @@
       "y": 908,
       "w": 319,
       "h": 341,
-      "box_key": "box_7"
+      "box_key": "box_7",
+      "card_type": ""
     },
     {
       "word_id": "20176",
@@ -99,16 +156,18 @@
       "y": 908,
       "w": 319,
       "h": 341,
-      "box_key": "box_10"
+      "box_key": "box_10",
+      "card_type": ""
     },
     {
       "word_id": "20174",
       "order": 9,
-      "x": 728,
-      "y": 908,
+      "x": 32,
+      "y": 551,
       "w": 319,
       "h": 341,
-      "box_key": "box_8"
+      "box_key": "box_8",
+      "card_type": ""
     },
     {
       "word_id": "20155",
@@ -117,25 +176,28 @@
       "y": 1265,
       "w": 319,
       "h": 341,
-      "box_key": "box_1"
+      "box_key": "box_1",
+      "card_type": ""
     },
     {
       "word_id": "20175",
       "order": 11,
-      "x": 380,
-      "y": 1265,
+      "x": 728,
+      "y": 194,
       "w": 319,
       "h": 341,
-      "box_key": "box_9"
+      "box_key": "box_9",
+      "card_type": ""
     },
     {
       "word_id": "20177",
       "order": 12,
-      "x": 728,
-      "y": 1265,
+      "x": 380,
+      "y": 551,
       "w": 319,
       "h": 341,
-      "box_key": "box_11"
+      "box_key": "box_11",
+      "card_type": "like"
     }
   ],
   "holding_word_ids": [],

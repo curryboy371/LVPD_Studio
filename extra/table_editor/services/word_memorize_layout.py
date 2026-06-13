@@ -32,10 +32,6 @@ TRAP_REGROW_SEC_MAX = 5.0
 TRAP_REGROW_HOLD_SEC = 0.45
 # trap 타일 채우기 완료 후 연기가 모두 사라질 때까지 재확인 간격(초)
 TRAP_REGROW_SMOKE_POLL_SEC = 0.05
-# trap 카드 — 채굴 완료 후 카드 size-up (초)
-TRAP_CARD_SIZE_UP_SEC = 0.55
-TRAP_CARD_SCALE_START = 0.82
-TRAP_CARD_SCALE_END = 1.03
 # trap PNG — 인접 카드 채굴로 깨질 수 있는 가장자리 타일 링만큼 안쪽 여백
 TRAP_CARD_EDGE_MARGIN_TILES = 1
 # 재생·미리보기 타일링 시 한 칸 픽셀 크기 (FHD 기준, 프레임 너비에 비례)
@@ -423,7 +419,17 @@ def title_line_specs_from_legacy_layout(
     ]
 
 
-def layout_title_line_specs(layout: "WordMemorizeLayout") -> list[TitleLineSpec]:
+def layout_title_line_specs(
+    layout: "WordMemorizeLayout",
+    *,
+    meaning_lang: str = "ko",
+) -> list[TitleLineSpec]:
+    if _is_zh_meaning_lang(meaning_lang) and layout.title_lines_zh:
+        return [
+            s
+            for s in layout.title_lines_zh
+            if (s.text or "").strip()
+        ]
     if layout.title_lines:
         return [
             s
@@ -447,6 +453,12 @@ def sync_layout_title_fields(layout: "WordMemorizeLayout") -> None:
     layout.title_color = first.color
     layout.title_font = first.font
     layout.title_font_pt = first.font_pt
+
+
+def sync_layout_title_fields_zh(layout: "WordMemorizeLayout") -> None:
+    """title_lines_zh → title_zh 문자열."""
+    specs = layout.title_lines_zh
+    layout.title_zh = join_title_lines([s.text for s in specs])
 
 
 @dataclass
@@ -496,7 +508,13 @@ def subtitle_line_specs_from_legacy_layout(
     ]
 
 
-def layout_subtitle_line_specs(layout: "WordMemorizeLayout") -> list[SubtitleLineSpec]:
+def layout_subtitle_line_specs(
+    layout: "WordMemorizeLayout",
+    *,
+    meaning_lang: str = "ko",
+) -> list[SubtitleLineSpec]:
+    if _is_zh_meaning_lang(meaning_lang) and layout.subtitle_lines_zh:
+        return [s for s in layout.subtitle_lines_zh if (s.text or "").strip()]
     if layout.subtitle_lines:
         return [s for s in layout.subtitle_lines if (s.text or "").strip()]
     return subtitle_line_specs_from_legacy_layout(
@@ -515,6 +533,12 @@ def sync_layout_subtitle_fields(layout: "WordMemorizeLayout") -> None:
     layout.subtitle_font = first.font
     if first.text_tile and not layout_subtitle_text_tile(layout):
         layout.subtitle_text_tile = first.text_tile
+
+
+def sync_layout_subtitle_fields_zh(layout: "WordMemorizeLayout") -> None:
+    """subtitle_lines_zh → subtitle_zh 문자열."""
+    specs = layout.subtitle_lines_zh
+    layout.subtitle_zh = join_title_lines([s.text for s in specs])
 
 
 def default_subtitle_position(
@@ -1190,6 +1214,11 @@ CARD_TYPE_CTA_CAPTION: dict[str, str] = {
     CARD_TYPE_LIKE: "좋아요 부탁드립니다",
     CARD_TYPE_TOPIC_RECOMMEND: "원하시는 주제를 댓글에 남겨주세요",
 }
+CARD_TYPE_CTA_CAPTION_ZH: dict[str, str] = {
+    CARD_TYPE_SUBSCRIBE: "关注我学习更多的实用韩语。",
+    CARD_TYPE_LIKE: "你们的点赞是我的动力。",
+    CARD_TYPE_TOPIC_RECOMMEND: "评论里留言你想学习的韩语吧",
+}
 _LEGACY_MINING_MASK_TO_CARD_TYPE: dict[str, str] = {
     MINING_MASK_HANZI: CARD_TYPE_TOPIC_RECOMMEND,
     MINING_MASK_HANZI_PINYIN: CARD_TYPE_TOPIC_RECOMMEND,
@@ -1270,27 +1299,40 @@ def box_cta_hanzi(box: WordMemorizeBox) -> str:
     return card_type_cta_hanzi(box_card_type(box))
 
 
-def card_type_cta_audio_rel(card_type: str) -> str:
-    """CTA 타입별 고정 음성 상대 경로 — 없으면 빈 문자열."""
-    return CARD_TYPE_CTA_AUDIO_REL.get(normalize_card_type(card_type), "")
+def card_type_cta_audio_rel(card_type: str, *, meaning_lang: str = "ko") -> str:
+    """CTA 타입별 고정 음성 상대 경로 — zh는 stem_ch.mp3."""
+    base = CARD_TYPE_CTA_AUDIO_REL.get(normalize_card_type(card_type), "")
+    if not base:
+        return ""
+    if not _is_zh_meaning_lang(meaning_lang):
+        return base
+    p = Path(base.replace("\\", "/"))
+    return str(p.with_name(f"{p.stem}_ch{p.suffix}"))
 
 
-def box_cta_audio_path(box: WordMemorizeBox) -> Path | None:
+def box_cta_audio_path(
+    box: WordMemorizeBox,
+    *,
+    meaning_lang: str = "ko",
+) -> Path | None:
     """CTA 타입 박스 고정 mp3 절대 경로 — 일반 단어는 None."""
-    rel = card_type_cta_audio_rel(box_card_type(box))
+    rel = card_type_cta_audio_rel(box_card_type(box), meaning_lang=meaning_lang)
     if not rel:
         return None
     return get_repo_root() / rel.replace("\\", "/")
 
 
-def card_type_cta_caption(card_type: str) -> str:
-    """CTA 음성 재생 시 하단 자막 문구."""
-    return CARD_TYPE_CTA_CAPTION.get(normalize_card_type(card_type), "")
+def card_type_cta_caption(card_type: str, *, meaning_lang: str = "ko") -> str:
+    """CTA 음성 재생 시 하단 자막 문구 — zh 모드는 중국어."""
+    norm = normalize_card_type(card_type)
+    if _is_zh_meaning_lang(meaning_lang):
+        return CARD_TYPE_CTA_CAPTION_ZH.get(norm, "")
+    return CARD_TYPE_CTA_CAPTION.get(norm, "")
 
 
-def box_cta_caption(box: WordMemorizeBox) -> str:
+def box_cta_caption(box: WordMemorizeBox, *, meaning_lang: str = "ko") -> str:
     """박스 CTA 자막 — 없으면 빈 문자열."""
-    return card_type_cta_caption(box_card_type(box))
+    return card_type_cta_caption(box_card_type(box), meaning_lang=meaning_lang)
 
 
 def resolve_cta_caption_position(
@@ -1565,11 +1607,15 @@ class WordMemorizeLayout:
     title_font: str = DEFAULT_TITLE_FONT
     title_font_pt: int = DEFAULT_TITLE_FONT_PT
     title_lines: list[TitleLineSpec] = field(default_factory=list)
+    title_zh: str = ""
+    title_lines_zh: list[TitleLineSpec] = field(default_factory=list)
     subtitle: str = ""
     subtitle_text_tile: str = ""
     subtitle_font: str = DEFAULT_TITLE_FONT
     subtitle_y_offset_px: int = 0
     subtitle_lines: list[SubtitleLineSpec] = field(default_factory=list)
+    subtitle_zh: str = ""
+    subtitle_lines_zh: list[SubtitleLineSpec] = field(default_factory=list)
     selection_highlight: SelectionHighlightType = DEFAULT_SELECTION_HIGHLIGHT
     # 재생 중인 단어와 y·h가 같은 줄 강조 (카드 효과와 별도)
     row_highlight: RowHighlightType = DEFAULT_ROW_HIGHLIGHT
@@ -1611,7 +1657,9 @@ class WordMemorizeLayout:
 
     def to_dict(self) -> dict[str, Any]:
         sync_layout_title_fields(self)
+        sync_layout_title_fields_zh(self)
         sync_layout_subtitle_fields(self)
+        sync_layout_subtitle_fields_zh(self)
         sync_layout_game_tile_fields(self)
         sync_layout_game_particle_fields(self)
         self.title_x = int(self.frame_width) // 2
@@ -1631,11 +1679,15 @@ class WordMemorizeLayout:
             "title_font": normalize_title_font(self.title_font),
             "title_font_pt": normalize_title_font_pt(self.title_font_pt),
             "title_lines": [s.to_dict() for s in self.title_lines],
+            "title_zh": (self.title_zh or "").strip(),
+            "title_lines_zh": [s.to_dict() for s in self.title_lines_zh],
             "subtitle": (self.subtitle or "").strip(),
             "subtitle_text_tile": layout_subtitle_text_tile(self),
             "subtitle_font": normalize_title_font(self.subtitle_font),
             "subtitle_y_offset_px": int(self.subtitle_y_offset_px),
             "subtitle_lines": [s.to_dict() for s in self.subtitle_lines],
+            "subtitle_zh": (self.subtitle_zh or "").strip(),
+            "subtitle_lines_zh": [s.to_dict() for s in self.subtitle_lines_zh],
             "selection_highlight": normalize_selection_highlight(self.selection_highlight),
             "row_highlight": normalize_row_highlight(self.row_highlight),
             "use_base_slot": bool(self.use_base_slot),
@@ -1709,6 +1761,22 @@ class WordMemorizeLayout:
             )
         sync_layout_title_fields(layout)
         layout.title_x = int(layout.frame_width) // 2
+        layout.title_zh = str(data.get("title_zh", "") or "").strip()
+        raw_lines_zh = data.get("title_lines_zh")
+        if isinstance(raw_lines_zh, list) and raw_lines_zh:
+            layout.title_lines_zh = [
+                TitleLineSpec.from_dict(item)
+                for item in raw_lines_zh
+                if isinstance(item, dict)
+            ]
+        elif layout.title_zh:
+            layout.title_lines_zh = title_line_specs_from_legacy_layout(
+                layout.title_zh,
+                color=layout.title_color,
+                font=layout.title_font,
+                font_pt=layout.title_font_pt,
+            )
+        sync_layout_title_fields_zh(layout)
         layout.subtitle = str(data.get("subtitle", "") or "").strip()
         layout.subtitle_text_tile = normalize_word_memorize_game_text_tile(
             str(data.get("subtitle_text_tile", "") or "")
@@ -1731,6 +1799,21 @@ class WordMemorizeLayout:
                 text_tile=layout.subtitle_text_tile,
             )
         sync_layout_subtitle_fields(layout)
+        layout.subtitle_zh = str(data.get("subtitle_zh", "") or "").strip()
+        raw_sub_lines_zh = data.get("subtitle_lines_zh")
+        if isinstance(raw_sub_lines_zh, list) and raw_sub_lines_zh:
+            layout.subtitle_lines_zh = [
+                SubtitleLineSpec.from_dict(item)
+                for item in raw_sub_lines_zh
+                if isinstance(item, dict)
+            ]
+        elif layout.subtitle_zh:
+            layout.subtitle_lines_zh = subtitle_line_specs_from_legacy_layout(
+                layout.subtitle_zh,
+                font=layout.subtitle_font,
+                text_tile=layout.subtitle_text_tile,
+            )
+        sync_layout_subtitle_fields_zh(layout)
         raw_highlight = str(
             data.get("selection_highlight", DEFAULT_SELECTION_HIGHLIGHT) or ""
         ).strip()

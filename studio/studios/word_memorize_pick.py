@@ -342,6 +342,8 @@ def _horizontal_void_distance(
         gap = cell_x0 - card_x1
     else:
         return 0
+    if gap <= 0:
+        return 0
     return max(1, int(math.ceil(gap / max(1, cell_x1 - cell_x0))))
 
 
@@ -354,6 +356,8 @@ def _vertical_void_distance(
     elif row_top >= card_y1:
         gap = row_top - card_y1
     else:
+        return 0
+    if gap <= 0:
         return 0
     return max(1, int(math.ceil(gap / max(1, row_bottom - row_top))))
 
@@ -375,7 +379,7 @@ def _cell_on_active_mining_row(
     cell_x1 = cell_x0 + px
     card_x0 = int(box.x)
     card_x1 = card_x0 + int(box.w)
-    return _overlap_len(cell_x0, cell_x1, card_x0, card_x1) >= px // 2
+    return _overlap_len(cell_x0, cell_x1, card_x0, card_x1) > 0
 
 
 def _cell_punch_chance(
@@ -404,6 +408,17 @@ def _cell_punch_chance(
     overlap_y = _overlap_len(row_top, row_bottom, card_y0, card_y1)
     inside_card = overlap_x >= px // 2 and overlap_y >= px // 2
 
+    # 카드 좌·우 가장자리·바로 인접 칸 — 격자 스냅으로 overlap 없음/얇음
+    touches_card_x = cell_x1 == card_x0 or cell_x0 == card_x1
+    if (
+        not inside_card
+        and not is_overdig_row
+        and logical_row_index < completed_rows
+        and overlap_y > 0
+        and (overlap_x > 0 or touches_card_x)
+    ):
+        return 1.0
+
     # 카드 y가 격자와 어긋나면 맨 윗줄이 inside_card·fringe 모두 아님 → 0% 버그 방지
     if (
         not is_overdig_row
@@ -426,6 +441,13 @@ def _cell_punch_chance(
 
     void_dist_x = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
     if void_dist_x > 0:
+        # 곡괭이가 지나간 행의 좌·우 fringe — 화면 가장자리까지 연쇄 보장
+        if (
+            not is_overdig_row
+            and logical_row_index < completed_rows
+            and overlap_y > 0
+        ):
+            return 1.0
         chances = MINING_VOID_FRINGE_CHANCE
         if void_dist_x > len(chances):
             return 0.0
@@ -1236,6 +1258,7 @@ def build_mining_tile_overlay(
     words_by_id: dict[int, Word] | None = None,
     card_meaning_by_id: dict[int, str] | None = None,
     meaning_lang: str = "ko",
+    tiles_fully_restored: bool = False,
 ) -> pygame.Surface | None:
     """타일 오버레이 — 행 단위 구멍 유지."""
     from extra.table_editor.services.word_memorize_layout import WordMemorizeLayout
@@ -1245,6 +1268,8 @@ def build_mining_tile_overlay(
         return None
     if not layout_uses_pick_mining(layout):
         return None
+    if tiles_fully_restored:
+        return base_layer.copy()
     tile_px = game_tile_display_px(frame_width=frame_width)
     frame_height = int(base_layer.get_height())
     if trap_regrow_active:

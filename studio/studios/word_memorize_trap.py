@@ -11,16 +11,11 @@ import pygame
 
 from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
-    TRAP_CARD_SCALE_END,
-    TRAP_CARD_SCALE_START,
-    TRAP_CARD_SIZE_UP_SEC,
     TRAP_REGROW_SEC,
     TRAP_REGROW_SEC_MAX,
     TRAP_REGROW_HOLD_SEC,
-    PICK_REVEAL_SEC,
     WordMemorizeBox,
     WordMemorizeLayout,
-    box_uses_mining_regrow,
     box_uses_trap,
     game_tile_display_px,
     layout_tile_band_y,
@@ -29,8 +24,6 @@ from extra.table_editor.services.word_memorize_layout import (
 )
 from studio.studios.word_memorize_pick import (
     box_runtime_key,
-    card_mining_row_count,
-    card_mining_state,
     collect_layout_mining_punch_rects,
     pick_reveal_progress,
     punch_mining_rects,
@@ -64,7 +57,6 @@ def clear_trap_regrow_cache() -> None:
 
     _defrag_schedule_cache.clear()
     _defrag_sprite_cache.clear()
-    _mining_complete_elapsed_cache.clear()
     clear_regrow_overlay_cache()
 
 
@@ -541,31 +533,6 @@ def draw_trap_on_rect(
     surface.blit(img, rect.topleft)
 
 
-_mining_complete_elapsed_cache: dict[tuple[Any, ...], float] = {}
-
-
-def estimate_trap_card_mining_complete_elapsed(
-    box: WordMemorizeBox,
-    *,
-    tile_px: int,
-) -> float:
-    """채굴이 끝나는 시각(초) — fade 시작점."""
-    px = max(1, int(tile_px))
-    cache_key = (box_runtime_key(box), int(box.x), int(box.y), int(box.w), int(box.h), px)
-    cached = _mining_complete_elapsed_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    reveal_sec = float(PICK_REVEAL_SEC)
-    complete_at = reveal_sec
-    for step in range(120):
-        t = reveal_sec * float(step) / 119.0
-        if card_mining_state(box, t, tile_px=px, stored_completed_rows=0).is_complete:
-            complete_at = t
-            break
-    _mining_complete_elapsed_cache[cache_key] = complete_at
-    return complete_at
-
-
 def should_show_trap_card_image(
     box: WordMemorizeBox,
     *,
@@ -589,72 +556,6 @@ def should_show_trap_card_image(
         tile_px,
     )
     return False
-
-
-def trap_card_mining_complete(
-    box: WordMemorizeBox,
-    *,
-    runtime_key: str,
-    revealed_keys: set[str],
-    revealed_rows_by_key: dict[str, int],
-    is_active: bool,
-    active_elapsed_sec: float,
-    tile_px: int,
-) -> bool:
-    """trap 카드 채굴이 끝났는지."""
-    if runtime_key in revealed_keys:
-        return True
-    row_count = card_mining_row_count(box, tile_px)
-    if int(revealed_rows_by_key.get(runtime_key, 0)) >= row_count:
-        return True
-    if is_active:
-        stored = int(revealed_rows_by_key.get(runtime_key, 0))
-        return card_mining_state(
-            box,
-            active_elapsed_sec,
-            tile_px=tile_px,
-            stored_completed_rows=stored,
-        ).is_complete
-    return False
-
-
-def trap_card_reveal_scale(
-    box: WordMemorizeBox,
-    *,
-    runtime_key: str,
-    revealed_keys: set[str],
-    revealed_rows_by_key: dict[str, int],
-    is_active: bool,
-    active_elapsed_sec: float,
-    tile_px: int,
-    trap_regrow_active: bool = False,
-) -> float | None:
-    """CTA 카드 — 채굴 완료 후 size-up 배율. 진행 전·비-regrow이면 None."""
-    if not box_uses_mining_regrow(box):
-        return None
-    if trap_regrow_active:
-        return float(TRAP_CARD_SCALE_END)
-    if not trap_card_mining_complete(
-        box,
-        runtime_key=runtime_key,
-        revealed_keys=revealed_keys,
-        revealed_rows_by_key=revealed_rows_by_key,
-        is_active=is_active,
-        active_elapsed_sec=active_elapsed_sec,
-        tile_px=tile_px,
-    ):
-        return None
-    fade_sec = max(1e-6, float(TRAP_CARD_SIZE_UP_SEC))
-    if is_active:
-        complete_at = estimate_trap_card_mining_complete_elapsed(box, tile_px=tile_px)
-        grow_t = max(0.0, float(active_elapsed_sec) - complete_at)
-    else:
-        grow_t = fade_sec
-    ratio = max(0.0, min(1.0, grow_t / fade_sec))
-    eased = 1.0 - (1.0 - ratio) ** 2.0
-    start = float(TRAP_CARD_SCALE_START)
-    end = float(TRAP_CARD_SCALE_END)
-    return start + (end - start) * eased
 
 
 _smoke_sprite_cache: pygame.Surface | None = None
