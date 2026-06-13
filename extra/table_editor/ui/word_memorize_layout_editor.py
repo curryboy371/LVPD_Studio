@@ -4,8 +4,8 @@ from __future__ import annotations
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
-from typing import Literal
+from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
+from typing import Any, Literal
 
 from core.paths import SHORTS_HEIGHT, SHORTS_WIDTH, get_repo_root
 from extra.table_editor.services.word_lookup import lookup_word_details
@@ -45,7 +45,11 @@ from extra.table_editor.services.word_memorize_layout import (
     is_laser_selection_highlight,
     laser_preview_outline_hex,
     layout_has_overlaps,
+    layout_uses_pick_mining,
     list_word_memorize_bg_stems,
+    list_word_memorize_game_particles,
+    list_word_memorize_game_picks,
+    list_word_memorize_game_tiles,
     list_title_color_labels,
     list_title_font_labels,
     list_row_highlight_labels,
@@ -57,9 +61,15 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_title_color,
     normalize_title_font,
     normalize_title_font_pt,
+    GAME_ASSET_NONE_LABEL,
+    game_tile_display_px,
     normalize_word_memorize_bg_stem,
+    normalize_word_memorize_game_particle,
+    normalize_word_memorize_game_pick,
+    normalize_word_memorize_game_tile,
     save_layout,
     sync_layout_title_fields,
+    normalize_card_background_color,
     title_color_hex_for_label,
     title_color_label_for_value,
     title_font_key_for_label,
@@ -72,6 +82,9 @@ from extra.table_editor.services.word_memorize_layout import (
     TITLE_FONT_PT_MIN,
     TITLE_FONT_PT_MAX,
     word_memorize_bg_image_path,
+    word_memorize_game_particle_path,
+    word_memorize_game_pick_path,
+    word_memorize_game_tile_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
     WordMemorizeVocabImportDialog,
@@ -205,6 +218,12 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._box_photos: dict[str, object] = {}
         self._bg_photo: object | None = None
         self._bg_photo_key: str | None = None
+        self._game_tile_layer_photo: object | None = None
+        self._game_tile_layer_key: str | None = None
+        self._game_tile_preview_photo: object | None = None
+        self._game_particle_preview_photo: object | None = None
+        self._game_pick_preview_photo: object | None = None
+        self._show_tile_canvas_preview = True
         self._dirty = False
         self._margin_drag: MarginDragMode = ""
 
@@ -434,15 +453,43 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             variable=self._use_base_slot_var,
             command=self._on_use_base_slot_changed,
         ).pack(anchor="w", padx=6, pady=(0, 4))
+        card_bg_row = ttk.Frame(highlight_frame)
+        card_bg_row.pack(fill=tk.X, padx=6, pady=(0, 4))
         self._use_card_background_var = tk.BooleanVar(
             value=bool(getattr(self._layout, "use_card_background", True))
         )
         ttk.Checkbutton(
-            highlight_frame,
-            text="단어 카드 배경 (흰 박스)",
+            card_bg_row,
+            text="단어 카드 배경",
             variable=self._use_card_background_var,
             command=self._on_use_card_background_changed,
-        ).pack(anchor="w", padx=6, pady=(0, 4))
+        ).pack(side=tk.LEFT)
+        ttk.Label(card_bg_row, text="색").pack(side=tk.LEFT, padx=(8, 4))
+        self._card_bg_swatch = tk.Frame(
+            card_bg_row,
+            width=28,
+            height=20,
+            relief=tk.GROOVE,
+            bd=1,
+        )
+        self._card_bg_swatch.pack(side=tk.LEFT, padx=(0, 4))
+        self._card_bg_swatch.pack_propagate(False)
+        self._card_background_color_label = ttk.Label(
+            card_bg_row,
+            text=normalize_card_background_color(
+                getattr(self._layout, "card_background_color", "#ffffff")
+            ),
+            width=8,
+        )
+        self._card_background_color_label.pack(side=tk.LEFT, padx=(0, 4))
+        self._card_background_color_btn = ttk.Button(
+            card_bg_row,
+            text="RGB…",
+            command=self._pick_card_background_color,
+            width=6,
+        )
+        self._card_background_color_btn.pack(side=tk.LEFT)
+        self._sync_card_background_color_controls()
         self._show_images_var = tk.BooleanVar(
             value=bool(getattr(self._layout, "show_images", True))
         )
@@ -451,7 +498,76 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             text="단어 그림 표시 (img_path)",
             variable=self._show_images_var,
             command=self._on_show_images_changed,
-        ).pack(anchor="w", padx=6, pady=(0, 6))
+        ).pack(anchor="w", padx=6, pady=(0, 4))
+
+        game_frame = ttk.LabelFrame(sidebar, text="게임 배경")
+        game_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        game_in = ttk.Frame(game_frame)
+        game_in.pack(fill=tk.X, padx=6, pady=6)
+        tile_row = ttk.Frame(game_in)
+        tile_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(tile_row, text="타일").pack(side=tk.LEFT)
+        self._game_tile_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
+        tile_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_tiles()
+        self._game_tile_combo = ttk.Combobox(
+            tile_row,
+            textvariable=self._game_tile_var,
+            values=tile_choices,
+            state="readonly",
+            width=16,
+        )
+        self._game_tile_combo.pack(side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True)
+        self._game_tile_combo.bind(
+            "<<ComboboxSelected>>", self._on_game_tile_changed, add="+"
+        )
+        self._game_tile_preview_label = ttk.Label(tile_row, text="(미리보기)")
+        self._game_tile_preview_label.pack(side=tk.RIGHT)
+        particle_row = ttk.Frame(game_in)
+        particle_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(particle_row, text="파티클").pack(side=tk.LEFT)
+        self._game_particle_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
+        particle_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_particles()
+        self._game_particle_combo = ttk.Combobox(
+            particle_row,
+            textvariable=self._game_particle_var,
+            values=particle_choices,
+            state="readonly",
+            width=16,
+        )
+        self._game_particle_combo.pack(
+            side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True
+        )
+        self._game_particle_combo.bind(
+            "<<ComboboxSelected>>", self._on_game_particle_changed, add="+"
+        )
+        self._game_particle_preview_label = ttk.Label(particle_row, text="(미리보기)")
+        self._game_particle_preview_label.pack(side=tk.RIGHT)
+        pick_row = ttk.Frame(game_in)
+        pick_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(pick_row, text="곡괭이").pack(side=tk.LEFT)
+        self._game_pick_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
+        pick_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_picks()
+        self._game_pick_combo = ttk.Combobox(
+            pick_row,
+            textvariable=self._game_pick_var,
+            values=pick_choices,
+            state="readonly",
+            width=16,
+        )
+        self._game_pick_combo.pack(side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True)
+        self._game_pick_combo.bind(
+            "<<ComboboxSelected>>", self._on_game_pick_changed, add="+"
+        )
+        self._game_pick_preview_label = ttk.Label(pick_row, text="(미리보기)")
+        self._game_pick_preview_label.pack(side=tk.RIGHT)
+        ttk.Label(
+            game_in,
+            text="tiles+곡괭이: 카드 위 타일 → 360° 회전 채굴로 단어 공개",
+            foreground="#666",
+            wraplength=280,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
+        self._sync_game_asset_combos()
 
         grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
         grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
@@ -566,6 +682,16 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
         preview_host = ttk.LabelFrame(body, text="9:16 미리보기")
         preview_host.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        preview_tools = ttk.Frame(preview_host)
+        preview_tools.pack(fill=tk.X, padx=8, pady=(8, 0))
+        self._tile_preview_toggle_btn = ttk.Button(
+            preview_tools,
+            text="타일 미리보기 숨기기",
+            command=self._toggle_tile_canvas_preview,
+            width=18,
+        )
+        self._tile_preview_toggle_btn.pack(side=tk.LEFT)
 
         preview_row = ttk.Frame(preview_host)
         preview_row.pack(padx=8, pady=8)
@@ -1305,6 +1431,38 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._layout.use_card_background = val
             self._mark_dirty()
             self._redraw_canvas()
+        self._sync_card_background_color_controls()
+
+    def _pick_card_background_color(self) -> None:
+        if not bool(self._use_card_background_var.get()):
+            return
+        current = normalize_card_background_color(
+            getattr(self._layout, "card_background_color", "#ffffff")
+        )
+        picked = colorchooser.askcolor(
+            color=current,
+            title="단어 카드 배경색 (RGB)",
+            parent=self,
+        )
+        if picked[0] is None:
+            return
+        r, g, b = (max(0, min(255, int(round(c)))) for c in picked[0])
+        hx = f"#{r:02x}{g:02x}{b:02x}"
+        if hx != current:
+            self._layout.card_background_color = hx
+            self._mark_dirty()
+            self._redraw_canvas()
+        self._sync_card_background_color_controls()
+
+    def _sync_card_background_color_controls(self) -> None:
+        hx = normalize_card_background_color(
+            getattr(self._layout, "card_background_color", "#ffffff")
+        )
+        self._card_background_color_label.configure(text=hx)
+        self._card_bg_swatch.configure(bg=hx)
+        enabled = bool(self._use_card_background_var.get())
+        state = tk.NORMAL if enabled else tk.DISABLED
+        self._card_background_color_btn.configure(state=state)
 
     def _on_show_images_changed(self) -> None:
         val = bool(self._show_images_var.get())
@@ -1312,6 +1470,138 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._layout.show_images = val
             self._mark_dirty()
             self._redraw_canvas()
+
+    def _sync_game_asset_combos(self) -> None:
+        tile_current = normalize_word_memorize_game_tile(
+            getattr(self._layout, "game_tile", "")
+        )
+        particle_current = normalize_word_memorize_game_particle(
+            getattr(self._layout, "game_particle", "")
+        )
+        pick_current = normalize_word_memorize_game_pick(
+            getattr(self._layout, "game_pick", "")
+        )
+        tile_label = tile_current if tile_current else GAME_ASSET_NONE_LABEL
+        particle_label = (
+            particle_current if particle_current else GAME_ASSET_NONE_LABEL
+        )
+        pick_label = pick_current if pick_current else GAME_ASSET_NONE_LABEL
+        tile_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_tiles()
+        particle_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_particles()
+        pick_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_picks()
+        self._game_tile_combo.configure(values=tile_choices)
+        self._game_particle_combo.configure(values=particle_choices)
+        self._game_pick_combo.configure(values=pick_choices)
+        self._game_tile_var.set(
+            tile_label if tile_label in tile_choices else GAME_ASSET_NONE_LABEL
+        )
+        self._game_particle_var.set(
+            particle_label
+            if particle_label in particle_choices
+            else GAME_ASSET_NONE_LABEL
+        )
+        self._game_pick_var.set(
+            pick_label if pick_label in pick_choices else GAME_ASSET_NONE_LABEL
+        )
+        self._refresh_game_asset_previews()
+
+    def _refresh_game_asset_previews(self) -> None:
+        self._update_game_asset_preview_label(
+            stem=normalize_word_memorize_game_tile(
+                getattr(self._layout, "game_tile", "")
+            ),
+            path_fn=word_memorize_game_tile_path,
+            label=self._game_tile_preview_label,
+            attr="_game_tile_preview_photo",
+            size=56,
+        )
+        self._update_game_asset_preview_label(
+            stem=normalize_word_memorize_game_particle(
+                getattr(self._layout, "game_particle", "")
+            ),
+            path_fn=word_memorize_game_particle_path,
+            label=self._game_particle_preview_label,
+            attr="_game_particle_preview_photo",
+            size=56,
+        )
+        self._update_game_asset_preview_label(
+            stem=normalize_word_memorize_game_pick(
+                getattr(self._layout, "game_pick", "")
+            ),
+            path_fn=word_memorize_game_pick_path,
+            label=self._game_pick_preview_label,
+            attr="_game_pick_preview_photo",
+            size=56,
+        )
+
+    def _update_game_asset_preview_label(
+        self,
+        *,
+        stem: str,
+        path_fn: Any,
+        label: ttk.Label,
+        attr: str,
+        size: int,
+    ) -> None:
+        if not stem:
+            label.configure(image="", text="(없음)")
+            setattr(self, attr, None)
+            return
+        path = path_fn(stem)
+        if not path.is_file():
+            label.configure(image="", text="(없음)")
+            setattr(self, attr, None)
+            return
+        try:
+            from PIL import Image, ImageTk
+
+            img = Image.open(path).convert("RGBA")
+            img.thumbnail((size, size), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            setattr(self, attr, photo)
+            label.configure(image=photo, text="")
+        except Exception:
+            label.configure(image="", text="(오류)")
+            setattr(self, attr, None)
+
+    def _on_game_tile_changed(self, _event: tk.Event | None = None) -> None:
+        raw = self._game_tile_var.get()
+        val = normalize_word_memorize_game_tile(
+            raw if raw != GAME_ASSET_NONE_LABEL else ""
+        )
+        if val != normalize_word_memorize_game_tile(
+            getattr(self._layout, "game_tile", "")
+        ):
+            self._layout.game_tile = val
+            self._mark_dirty()
+            self._invalidate_game_tile_layer_cache()
+            self._redraw_canvas()
+        self._refresh_game_asset_previews()
+
+    def _on_game_particle_changed(self, _event: tk.Event | None = None) -> None:
+        raw = self._game_particle_var.get()
+        val = normalize_word_memorize_game_particle(
+            raw if raw != GAME_ASSET_NONE_LABEL else ""
+        )
+        if val != normalize_word_memorize_game_particle(
+            getattr(self._layout, "game_particle", "")
+        ):
+            self._layout.game_particle = val
+            self._mark_dirty()
+        self._refresh_game_asset_previews()
+
+    def _on_game_pick_changed(self, _event: tk.Event | None = None) -> None:
+        raw = self._game_pick_var.get()
+        val = normalize_word_memorize_game_pick(
+            raw if raw != GAME_ASSET_NONE_LABEL else ""
+        )
+        if val != normalize_word_memorize_game_pick(
+            getattr(self._layout, "game_pick", "")
+        ):
+            self._layout.game_pick = val
+            self._mark_dirty()
+            self._redraw_canvas()
+        self._refresh_game_asset_previews()
 
     def _sync_selection_highlight_combo(self) -> None:
         self._selection_highlight_var.set(
@@ -1326,13 +1616,27 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._use_card_background_var.set(
             bool(getattr(self._layout, "use_card_background", True))
         )
+        self._sync_card_background_color_controls()
         self._show_images_var.set(bool(getattr(self._layout, "show_images", True)))
+        self._sync_game_asset_combos()
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.bg_music_path = normalize_vocab_bg_path(
             bg_path_from_combo(self._bg_music_var.get())
         )
         self._mark_dirty()
+
+    def _toggle_tile_canvas_preview(self) -> None:
+        """캔버스 타일 레이어 표시/숨김."""
+        self._show_tile_canvas_preview = not self._show_tile_canvas_preview
+        self._tile_preview_toggle_btn.configure(
+            text=(
+                "타일 미리보기 보기"
+                if not self._show_tile_canvas_preview
+                else "타일 미리보기 숨기기"
+            )
+        )
+        self._redraw_canvas()
 
     def _title_specs_for_preview(self) -> list[TitleLineSpec]:
         return layout_title_line_specs(self._layout)
@@ -1783,10 +2087,19 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._box_photos.clear()
         self._bg_photo = None
         self._bg_photo_key = None
+        self._game_tile_layer_photo = None
+        self._game_tile_layer_key = None
+        self._game_tile_preview_photo = None
+        self._game_particle_preview_photo = None
+        self._game_pick_preview_photo = None
 
     def _invalidate_bg_cache(self) -> None:
         self._bg_photo = None
         self._bg_photo_key = None
+
+    def _invalidate_game_tile_layer_cache(self) -> None:
+        self._game_tile_layer_photo = None
+        self._game_tile_layer_key = None
 
     def _draw_background(self) -> None:
         c = self._canvas
@@ -1820,6 +2133,53 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             fill="#aaa",
             tags="bg",
         )
+
+    def _draw_game_tile_layer(self) -> None:
+        """미리보기 캔버스 — 선택 타일로 화면 전체 타일링."""
+        tile_stem = normalize_word_memorize_game_tile(
+            getattr(self._layout, "game_tile", "")
+        )
+        if not tile_stem:
+            return
+        c = self._canvas
+        c.delete("game_tile")
+        layer_key = tile_stem
+        if (
+            self._game_tile_layer_photo is not None
+            and self._game_tile_layer_key == layer_key
+        ):
+            c.create_image(
+                0, 0, anchor="nw", image=self._game_tile_layer_photo, tags="game_tile"
+            )
+            return
+        path = word_memorize_game_tile_path(tile_stem)
+        if not path.is_file():
+            return
+        try:
+            from PIL import Image, ImageTk
+
+            tile = Image.open(path).convert("RGBA")
+            tile_px = game_tile_display_px(frame_width=PREVIEW_WIDTH)
+            if tile.size != (tile_px, tile_px):
+                tile = tile.resize((tile_px, tile_px), Image.Resampling.LANCZOS)
+            tw, th = tile.size
+            if tw <= 0 or th <= 0:
+                return
+            layer = Image.new("RGBA", (PREVIEW_WIDTH, PREVIEW_HEIGHT), (0, 0, 0, 0))
+            for y in range(0, PREVIEW_HEIGHT, th):
+                for x in range(0, PREVIEW_WIDTH, tw):
+                    layer.paste(tile, (x, y), tile)
+            self._game_tile_layer_photo = ImageTk.PhotoImage(layer)
+            self._game_tile_layer_key = layer_key
+            c.create_image(
+                0,
+                0,
+                anchor="nw",
+                image=self._game_tile_layer_photo,
+                tags="game_tile",
+            )
+        except Exception:
+            self._invalidate_game_tile_layer_cache()
 
     def _draw_title_preview(self) -> None:
         specs = self._title_specs_for_preview()
@@ -2296,7 +2656,9 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 outline = "#90a4ae"
                 width = 1
             card_fill = (
-                "#ffffff"
+                normalize_card_background_color(
+                    getattr(self._layout, "card_background_color", "#ffffff")
+                )
                 if bool(getattr(self._layout, "use_card_background", True))
                 else ""
             )
@@ -2343,6 +2705,10 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         c = self._canvas
         c.delete("all")
         self._draw_background()
+        if self._show_tile_canvas_preview and not layout_uses_pick_mining(
+            self._layout
+        ):
+            self._draw_game_tile_layer()
         self._draw_shorts_zone_guides()
 
         selected = self._selected_box()
@@ -2351,6 +2717,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
         for box in self._layout.sorted_boxes():
             self._draw_box(c, box)
+
+        if self._show_tile_canvas_preview and layout_uses_pick_mining(
+            self._layout
+        ):
+            self._draw_game_tile_layer()
 
         box = self._selected_box()
         if box is not None:
@@ -2432,6 +2803,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._update_margin_label()
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
+        self._sync_game_asset_combos()
         self._sync_title_var()
 
     def _open(self) -> None:
@@ -2478,6 +2850,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             )
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
+        self._sync_game_asset_combos()
         self._sync_title_var()
 
     def _on_close(self) -> None:

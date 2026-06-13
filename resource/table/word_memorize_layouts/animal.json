@@ -25,8 +25,12 @@
   "row_highlight": "none",
   "use_base_slot": false,
   "use_card_background": false,
+  "card_background_color": "#ffffff",
   "show_images": true,
-  "bg_music_path": "resource/sound/bg_short/쇼츠-약간빠름.mp3",
+  "bg_music_path": "resource/sound/bg_short/쇼츠-왈츠.mp3",
+  "game_tile": "tile_000_000",
+  "game_particle": "particle_000",
+  "game_pick": "pick1",
   "boxes": [
     {
       "word_id": "20103",

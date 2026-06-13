@@ -1,0 +1,21 @@
+@sheet 명사
+@pos 명사
+@type 스포츠
+
+# meaning	en_meaning	word	pinyin
+축구	Football / Soccer	足球	zúqiú
+농구	Basketball	篮球	lánqiú
+야구	Baseball	棒球	bàngqiú
+배구	Volleyball	排球	páiqiú
+탁구	Table tennis / Ping-pong	乒乓球	pīngpāngqiú
+펜싱	Fencing	击剑	jījiàn
+테니스	Tennis	网球	wǎngqiú
+배드민턴	Badminton	羽毛球	yǔmáoqiú
+골프	Golf	高尔夫球	gāo'ěrfūqiú
+수영	Swimming	游泳	yóuyǒng
+달리기	Running	跑步	pǎobù
+양궁	Archery	射箭	shèjiàn
+역도	Weightlifting	举重	jǔzhòng
+태권도	Taekwondo	跆拳道	táiquándào
+스키	Skiing	滑雪	huáxuě
+헬스	Fitness / Working out	健身	jiànshēn

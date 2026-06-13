@@ -16,6 +16,23 @@ DEFAULT_LAYOUTS_DIR = get_repo_root() / "resource" / "table" / "word_memorize_la
 WORD_MEMORIZE_BG_DIR = get_repo_root() / "resource" / "BG"
 WORD_MEMORIZE_BG_CH_DIR = WORD_MEMORIZE_BG_DIR / "ch"
 WORD_MEMORIZE_LASER_ICON_DIR = get_repo_root() / "resource" / "image" / "icon"
+WORD_MEMORIZE_GAME_DIR = get_repo_root() / "resource" / "image" / "game"
+WORD_MEMORIZE_GAME_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "tiles"
+WORD_MEMORIZE_GAME_PARTICLES_DIR = WORD_MEMORIZE_GAME_DIR / "particles"
+WORD_MEMORIZE_GAME_PICKS_DIR = WORD_MEMORIZE_GAME_DIR / "picks"
+GAME_ASSET_NONE_LABEL = "(없음)"
+# 재생·미리보기 타일링 시 한 칸 픽셀 크기 (FHD 기준, 프레임 너비에 비례)
+GAME_TILE_DISPLAY_PX = 16
+# 곡괭이 360° 회전으로 카드 타일 제거 애니메이션 길이(초)
+PICK_REVEAL_SEC = 1.2
+# 곡괭이 표시 크기 — 카드 min(w,h) 대비 (기존 0.9의 1/2)
+PICK_DISPLAY_CARD_RATIO = 0.45
+
+
+def game_tile_display_px(*, frame_width: int = SHORTS_WIDTH) -> int:
+    """타일 한 칸 표시 크기 — frame_width 기준으로 GAME_TILE_DISPLAY_PX 비례."""
+    fw = max(1, int(frame_width))
+    return max(1, int(round(GAME_TILE_DISPLAY_PX * fw / float(SHORTS_WIDTH))))
 DEFAULT_LASER_VARIANT = "laser_b"
 LASER_SELECTION_KEYS = frozenset({"laser_b", "laser_g", "laser_p", "laser_y"})
 LASER_BORDER_COLORS: dict[str, tuple[int, int, int]] = {
@@ -81,6 +98,8 @@ TITLE_COLOR_CHOICES: tuple[tuple[str, str], ...] = (
     ("회색", "#9e9e9e"),
 )
 DEFAULT_TITLE_COLOR = "#ffffff"
+DEFAULT_CARD_BACKGROUND_COLOR = "#ffffff"
+CARD_BACKGROUND_COLOR_CHOICES = TITLE_COLOR_CHOICES
 
 TITLE_FONT_CHOICES: tuple[tuple[str, str], ...] = (
     ("한글+한자", "kr_cn"),
@@ -532,6 +551,43 @@ def title_color_to_rgb(raw: str) -> tuple[int, int, int]:
     return int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16)
 
 
+def list_card_background_color_labels() -> list[str]:
+    return [label for label, _ in CARD_BACKGROUND_COLOR_CHOICES]
+
+
+def normalize_card_background_color(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_CARD_BACKGROUND_COLOR
+    for label, hx in CARD_BACKGROUND_COLOR_CHOICES:
+        if text == label:
+            return hx
+    lowered = text.lower().lstrip("#")
+    if len(lowered) == 6 and all(c in "0123456789abcdef" for c in lowered):
+        return f"#{lowered}"
+    return DEFAULT_CARD_BACKGROUND_COLOR
+
+
+def card_background_color_label_for_value(raw: str) -> str:
+    norm = normalize_card_background_color(raw)
+    for label, hx in CARD_BACKGROUND_COLOR_CHOICES:
+        if normalize_card_background_color(hx) == norm:
+            return label
+    return CARD_BACKGROUND_COLOR_CHOICES[0][0]
+
+
+def card_background_color_hex_for_label(label: str) -> str:
+    for lbl, hx in CARD_BACKGROUND_COLOR_CHOICES:
+        if lbl == label:
+            return hx
+    return DEFAULT_CARD_BACKGROUND_COLOR
+
+
+def card_background_color_to_rgb(raw: str) -> tuple[int, int, int]:
+    hx = normalize_card_background_color(raw).lstrip("#")
+    return int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16)
+
+
 def default_title_position(
     frame_width: int = SHORTS_WIDTH,
     frame_height: int = SHORTS_HEIGHT,
@@ -678,6 +734,129 @@ def word_memorize_bg_video_path(stem: str) -> Path:
     return WORD_MEMORIZE_BG_DIR / f"{name}.mp4"
 
 
+def _list_game_asset_stems(directory: Path) -> list[str]:
+    """게임 PNG stem 목록 (확장자 제외, 정렬)."""
+    if not directory.is_dir():
+        return []
+    stems: set[str] = set()
+    for path in directory.iterdir():
+        if path.is_file() and path.suffix.lower() in _BG_IMAGE_EXTS:
+            stem = path.stem.strip()
+            if stem:
+                stems.add(stem)
+    return sorted(stems)
+
+
+def list_word_memorize_game_tiles() -> list[str]:
+    """resource/image/game/tiles 내 타일 PNG stem 목록."""
+    return _list_game_asset_stems(WORD_MEMORIZE_GAME_TILES_DIR)
+
+
+def list_word_memorize_game_particles() -> list[str]:
+    """resource/image/game/particles 내 파티클 PNG stem 목록."""
+    return _list_game_asset_stems(WORD_MEMORIZE_GAME_PARTICLES_DIR)
+
+
+def list_word_memorize_game_picks() -> list[str]:
+    """resource/image/game/picks 내 곡괭이 PNG stem 목록."""
+    return _list_game_asset_stems(WORD_MEMORIZE_GAME_PICKS_DIR)
+
+
+def normalize_word_memorize_game_tile(raw: str) -> str:
+    """타일 stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    stem = Path(text).stem
+    if stem in list_word_memorize_game_tiles():
+        return stem
+    return ""
+
+
+def normalize_word_memorize_game_particle(raw: str) -> str:
+    """파티클 stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    stem = Path(text).stem
+    if stem in list_word_memorize_game_particles():
+        return stem
+    return ""
+
+
+def normalize_word_memorize_game_pick(raw: str) -> str:
+    """곡괭이 stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    stem = Path(text).stem
+    if stem in list_word_memorize_game_picks():
+        return stem
+    return ""
+
+
+def word_memorize_game_tile_path(stem: str) -> Path:
+    """타일 PNG 절대 경로."""
+    name = normalize_word_memorize_game_tile(stem)
+    if not name:
+        return WORD_MEMORIZE_GAME_TILES_DIR / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = WORD_MEMORIZE_GAME_TILES_DIR / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return WORD_MEMORIZE_GAME_TILES_DIR / f"{name}.png"
+
+
+def word_memorize_game_particle_path(stem: str) -> Path:
+    """파티클 PNG 절대 경로."""
+    name = normalize_word_memorize_game_particle(stem)
+    if not name:
+        return WORD_MEMORIZE_GAME_PARTICLES_DIR / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = WORD_MEMORIZE_GAME_PARTICLES_DIR / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return WORD_MEMORIZE_GAME_PARTICLES_DIR / f"{name}.png"
+
+
+def word_memorize_game_pick_path(stem: str) -> Path:
+    """곡괭이 PNG 절대 경로."""
+    name = normalize_word_memorize_game_pick(stem)
+    if not name:
+        return WORD_MEMORIZE_GAME_PICKS_DIR / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = WORD_MEMORIZE_GAME_PICKS_DIR / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return WORD_MEMORIZE_GAME_PICKS_DIR / f"{name}.png"
+
+
+def layout_game_tile(layout: WordMemorizeLayout) -> str:
+    """레이아웃에 설정된 게임 타일 stem (없으면 '')."""
+    return normalize_word_memorize_game_tile(
+        str(getattr(layout, "game_tile", "") or "")
+    )
+
+
+def layout_game_particle(layout: WordMemorizeLayout) -> str:
+    """레이아웃에 설정된 게임 파티클 stem (없으면 '')."""
+    return normalize_word_memorize_game_particle(
+        str(getattr(layout, "game_particle", "") or "")
+    )
+
+
+def layout_game_pick(layout: WordMemorizeLayout) -> str:
+    """레이아웃에 설정된 곡괭이 stem (없으면 '')."""
+    return normalize_word_memorize_game_pick(
+        str(getattr(layout, "game_pick", "") or "")
+    )
+
+
+def layout_uses_pick_mining(layout: WordMemorizeLayout) -> bool:
+    """타일+곡괭이 채굴 연출 사용 여부."""
+    return bool(layout_game_tile(layout) and layout_game_pick(layout))
+
+
 @dataclass
 class WordMemorizeBox:
     word_id: str
@@ -797,12 +976,20 @@ class WordMemorizeLayout:
     row_highlight: RowHighlightType = DEFAULT_ROW_HIGHLIGHT
     # True: #1 카드는 이미지·테두리 없이 병음·한자·뜻만 크게
     use_base_slot: bool = False
-    # True: 일반 word 카드 흰 배경·테두리 (False면 글자·이미지만)
+    # True: 일반 word 카드 배경·테두리 (False면 글자·이미지만)
     use_card_background: bool = True
+    # use_card_background=True 일 때 카드 채우기 색 (#RRGGBB 또는 팔레트 라벨)
+    card_background_color: str = DEFAULT_CARD_BACKGROUND_COLOR
     # True: 카드에 단어 그림(img_path) 표시
     show_images: bool = True
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
+    # resource/image/game/tiles/{stem}.png — 시작 시 화면 타일 채우기
+    game_tile: str = ""
+    # resource/image/game/particles/{stem}.png
+    game_particle: str = ""
+    # resource/image/game/picks/{stem}.png — 카드 중앙 360° 회전 채굴
+    game_pick: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
     holding_word_ids: list[str] = field(default_factory=list)
     margin_top_ratio: float = DEFAULT_MARGIN_TOP_RATIO
@@ -843,8 +1030,14 @@ class WordMemorizeLayout:
             "row_highlight": normalize_row_highlight(self.row_highlight),
             "use_base_slot": bool(self.use_base_slot),
             "use_card_background": bool(self.use_card_background),
+            "card_background_color": normalize_card_background_color(
+                self.card_background_color
+            ),
             "show_images": bool(self.show_images),
             "bg_music_path": (self.bg_music_path or "").strip(),
+            "game_tile": layout_game_tile(self),
+            "game_particle": layout_game_particle(self),
+            "game_pick": layout_game_pick(self),
             "boxes": [
                 {
                     "word_id": b.word_id,
@@ -909,6 +1102,12 @@ class WordMemorizeLayout:
         layout.row_highlight = normalize_row_highlight(data.get("row_highlight", "none"))
         layout.use_base_slot = bool(data.get("use_base_slot", False))
         layout.use_card_background = bool(data.get("use_card_background", True))
+        layout.card_background_color = normalize_card_background_color(
+            str(
+                data.get("card_background_color", DEFAULT_CARD_BACKGROUND_COLOR)
+                or DEFAULT_CARD_BACKGROUND_COLOR
+            )
+        )
         layout.show_images = bool(data.get("show_images", True))
         if raw_highlight.lower() in ("row_band",) or raw_highlight == "가로줄":
             if layout.row_highlight == "none":
@@ -958,6 +1157,15 @@ class WordMemorizeLayout:
         layout.bg_music_path = normalize_vocab_bg_path(
             str(data.get("bg_music_path", "") or "")
         )
+        layout.game_tile = normalize_word_memorize_game_tile(
+            str(data.get("game_tile", "") or "")
+        )
+        layout.game_particle = normalize_word_memorize_game_particle(
+            str(data.get("game_particle", "") or "")
+        )
+        layout.game_pick = normalize_word_memorize_game_pick(
+            str(data.get("game_pick", "") or "")
+        )
         return layout
 
 
@@ -967,6 +1175,12 @@ def layout_use_base_slot(layout: WordMemorizeLayout) -> bool:
 
 def layout_use_card_background(layout: WordMemorizeLayout) -> bool:
     return bool(getattr(layout, "use_card_background", True))
+
+
+def layout_card_background_rgb(layout: WordMemorizeLayout) -> tuple[int, int, int]:
+    return card_background_color_to_rgb(
+        getattr(layout, "card_background_color", DEFAULT_CARD_BACKGROUND_COLOR)
+    )
 
 
 def base_slot_order(layout: WordMemorizeLayout) -> int | None:

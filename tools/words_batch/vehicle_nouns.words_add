@@ -1,0 +1,17 @@
+@sheet 명사
+@pos 명사
+@type 탈것
+
+# meaning	en_meaning	word	pinyin
+비행기	Airplane	飞机	fēijī
+택시	Taxi	出租车	chūzūchē
+버스	Bus	公交车	gōngjiāochē
+자전거	Bicycle	自行车	zìxíngchē
+기차	Train	火车	huǒchē
+지하철	Subway / Metro	地铁	dìtiě
+배 (선박)	Boat / Ship	船	chuán
+오토바이	Motorcycle	摩托车	mótuōchē
+고속철도	High-speed rail	高铁	gāotiě
+전동스쿠터 / 전기차	Electric scooter / EV	电动车	diàndòngchē
+공유 자전거	Shared bicycle	共享单车	gòngxiǎng dānchē
+도보 (걷기)	Walking	步行	bùxíng

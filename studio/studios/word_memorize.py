@@ -15,9 +15,17 @@ from core.paths import (
 )
 from data.table_manager import get_word, load_words_table_from_csv
 from extra.table_editor.services.word_memorize_layout import (
+    PICK_REVEAL_SEC,
     WordMemorizeBox,
     box_runtime_key,
+    game_tile_display_px,
+    layout_uses_pick_mining,
     load_layout,
+)
+from studio.studios.word_memorize_pick import (
+    card_mining_row_count,
+    card_mining_state,
+    pick_reveal_progress,
 )
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
@@ -41,7 +49,7 @@ TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 
-WordSubstep = Literal["", "first", "second"]
+WordSubstep = Literal["", "mining", "first", "second"]
 
 
 def _normalize_meaning_lang(raw: str) -> MeaningLang:
@@ -88,10 +96,13 @@ class WordMemorizeStudio(IStudio):
         self._timer = 0.0
         self._hold_sec = INTRO_HOLD_SEC
         self._active_key: str | None = None
+        self._revealed_keys: set[str] = set()
+        self._revealed_rows_by_key: dict[str, int] = {}
         self._queued_second_path: Path | None = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
+        self._pick_mining_elapsed_sec = 0.0
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -200,10 +211,12 @@ class WordMemorizeStudio(IStudio):
         self._timer = 0.0
         self._hold_sec = INTRO_HOLD_SEC
         self._active_key = None
+        self._revealed_keys = set()
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
+        self._pick_mining_elapsed_sec = 0.0
         self._done = False
 
     def get_title(self) -> str:
@@ -237,7 +250,11 @@ class WordMemorizeStudio(IStudio):
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
         self._renderer.tick_background_video(dt)
         if self._phase == "word":
-            self._active_word_elapsed_sec += dt
+            if self._word_substep == "mining":
+                self._pick_mining_elapsed_sec += dt
+            else:
+                self._active_word_elapsed_sec += dt
+            self._sync_pick_revealed_keys()
         self._timer += dt
         if self._timer < self._hold_sec:
             return
@@ -250,12 +267,83 @@ class WordMemorizeStudio(IStudio):
             self._done = True
             self.stop_background_audio()
 
+    def _sync_pick_revealed_keys(self) -> None:
+        """곡괭이로 제거된 타일 행을 누적 저장."""
+        if not layout_uses_pick_mining(self._layout):
+            return
+        if self._phase != "word" or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None:
+            return
+        from extra.table_editor.services.word_memorize_layout import game_tile_display_px
+
+        tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
+        key = self._active_key
+        prev = int(self._revealed_rows_by_key.get(key, 0))
+        state = card_mining_state(
+            box,
+            self._pick_mining_elapsed_sec,
+            tile_px=tile_px,
+            stored_completed_rows=prev,
+        )
+        self._revealed_rows_by_key[key] = max(prev, state.completed_rows)
+        if state.is_complete:
+            self._revealed_keys.add(key)
+
+    def _active_mining_box(self) -> WordMemorizeBox | None:
+        if 0 <= self._seq_index < len(self._sequence):
+            return self._sequence[self._seq_index]
+        return None
+
     def _box_active_key(self, box: WordMemorizeBox) -> str:
         return box_runtime_key(box)
 
     def _outro_hold_sec(self) -> float:
         """마지막 음성 이후 종료 대기 시간 (녹화는 즉시 종료)."""
         return 0.0 if self._is_recording_mode() else END_HOLD_SEC
+
+    def _mining_hold_sec(self, box: WordMemorizeBox) -> float:
+        """곡괭이 채굴 구간 길이 (행 수와 무관하게 카드당 고정)."""
+        _ = box
+        return float(PICK_REVEAL_SEC)
+
+    def _ensure_mining_complete(self) -> None:
+        """채굴 타이머 만료 시 카드 행·완료 상태를 강제 반영."""
+        if not layout_uses_pick_mining(self._layout) or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None:
+            return
+        tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
+        row_count = card_mining_row_count(box, tile_px)
+        self._revealed_rows_by_key[self._active_key] = row_count
+        self._revealed_keys.add(self._active_key)
+
+    def _start_tts_after_mining(self) -> None:
+        """채굴 완료 후 TTS·하이라이트 타이머 시작."""
+        box = self._active_mining_box()
+        if box is None:
+            self._word_substep = "second"
+            self._hold_sec = 0.0
+            return
+        self._active_word_elapsed_sec = 0.0
+        self._active_word_duration_sec = self._word_play_duration_sec(box)
+        self._queued_second_path = None
+        self._queued_second_len = 0.0
+        first_len, second_path, second_len = self._word_tts_paths(box)
+        second_lead, next_lead = self._word_tts_leads()
+        self._word_substep = "first"
+        if first_len > 0:
+            self._hold_sec = max(0.0, first_len - second_lead)
+            self._queued_second_path = second_path
+            self._queued_second_len = second_len
+        elif second_len > 0:
+            self._word_substep = "second"
+            self._hold_sec = max(0.0, second_len - next_lead)
+        else:
+            self._word_substep = "second"
+            self._hold_sec = 0.0
 
     def _begin_word(self, index: int) -> None:
         if index >= len(self._sequence):
@@ -269,9 +357,14 @@ class WordMemorizeStudio(IStudio):
         self._phase = "word"
         self._active_key = self._box_active_key(box)
         self._active_word_elapsed_sec = 0.0
+        self._pick_mining_elapsed_sec = 0.0
         self._active_word_duration_sec = self._word_play_duration_sec(box)
-        self._queued_second_path: Path | None = None
+        self._queued_second_path = None
         self._queued_second_len = 0.0
+        if layout_uses_pick_mining(self._layout):
+            self._word_substep = "mining"
+            self._hold_sec = self._mining_hold_sec(box)
+            return
         first_len, second_path, second_len = self._word_tts_paths(box)
         second_lead, next_lead = self._word_tts_leads()
         self._word_substep = "first"
@@ -290,6 +383,10 @@ class WordMemorizeStudio(IStudio):
             return
 
     def _advance_word_step(self) -> None:
+        if self._word_substep == "mining":
+            self._ensure_mining_complete()
+            self._start_tts_after_mining()
+            return
         if self._word_substep == "first":
             self._word_substep = "second"
             _, next_lead = self._word_tts_leads()
@@ -304,6 +401,7 @@ class WordMemorizeStudio(IStudio):
         self._word_substep = ""
         self._queued_second_path = None
         self._queued_second_len = 0.0
+        self._sync_pick_revealed_keys()
         nxt = self._seq_index + 1
         if nxt < len(self._sequence):
             self._begin_word(nxt)
@@ -504,6 +602,8 @@ class WordMemorizeStudio(IStudio):
 
         highlight = self._phase == "word" and self._active_key is not None
         active_box_key: str | None = self._active_key if highlight else None
+        pick_mining = layout_uses_pick_mining(self._layout)
+        revealed = frozenset(self._revealed_keys) if pick_mining else frozenset()
         self._renderer.draw(
             screen,
             self._layout,
@@ -519,6 +619,13 @@ class WordMemorizeStudio(IStudio):
             active_word_duration_sec=(
                 self._active_word_duration_sec if highlight else 0.0
             ),
+            active_mining_elapsed_sec=(
+                self._pick_mining_elapsed_sec
+                if highlight and pick_mining
+                else 0.0
+            ),
+            revealed_box_keys=revealed,
+            revealed_rows_by_key=dict(self._revealed_rows_by_key),
         )
 
     def get_recording_prefix(self) -> Optional[str]:

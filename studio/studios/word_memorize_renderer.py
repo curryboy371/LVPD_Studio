@@ -8,7 +8,7 @@ from typing import Any
 
 import pygame
 
-from core.paths import get_repo_root
+from core.paths import SHORTS_WIDTH, get_repo_root
 from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
     BASE_SLOT_HANZI_COLOR,
@@ -37,7 +37,11 @@ from extra.table_editor.services.word_memorize_layout import (
     find_box_by_runtime_key,
     is_base_slot_box,
     layout_card_content_vertical,
+    layout_card_background_rgb,
     layout_use_card_background,
+    layout_game_tile,
+    layout_uses_pick_mining,
+    layout_game_pick,
     layout_title_line_specs,
     is_laser_selection_highlight,
     normalize_row_highlight,
@@ -50,6 +54,17 @@ from extra.table_editor.services.word_memorize_layout import (
     _card_meaning_font_bold,
     resolve_word_memorize_bg_image_path,
     resolve_word_memorize_bg_video_path,
+    game_tile_display_px,
+    PICK_DISPLAY_CARD_RATIO,
+    word_memorize_game_pick_path,
+    word_memorize_game_tile_path,
+)
+from studio.studios.word_memorize_pick import (
+    build_mining_tile_overlay,
+    card_mining_state,
+    draw_rotating_pick_at,
+    load_pick_surface,
+    pick_reveal_progress,
 )
 from studio.studios.word_memorize_laser import (
     SCORCH_ORIGIN_OFFSET_PX,
@@ -595,6 +610,39 @@ def _load_scaled_image(path: Path, max_w: int, max_h: int) -> pygame.Surface | N
         return None
 
 
+def _load_tile_image(
+    path: Path, *, display_px: int | None = None, frame_width: int = SHORTS_WIDTH
+) -> pygame.Surface | None:
+    """게임 타일 PNG 로드 — 정사각형 display_px 크기로 스케일."""
+    if not path.is_file():
+        return None
+    size = display_px if display_px is not None else game_tile_display_px(
+        frame_width=frame_width
+    )
+    size = max(1, int(size))
+    try:
+        surf = pygame.image.load(str(path))
+        if surf.get_alpha() is None:
+            surf = surf.convert()
+        else:
+            surf = surf.convert_alpha()
+        if surf.get_size() != (size, size):
+            surf = pygame.transform.smoothscale(surf, (size, size))
+        return surf
+    except Exception:
+        return None
+
+
+def _blit_tiled(surface: pygame.Surface, tile: pygame.Surface, fw: int, fh: int) -> None:
+    """프레임 전체를 타일 이미지로 채운다."""
+    tw, th = tile.get_size()
+    if tw <= 0 or th <= 0:
+        return
+    for y in range(0, fh, th):
+        for x in range(0, fw, tw):
+            surface.blit(tile, (x, y))
+
+
 def _blit_contained_background(
     surface: pygame.Surface, bg: pygame.Surface, fw: int, fh: int
 ) -> None:
@@ -648,6 +696,9 @@ class WordMemorizeRenderer:
         self._base_font_cache: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._font_title_by_key: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
+        self._game_tile_cache: dict[tuple[str, int], pygame.Surface | None] = {}
+        self._game_tile_overlay_base: dict[tuple[str, int, int], pygame.Surface | None] = {}
+        self._pick_cache: dict[tuple[str, int], pygame.Surface | None] = {}
         self._bg_video = LoopingBackgroundVideo()
         self._bg_layout_stem = ""
         self._bg_meaning_lang = "ko"
@@ -771,6 +822,9 @@ class WordMemorizeRenderer:
         use_video_background: bool = False,
         active_word_elapsed_sec: float = 0.0,
         active_word_duration_sec: float = 0.0,
+        active_mining_elapsed_sec: float = 0.0,
+        revealed_box_keys: frozenset[str] | set[str] | None = None,
+        revealed_rows_by_key: dict[str, int] | None = None,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -779,10 +833,15 @@ class WordMemorizeRenderer:
             else border_anim_time_sec(config)
         )
         fw, fh = layout.frame_width, layout.frame_height
+        pick_mining = layout_uses_pick_mining(layout)
+        revealed = set(revealed_box_keys or ())
+        rows_by_key = dict(revealed_rows_by_key or {})
+
         self._draw_background(
             surface, layout, fw, fh, use_video=use_video_background
         )
-        self._draw_title(surface, layout, fw, fh)
+        if not pick_mining:
+            self._draw_title(surface, layout, fw, fh)
 
         active_anchor = find_box_by_runtime_key(layout, active_box_key or "")
         active_is_base = (
@@ -817,8 +876,19 @@ class WordMemorizeRenderer:
                 inactive.append((box, word, card_meaning))
 
         word_timing = (active_word_elapsed_sec, active_word_duration_sec)
+        mining_elapsed = active_mining_elapsed_sec
 
         for box, word, card_meaning in inactive:
+            runtime_key = box_runtime_key(box)
+            if not self._should_draw_word_card(
+                runtime_key,
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=False,
+                active_elapsed_sec=0.0,
+            ):
+                continue
             self._draw_box(
                 surface,
                 box,
@@ -829,12 +899,69 @@ class WordMemorizeRenderer:
                 anim_time_sec=t_anim,
                 word_elapsed_sec=0.0,
                 word_duration_sec=0.0,
+                draw_effects=False,
+            )
+
+        active_card_visible = (
+            active_anchor is not None
+            and self._should_draw_word_card(
+                active_box_key or "",
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=True,
+                active_elapsed_sec=mining_elapsed if pick_mining else word_timing[0],
+            )
+        )
+
+        for box, word, card_meaning in active_cards:
+            if not self._should_draw_word_card(
+                active_box_key or "",
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=True,
+                active_elapsed_sec=mining_elapsed if pick_mining else word_timing[0],
+            ):
+                continue
+            self._draw_box(
+                surface,
+                box,
+                word,
+                card_meaning,
+                layout=layout,
+                active=True,
+                anim_time_sec=t_anim,
+                word_elapsed_sec=word_timing[0],
+                word_duration_sec=word_timing[1],
+                draw_effects=False,
+            )
+
+        self._draw_pick_mining_overlay(
+            surface,
+            layout,
+            fw,
+            fh,
+            revealed_box_keys=revealed,
+            revealed_rows_by_key=rows_by_key,
+            active_box=active_anchor,
+            active_elapsed_sec=mining_elapsed if active_cards else 0.0,
+        )
+        if pick_mining:
+            self._draw_title(surface, layout, fw, fh)
+            self._draw_mining_pick(
+                surface,
+                layout,
+                active_box=active_anchor,
+                active_elapsed_sec=mining_elapsed if active_cards else 0.0,
+                revealed_rows_by_key=rows_by_key,
             )
 
         if (
             row_highlight_type != "none"
             and active_anchor is not None
             and not active_is_base
+            and active_card_visible
         ):
             draw_row_highlight(
                 surface,
@@ -844,7 +971,6 @@ class WordMemorizeRenderer:
                 anim_time_sec=t_anim,
             )
 
-        # 누적 문신 → 레이저(위) → 활성 카드 순 (레이저 구간에 문신 잔상 X)
         self._blit_scorch_layer(surface, fw, fh)
 
         if (
@@ -852,6 +978,7 @@ class WordMemorizeRenderer:
             and active_anchor is not None
             and active_cards
             and not active_is_base
+            and active_card_visible
         ):
             self._sync_scorch_active_key(active_box_key)
             scorch = self._ensure_scorch_layer(fw, fh)
@@ -874,17 +1001,170 @@ class WordMemorizeRenderer:
             )
 
         for box, word, card_meaning in active_cards:
-            self._draw_box(
+            if not self._should_draw_word_card(
+                active_box_key or "",
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=True,
+                active_elapsed_sec=mining_elapsed if pick_mining else word_timing[0],
+            ):
+                continue
+            self._draw_box_effects(
                 surface,
                 box,
-                word,
-                card_meaning,
                 layout=layout,
-                active=True,
                 anim_time_sec=t_anim,
                 word_elapsed_sec=word_timing[0],
                 word_duration_sec=word_timing[1],
             )
+
+    def _should_draw_word_card(
+        self,
+        runtime_key: str,
+        *,
+        pick_mining: bool,
+        revealed_keys: set[str],
+        revealed_rows_by_key: dict[str, int],
+        is_active: bool,
+        active_elapsed_sec: float,
+    ) -> bool:
+        """채굴 모드: 타일에 가려진 카드는 그리지 않음."""
+        if not pick_mining:
+            return True
+        if runtime_key in revealed_keys:
+            return True
+        if int(revealed_rows_by_key.get(runtime_key, 0)) > 0:
+            return True
+        if is_active and pick_reveal_progress(active_elapsed_sec) > 0.0:
+            return True
+        return False
+
+    def _get_game_tile_overlay_base(
+        self, tile_stem: str, fw: int, fh: int
+    ) -> pygame.Surface | None:
+        px = game_tile_display_px(frame_width=fw)
+        key = (tile_stem, fw, fh, px)
+        if key in self._game_tile_overlay_base:
+            return self._game_tile_overlay_base[key]
+        tile = self._get_game_tile_surface(tile_stem, fw)
+        if tile is None:
+            self._game_tile_overlay_base[key] = None
+            return None
+        layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
+        _blit_tiled(layer, tile, fw, fh)
+        self._game_tile_overlay_base[key] = layer
+        return layer
+
+    def _get_pick_surface(self, pick_stem: str, max_px: int) -> pygame.Surface | None:
+        key = (pick_stem, max(1, int(max_px)))
+        if key in self._pick_cache:
+            return self._pick_cache[key]
+        path = word_memorize_game_pick_path(pick_stem)
+        surf = load_pick_surface(path, max_px)
+        self._pick_cache[key] = surf
+        return surf
+
+    def _draw_pick_mining_overlay(
+        self,
+        surface: pygame.Surface,
+        layout: WordMemorizeLayout,
+        fw: int,
+        fh: int,
+        *,
+        revealed_box_keys: set[str],
+        revealed_rows_by_key: dict[str, int] | None = None,
+        active_box: WordMemorizeBox | None,
+        active_elapsed_sec: float,
+    ) -> None:
+        """타일+곡괭이 모드: 카드 위 타일 오버레이."""
+        if not layout_uses_pick_mining(layout):
+            return
+        tile_stem = layout_game_tile(layout)
+        if not tile_stem or not layout_game_pick(layout):
+            return
+        base = self._get_game_tile_overlay_base(tile_stem, fw, fh)
+        if base is None:
+            return
+
+        overlay = build_mining_tile_overlay(
+            base,
+            layout,
+            frame_width=fw,
+            revealed_box_keys=revealed_box_keys,
+            revealed_rows_by_key=revealed_rows_by_key,
+            active_box=active_box,
+            active_elapsed_sec=active_elapsed_sec,
+        )
+        if overlay is not None:
+            surface.blit(overlay, (0, 0))
+
+    def _draw_mining_pick(
+        self,
+        surface: pygame.Surface,
+        layout: WordMemorizeLayout,
+        *,
+        active_box: WordMemorizeBox | None,
+        active_elapsed_sec: float,
+        revealed_rows_by_key: dict[str, int] | None = None,
+    ) -> None:
+        """활성 카드 중앙 회전 곡괭이 (타일 오버레이 위)."""
+        if not layout_uses_pick_mining(layout) or active_box is None:
+            return
+        pick_stem = layout_game_pick(layout)
+        if not pick_stem:
+            return
+        tile_px = game_tile_display_px(frame_width=int(layout.frame_width))
+        stored = int((revealed_rows_by_key or {}).get(box_runtime_key(active_box), 0))
+        state = card_mining_state(
+            active_box,
+            active_elapsed_sec,
+            tile_px=tile_px,
+            stored_completed_rows=stored,
+        )
+        if state.is_complete:
+            return
+        max_px = max(
+            32,
+            int(min(active_box.w, active_box.h) * PICK_DISPLAY_CARD_RATIO),
+        )
+        pick = self._get_pick_surface(pick_stem, max_px)
+        if pick is not None:
+            draw_rotating_pick_at(
+                surface,
+                pick,
+                center_x=state.pick_x,
+                center_y=state.pick_y,
+                rotation_deg=state.pick_rotation_deg,
+            )
+
+    def _get_game_tile_surface(self, tile_stem: str, fw: int) -> pygame.Surface | None:
+        key = (tile_stem, game_tile_display_px(frame_width=fw))
+        if key in self._game_tile_cache:
+            return self._game_tile_cache[key]
+        path = word_memorize_game_tile_path(tile_stem)
+        px = game_tile_display_px(frame_width=fw)
+        surf = _load_tile_image(path, display_px=px, frame_width=fw)
+        self._game_tile_cache[key] = surf
+        return surf
+
+    def _draw_game_tile_fill(
+        self,
+        surface: pygame.Surface,
+        layout: WordMemorizeLayout,
+        fw: int,
+        fh: int,
+    ) -> None:
+        """선택 타일로 프레임 배경 전체를 타일링 (채굴 모드는 오버레이만 사용)."""
+        if layout_uses_pick_mining(layout):
+            return
+        tile_stem = layout_game_tile(layout)
+        if not tile_stem:
+            return
+        tile = self._get_game_tile_surface(tile_stem, fw)
+        if tile is None:
+            return
+        _blit_tiled(surface, tile, fw, fh)
 
     def _draw_background(
         self,
@@ -899,6 +1179,7 @@ class WordMemorizeRenderer:
             frame = self._bg_video.get_frame(fw, fh)
             if frame is not None:
                 _blit_contained_background(surface, frame, fw, fh)
+                self._draw_game_tile_fill(surface, layout, fw, fh)
                 return
         img_path = resolve_word_memorize_bg_image_path(
             layout.background_value or self._bg_layout_stem,
@@ -907,8 +1188,10 @@ class WordMemorizeRenderer:
         bg = _load_scaled_image(img_path, fw, fh) if img_path.is_file() else None
         if bg is not None:
             _blit_contained_background(surface, bg, fw, fh)
+            self._draw_game_tile_fill(surface, layout, fw, fh)
             return
         surface.fill((0, 0, 0))
+        self._draw_game_tile_fill(surface, layout, fw, fh)
 
     def _draw_title(
         self,
@@ -1140,6 +1423,7 @@ class WordMemorizeRenderer:
         anim_time_sec: float,
         word_elapsed_sec: float = 0.0,
         word_duration_sec: float = 0.0,
+        draw_effects: bool = True,
     ) -> None:
         highlight_type = normalize_selection_highlight(
             getattr(layout, "selection_highlight", "gradient")
@@ -1157,7 +1441,7 @@ class WordMemorizeRenderer:
             self._paint_base_slot_box(
                 surface, base, word, card_meaning, hanzi_scale=hanzi_scale
             )
-            if active:
+            if active and draw_effects:
                 self._draw_base_slot_active_border(
                     surface,
                     base,
@@ -1169,6 +1453,7 @@ class WordMemorizeRenderer:
             return
 
         if not active:
+            use_card_bg = layout_use_card_background(layout)
             self._paint_box(
                 surface,
                 base,
@@ -1177,11 +1462,15 @@ class WordMemorizeRenderer:
                 highlight_type=highlight_type,
                 active=False,
                 anim_time_sec=anim_time_sec,
-                use_card_background=layout_use_card_background(layout),
+                use_card_background=use_card_bg,
+                card_fill_rgb=(
+                    layout_card_background_rgb(layout) if use_card_bg else BOX_FILL
+                ),
             )
             return
 
         use_card_bg = layout_use_card_background(layout)
+        card_fill_rgb = layout_card_background_rgb(layout) if use_card_bg else BOX_FILL
         if is_laser:
             self._paint_box(
                 surface,
@@ -1193,18 +1482,20 @@ class WordMemorizeRenderer:
                 draw_border=False,
                 anim_time_sec=anim_time_sec,
                 use_card_background=use_card_bg,
+                card_fill_rgb=card_fill_rgb,
             )
-            loop_preview = word_duration_sec <= 0
-            impact_t = laser_impact_elapsed_sec(
-                word_elapsed_sec, loop_preview=loop_preview
-            )
-            draw_laser_impact_border(
-                surface,
-                base,
-                impact_elapsed_sec=impact_t,
-                border_radius=ACTIVE_BORDER_RADIUS,
-                laser_variant=highlight_type,
-            )
+            if draw_effects:
+                loop_preview = word_duration_sec <= 0
+                impact_t = laser_impact_elapsed_sec(
+                    word_elapsed_sec, loop_preview=loop_preview
+                )
+                draw_laser_impact_border(
+                    surface,
+                    base,
+                    impact_elapsed_sec=impact_t,
+                    border_radius=ACTIVE_BORDER_RADIUS,
+                    laser_variant=highlight_type,
+                )
             return
 
         layer = pygame.Surface((base.width, base.height), pygame.SRCALPHA)
@@ -1220,12 +1511,66 @@ class WordMemorizeRenderer:
             draw_border=False,
             anim_time_sec=anim_time_sec,
             use_card_background=use_card_bg,
+            card_fill_rgb=card_fill_rgb,
         )
         sw = max(1, int(base.width * ACTIVE_CARD_SCALE))
         sh = max(1, int(base.height * ACTIVE_CARD_SCALE))
         scaled = pygame.transform.smoothscale(layer, (sw, sh))
         dest = scaled.get_rect(center=base.center)
         surface.blit(scaled, dest)
+        if draw_effects:
+            _draw_active_highlight(
+                surface,
+                dest,
+                highlight_type=highlight_type,
+                anim_time_sec=anim_time_sec,
+                word_elapsed_sec=word_elapsed_sec,
+                word_duration_sec=word_duration_sec,
+            )
+
+    def _draw_box_effects(
+        self,
+        surface: pygame.Surface,
+        box: WordMemorizeBox,
+        *,
+        layout: WordMemorizeLayout,
+        anim_time_sec: float,
+        word_elapsed_sec: float = 0.0,
+        word_duration_sec: float = 0.0,
+    ) -> None:
+        """활성 카드 테두리·레이저 임팩트 (타일 오버레이 위에 그림)."""
+        highlight_type = normalize_selection_highlight(
+            getattr(layout, "selection_highlight", "gradient")
+        )
+        is_laser = is_laser_selection_highlight(highlight_type)
+        base = pygame.Rect(box.x, box.y, box.w, box.h)
+        if is_base_slot_box(box, layout):
+            self._draw_base_slot_active_border(
+                surface,
+                base,
+                highlight_type=highlight_type,
+                anim_time_sec=anim_time_sec,
+                word_elapsed_sec=word_elapsed_sec,
+                word_duration_sec=word_duration_sec,
+            )
+            return
+        if is_laser:
+            loop_preview = word_duration_sec <= 0
+            impact_t = laser_impact_elapsed_sec(
+                word_elapsed_sec, loop_preview=loop_preview
+            )
+            draw_laser_impact_border(
+                surface,
+                base,
+                impact_elapsed_sec=impact_t,
+                border_radius=ACTIVE_BORDER_RADIUS,
+                laser_variant=highlight_type,
+            )
+            return
+        sw = max(1, int(base.width * ACTIVE_CARD_SCALE))
+        sh = max(1, int(base.height * ACTIVE_CARD_SCALE))
+        dest = pygame.Rect(0, 0, sw, sh)
+        dest.center = base.center
         _draw_active_highlight(
             surface,
             dest,
@@ -1247,9 +1592,12 @@ class WordMemorizeRenderer:
         anim_time_sec: float,
         draw_border: bool = True,
         use_card_background: bool = True,
+        card_fill_rgb: tuple[int, int, int] = BOX_FILL,
     ) -> None:
         if use_card_background:
-            pygame.draw.rect(surface, BOX_FILL, rect, border_radius=ACTIVE_BORDER_RADIUS)
+            pygame.draw.rect(
+                surface, card_fill_rgb, rect, border_radius=ACTIVE_BORDER_RADIUS
+            )
             if active and draw_border and not is_laser_selection_highlight(highlight_type):
                 _draw_active_highlight(
                     surface,
