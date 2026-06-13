@@ -23,6 +23,7 @@ from extra.table_editor.services.word_memorize_layout import (
     TITLE_FONT_CHOICES,
     TITLE_LINE_GAP_FHD,
     TitleLineSpec,
+    SubtitleLineSpec,
     box_overlaps_any,
     clamp_title_position,
     box_runtime_key,
@@ -40,7 +41,10 @@ from extra.table_editor.services.word_memorize_layout import (
     is_base_slot_box,
     layout_card_content_vertical,
     layout_title_line_specs,
+    layout_subtitle_line_specs,
+    layout_subtitle_text_tile,
     resolve_title_position,
+    resolve_subtitle_position,
     find_non_overlapping_position,
     is_laser_selection_highlight,
     laser_preview_outline_hex,
@@ -50,6 +54,7 @@ from extra.table_editor.services.word_memorize_layout import (
     list_word_memorize_game_particles,
     list_word_memorize_game_picks,
     list_word_memorize_game_tiles,
+    list_word_memorize_game_text_tiles,
     list_word_memorize_game_traps,
     list_title_color_labels,
     list_title_font_labels,
@@ -69,10 +74,13 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_word_memorize_game_particle,
     normalize_word_memorize_game_pick,
     normalize_word_memorize_game_tile,
+    normalize_word_memorize_game_text_tile,
     normalize_word_memorize_game_trap,
     box_game_trap,
     save_layout,
     sync_layout_title_fields,
+    sync_layout_subtitle_fields,
+    subtitle_line_specs_from_legacy_layout,
     normalize_card_background_color,
     title_color_hex_for_label,
     title_color_label_for_value,
@@ -89,6 +97,7 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_particle_path,
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
+    word_memorize_game_text_tile_path,
     word_memorize_game_trap_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
@@ -439,6 +448,77 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         title_y_spin.bind(
             "<<Decrement>>", self._on_title_y_offset_changed, add="+"
+        )
+
+        subtitle_frame = ttk.LabelFrame(left_inner, text="부제목 (타일 글씨)")
+        subtitle_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        subtitle_in = ttk.Frame(subtitle_frame)
+        subtitle_in.pack(fill=tk.X, padx=6, pady=6)
+        subtitle_lines_hdr = ttk.Frame(subtitle_in)
+        subtitle_lines_hdr.pack(fill=tk.X)
+        ttk.Label(subtitle_lines_hdr, text="줄").pack(side=tk.LEFT)
+        ttk.Button(
+            subtitle_lines_hdr, text="+", width=3, command=self._add_subtitle_line
+        ).pack(side=tk.RIGHT, padx=(2, 0))
+        ttk.Button(
+            subtitle_lines_hdr, text="-", width=3, command=self._remove_subtitle_line
+        ).pack(side=tk.RIGHT)
+        self._subtitle_lines_host = ttk.Frame(subtitle_in)
+        self._subtitle_lines_host.pack(fill=tk.X, pady=(4, 0))
+        self._subtitle_line_rows: list[tuple[tk.StringVar, tk.StringVar]] = []
+        self._rebuild_subtitle_line_entries()
+        subtitle_tile_row = ttk.Frame(subtitle_in)
+        subtitle_tile_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(subtitle_tile_row, text="글자 타일").pack(side=tk.LEFT)
+        self._subtitle_text_tile_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
+        text_tile_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_text_tiles()
+        self._subtitle_text_tile_combo = ttk.Combobox(
+            subtitle_tile_row,
+            textvariable=self._subtitle_text_tile_var,
+            values=text_tile_choices,
+            state="readonly",
+            width=16,
+        )
+        self._subtitle_text_tile_combo.pack(
+            side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True
+        )
+        self._subtitle_text_tile_combo.bind(
+            "<<ComboboxSelected>>", self._on_subtitle_text_tile_changed, add="+"
+        )
+        ttk.Button(
+            subtitle_in,
+            text="부제목 적용",
+            command=self._apply_subtitle_settings,
+        ).pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(
+            subtitle_in,
+            text="타일 맵 정중앙 · text_tile로 글자 위치의 배경 타일을 교체. 채굴·복구와 동기.",
+            foreground="#666",
+            wraplength=LEFT_PANEL_WIDTH - 28,
+        ).pack(anchor="w", pady=(4, 0))
+        subtitle_pos_row = ttk.Frame(subtitle_in)
+        subtitle_pos_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(subtitle_pos_row, text="Y 보정(px)").pack(side=tk.LEFT)
+        self._subtitle_y_offset_var = tk.StringVar(
+            value=str(int(getattr(self._layout, "subtitle_y_offset_px", 0)))
+        )
+        subtitle_y_spin = ttk.Spinbox(
+            subtitle_pos_row,
+            from_=-300,
+            to=300,
+            increment=2,
+            width=8,
+            textvariable=self._subtitle_y_offset_var,
+        )
+        subtitle_y_spin.pack(side=tk.LEFT, padx=(8, 0))
+        subtitle_y_spin.bind(
+            "<KeyRelease>", self._on_subtitle_y_offset_changed, add="+"
+        )
+        subtitle_y_spin.bind(
+            "<<Increment>>", self._on_subtitle_y_offset_changed, add="+"
+        )
+        subtitle_y_spin.bind(
+            "<<Decrement>>", self._on_subtitle_y_offset_changed, add="+"
         )
 
         bg_music_frame = ttk.LabelFrame(left_inner, text="쇼츠 배경음")
@@ -1936,6 +2016,124 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             str(int(getattr(self._layout, "title_y_offset_px", 0)))
         )
 
+    def _subtitle_specs_for_preview(self) -> list[SubtitleLineSpec]:
+        return layout_subtitle_line_specs(self._layout)
+
+    def _flush_subtitle_from_ui(self) -> None:
+        if not self._subtitle_line_rows:
+            return
+        specs = self._collect_subtitle_line_specs()
+        self._layout.subtitle_lines = specs
+        sync_layout_subtitle_fields(self._layout)
+
+    def _rebuild_subtitle_line_entries(
+        self, specs: list[SubtitleLineSpec] | None = None
+    ) -> None:
+        for child in self._subtitle_lines_host.winfo_children():
+            child.destroy()
+        self._subtitle_line_rows = []
+        if specs is None:
+            if self._layout.subtitle_lines:
+                specs = list(self._layout.subtitle_lines)
+            else:
+                specs = subtitle_line_specs_from_legacy_layout(
+                    self._layout.subtitle,
+                    font=self._layout.subtitle_font,
+                    text_tile=layout_subtitle_text_tile(self._layout),
+                )
+        if not specs:
+            specs = [SubtitleLineSpec()]
+        for spec in specs:
+            row = ttk.Frame(self._subtitle_lines_host)
+            row.pack(fill=tk.X, pady=2)
+            text_var = tk.StringVar(value=spec.text)
+            entry = ttk.Entry(row, textvariable=text_var, width=18)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            font_var = tk.StringVar(value=title_font_label_for_value(spec.font))
+            font_combo = ttk.Combobox(
+                row,
+                textvariable=font_var,
+                values=self._title_font_combo_values,
+                state="readonly",
+                width=10,
+            )
+            font_combo.pack(side=tk.LEFT, padx=(4, 0))
+            self._subtitle_line_rows.append((text_var, font_var))
+            entry.bind("<Return>", lambda _e: self._apply_subtitle_settings(), add="+")
+
+    def _add_subtitle_line(self) -> None:
+        specs = self._collect_subtitle_line_specs()
+        specs.append(SubtitleLineSpec())
+        self._rebuild_subtitle_line_entries(specs)
+
+    def _remove_subtitle_line(self) -> None:
+        if len(self._subtitle_line_rows) <= 1:
+            specs = self._collect_subtitle_line_specs()
+            if specs and not (specs[0].text or "").strip():
+                return
+            self._rebuild_subtitle_line_entries([SubtitleLineSpec()])
+            return
+        specs = self._collect_subtitle_line_specs()[:-1]
+        self._rebuild_subtitle_line_entries(specs)
+
+    def _collect_subtitle_line_specs(self) -> list[SubtitleLineSpec]:
+        specs: list[SubtitleLineSpec] = []
+        for text_var, font_var in self._subtitle_line_rows:
+            raw_font = (font_var.get() or "").strip()
+            font_key = normalize_title_font(
+                title_font_key_for_label(raw_font) if raw_font else ""
+            )
+            specs.append(
+                SubtitleLineSpec(
+                    text=text_var.get(),
+                    font=font_key,
+                )
+            )
+        return specs
+
+    def _flush_subtitle_text_tile_from_ui(self) -> None:
+        raw = (self._subtitle_text_tile_var.get() or "").strip()
+        val = normalize_word_memorize_game_text_tile(
+            raw if raw != GAME_ASSET_NONE_LABEL else ""
+        )
+        self._layout.subtitle_text_tile = val
+
+    def _on_subtitle_text_tile_changed(self, _event: tk.Event | None = None) -> None:
+        self._flush_subtitle_text_tile_from_ui()
+        self._mark_dirty()
+        self._invalidate_game_tile_layer_cache()
+        self._redraw_canvas()
+
+    def _apply_subtitle_settings(self) -> None:
+        self._flush_subtitle_from_ui()
+        self._flush_subtitle_text_tile_from_ui()
+        self._mark_dirty()
+        self._invalidate_game_tile_layer_cache()
+        self._redraw_canvas()
+
+    def _on_subtitle_y_offset_changed(self, _event: tk.Event | None = None) -> None:
+        raw = (self._subtitle_y_offset_var.get() or "").strip()
+        try:
+            val = int(raw)
+        except ValueError:
+            return
+        val = max(-300, min(300, val))
+        if val != int(getattr(self._layout, "subtitle_y_offset_px", 0)):
+            self._layout.subtitle_y_offset_px = val
+            self._mark_dirty()
+            self._invalidate_game_tile_layer_cache()
+            self._redraw_canvas()
+
+    def _sync_subtitle_var(self) -> None:
+        self._rebuild_subtitle_line_entries()
+        tile_stem = layout_subtitle_text_tile(self._layout)
+        self._subtitle_text_tile_var.set(
+            tile_stem if tile_stem else GAME_ASSET_NONE_LABEL
+        )
+        self._subtitle_y_offset_var.set(
+            str(int(getattr(self._layout, "subtitle_y_offset_px", 0)))
+        )
+
     def _edit_background(self) -> None:
         dlg = tk.Toplevel(self)
         dlg.title("배경 설정")
@@ -2247,6 +2445,15 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._game_tile_layer_photo = None
         self._game_tile_layer_key = None
 
+    def _game_tile_layer_cache_key(self, tile_stem: str, band_y0: int, band_y1: int) -> str:
+        from studio.studios.word_memorize_tile_text import subtitle_bake_cache_token
+
+        sub_token = "::".join(subtitle_bake_cache_token(self._layout))
+        return (
+            f"{tile_stem}:{self._layout.margin_top_ratio:.6f}:"
+            f"{self._layout.margin_bottom_ratio:.6f}:{band_y0}:{band_y1}:{sub_token}"
+        )
+
     def _draw_background(self) -> None:
         c = self._canvas
         c.delete("bg")
@@ -2281,7 +2488,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
 
     def _draw_game_tile_layer(self) -> None:
-        """미리보기 캔버스 — 상·하 여백 제외 구간만 타일링."""
+        """미리보기 — 게임 타일 + text_tile 부제목(베이스 레이어에 bake)."""
         tile_stem = normalize_word_memorize_game_tile(
             getattr(self._layout, "game_tile", "")
         )
@@ -2289,16 +2496,14 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             return
         c = self._canvas
         c.delete("game_tile")
+        tile_px = game_tile_display_px(frame_width=PREVIEW_WIDTH)
         band_y0, band_y1 = layout_tile_band_y(
             PREVIEW_HEIGHT,
             margin_top_ratio=self._layout.margin_top_ratio,
             margin_bottom_ratio=self._layout.margin_bottom_ratio,
-            tile_px=game_tile_display_px(frame_width=PREVIEW_WIDTH),
+            tile_px=tile_px,
         )
-        layer_key = (
-            f"{tile_stem}:{self._layout.margin_top_ratio:.6f}:"
-            f"{self._layout.margin_bottom_ratio:.6f}:{band_y0}:{band_y1}"
-        )
+        layer_key = self._game_tile_layer_cache_key(tile_stem, band_y0, band_y1)
         if (
             self._game_tile_layer_photo is not None
             and self._game_tile_layer_key == layer_key
@@ -2311,24 +2516,52 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         if not path.is_file():
             return
         try:
+            import pygame
             from PIL import Image, ImageTk
 
-            tile = Image.open(path).convert("RGBA")
-            tile_px = game_tile_display_px(frame_width=PREVIEW_WIDTH)
-            if tile.size != (tile_px, tile_px):
-                tile = tile.resize((tile_px, tile_px), Image.Resampling.LANCZOS)
-            tw, th = tile.size
-            if tw <= 0 or th <= 0:
-                return
-            layer = Image.new("RGBA", (PREVIEW_WIDTH, PREVIEW_HEIGHT), (0, 0, 0, 0))
-            for y in range(band_y0, band_y1, th):
-                if y + th > band_y1:
-                    break
-                for x in range(0, PREVIEW_WIDTH, tw):
-                    if x + tw > PREVIEW_WIDTH:
-                        break
-                    layer.paste(tile, (x, y), tile)
-            self._game_tile_layer_photo = ImageTk.PhotoImage(layer)
+            from studio.studios.word_memorize_tile_text import (
+                apply_tile_subtitle,
+                blit_tiled_band,
+                ensure_pygame_minimal,
+            )
+
+            ensure_pygame_minimal()
+            game_tile = pygame.image.load(str(path)).convert_alpha()
+            if game_tile.get_size() != (tile_px, tile_px):
+                game_tile = pygame.transform.smoothscale(
+                    game_tile, (tile_px, tile_px)
+                )
+            layer = pygame.Surface((PREVIEW_WIDTH, PREVIEW_HEIGHT), pygame.SRCALPHA)
+            layer.fill((0, 0, 0, 0))
+            blit_tiled_band(
+                layer,
+                game_tile,
+                PREVIEW_WIDTH,
+                PREVIEW_HEIGHT,
+                y0=band_y0,
+                y1=band_y1,
+            )
+
+            def _load_text_tile(stem: str) -> pygame.Surface | None:
+                text_path = word_memorize_game_text_tile_path(stem)
+                if not text_path.is_file():
+                    return None
+                surf = pygame.image.load(str(text_path)).convert_alpha()
+                if surf.get_size() != (tile_px, tile_px):
+                    surf = pygame.transform.smoothscale(surf, (tile_px, tile_px))
+                return surf
+
+            apply_tile_subtitle(
+                layer,
+                self._layout,
+                load_text_tile=_load_text_tile,
+                tile_px=tile_px,
+                frame_width=PREVIEW_WIDTH,
+                frame_height=PREVIEW_HEIGHT,
+            )
+            raw = pygame.image.tobytes(layer, "RGBA")
+            pil_layer = Image.frombytes("RGBA", layer.get_size(), raw)
+            self._game_tile_layer_photo = ImageTk.PhotoImage(pil_layer)
             self._game_tile_layer_key = layer_key
             c.create_image(
                 0,
@@ -3003,6 +3236,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
     def _write_layout(self, path: Path) -> None:
         self._flush_title_from_ui()
+        self._flush_subtitle_from_ui()
         self._layout.renumber_orders()
         try:
             save_layout(path, self._layout)
@@ -3030,6 +3264,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_game_asset_combos()
         self._sync_box_trap_combo()
         self._sync_title_var()
+        self._sync_subtitle_var()
 
     def _open(self) -> None:
         if not self._confirm_discard_dirty("다른 배치 파일을 불러옵니다."):
@@ -3078,6 +3313,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_game_asset_combos()
         self._sync_box_trap_combo()
         self._sync_title_var()
+        self._sync_subtitle_var()
 
     def _on_close(self) -> None:
         if not self._confirm_discard_dirty("창을 닫습니다."):

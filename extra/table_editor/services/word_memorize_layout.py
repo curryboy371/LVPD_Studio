@@ -18,6 +18,7 @@ WORD_MEMORIZE_BG_CH_DIR = WORD_MEMORIZE_BG_DIR / "ch"
 WORD_MEMORIZE_LASER_ICON_DIR = get_repo_root() / "resource" / "image" / "icon"
 WORD_MEMORIZE_GAME_DIR = get_repo_root() / "resource" / "image" / "game"
 WORD_MEMORIZE_GAME_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "tiles"
+WORD_MEMORIZE_GAME_TEXT_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "text_tile"
 WORD_MEMORIZE_GAME_PARTICLES_DIR = WORD_MEMORIZE_GAME_DIR / "particles"
 WORD_MEMORIZE_GAME_PICKS_DIR = WORD_MEMORIZE_GAME_DIR / "picks"
 # trap 카드 이미지 — resource/image/game/trap (또는 Trap)
@@ -180,6 +181,24 @@ DEFAULT_TITLE_FONT_PT = 68
 TITLE_FONT_PT_MIN = 20
 TITLE_FONT_PT_MAX = 120
 TITLE_LINE_GAP_FHD = 10
+
+# 부제목 — 타일 마스크 글씨 (타일 밴드 정중앙, 상하좌우 5타일 여백 후 최대 크기)
+SUBTITLE_MARGIN_TILES = 5
+SUBTITLE_FONT_PT_MAX = 4096
+SUBTITLE_FONT_PT_MIN = 24
+SUBTITLE_LINE_GAP_TILES = 2
+SUBTITLE_MIN_LINE_TILES = 4
+# 부제목 글자 격자 한 칸 — FHD(배경 타일 16px) 기준 2px, 프레임에 비례 스케일
+SUBTITLE_CELL_PX = 2
+
+
+def subtitle_cell_px(*, tile_px: int) -> int:
+    """부제목 마스크·text_tile blit에 쓰는 격자 한 칸 픽셀."""
+    gpx = max(1, int(tile_px))
+    ref = max(1, int(GAME_TILE_DISPLAY_PX))
+    cell = max(1, int(round(gpx * float(SUBTITLE_CELL_PX) / ref)))
+    return min(gpx, cell)
+
 
 SELECTION_HIGHLIGHT_CHOICES: tuple[tuple[str, str], ...] = (
     ("그라데이션", "gradient"),
@@ -403,6 +422,138 @@ def sync_layout_title_fields(layout: "WordMemorizeLayout") -> None:
     layout.title_color = first.color
     layout.title_font = first.font
     layout.title_font_pt = first.font_pt
+
+
+@dataclass
+class SubtitleLineSpec:
+    """부제목 한 줄 — text_tile로 타일 격자에 글씨, 크기는 재생 시 자동 산출."""
+
+    text: str = ""
+    font: str = DEFAULT_TITLE_FONT
+    text_tile: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text": (self.text or "").strip(),
+            "font": normalize_title_font(self.font),
+            "text_tile": normalize_word_memorize_game_text_tile(self.text_tile),
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> SubtitleLineSpec:
+        if not isinstance(raw, dict):
+            return cls()
+        return cls(
+            text=str(raw.get("text", "") or ""),
+            font=normalize_title_font(
+                str(raw.get("font", DEFAULT_TITLE_FONT) or DEFAULT_TITLE_FONT)
+            ),
+            text_tile=normalize_word_memorize_game_text_tile(
+                str(raw.get("text_tile", "") or "")
+            ),
+        )
+
+
+def subtitle_line_specs_from_legacy_layout(
+    subtitle: str,
+    *,
+    font: str = DEFAULT_TITLE_FONT,
+    text_tile: str = "",
+) -> list[SubtitleLineSpec]:
+    lines = split_title_lines(subtitle)
+    if not any((ln or "").strip() for ln in lines):
+        return []
+    tile = normalize_word_memorize_game_text_tile(text_tile)
+    return [
+        SubtitleLineSpec(text=ln, font=font, text_tile=tile)
+        for ln in lines
+        if (ln or "").strip()
+    ]
+
+
+def layout_subtitle_line_specs(layout: "WordMemorizeLayout") -> list[SubtitleLineSpec]:
+    if layout.subtitle_lines:
+        return [s for s in layout.subtitle_lines if (s.text or "").strip()]
+    return subtitle_line_specs_from_legacy_layout(
+        layout.subtitle,
+        font=layout.subtitle_font,
+        text_tile=layout_subtitle_text_tile(layout),
+    )
+
+
+def sync_layout_subtitle_fields(layout: "WordMemorizeLayout") -> None:
+    """subtitle_lines → subtitle 문자열·레거시 전역 필드(첫 줄 기준)."""
+    specs = layout.subtitle_lines
+    layout.subtitle = join_title_lines([s.text for s in specs])
+    active = [s for s in specs if (s.text or "").strip()]
+    first = active[0] if active else SubtitleLineSpec()
+    layout.subtitle_font = first.font
+    if first.text_tile and not layout_subtitle_text_tile(layout):
+        layout.subtitle_text_tile = first.text_tile
+
+
+def default_subtitle_position(
+    frame_width: int = SHORTS_WIDTH,
+    frame_height: int = SHORTS_HEIGHT,
+    *,
+    margin_top_ratio: float = DEFAULT_MARGIN_TOP_RATIO,
+    margin_bottom_ratio: float = DEFAULT_MARGIN_BOTTOM_RATIO,
+    tile_px: int = GAME_TILE_DISPLAY_PX,
+    y_offset_px: int = 0,
+) -> tuple[int, int]:
+    """부제목 앵커(블록 중심) — 타일이 깔리는 밴드의 정중앙."""
+    fw = max(1, int(frame_width))
+    fh = max(1, int(frame_height))
+    px = max(1, int(tile_px))
+    band_y0, band_y1 = layout_tile_band_y(
+        fh,
+        margin_top_ratio=margin_top_ratio,
+        margin_bottom_ratio=margin_bottom_ratio,
+        tile_px=px,
+    )
+    cx = fw // 2
+    cy = (band_y0 + band_y1) // 2 + int(y_offset_px)
+    cy = max(band_y0 + px, min(cy, max(band_y0 + px, band_y1 - px)))
+    return cx, cy
+
+
+def resolve_subtitle_position(
+    frame_width: int = SHORTS_WIDTH,
+    frame_height: int = SHORTS_HEIGHT,
+    *,
+    margin_top_ratio: float = DEFAULT_MARGIN_TOP_RATIO,
+    margin_bottom_ratio: float = DEFAULT_MARGIN_BOTTOM_RATIO,
+    tile_px: int = GAME_TILE_DISPLAY_PX,
+    y_offset_px: int = 0,
+) -> tuple[int, int]:
+    return default_subtitle_position(
+        frame_width=frame_width,
+        frame_height=frame_height,
+        margin_top_ratio=margin_top_ratio,
+        margin_bottom_ratio=margin_bottom_ratio,
+        tile_px=tile_px,
+        y_offset_px=y_offset_px,
+    )
+
+
+def subtitle_tile_band_rect(
+    frame_width: int,
+    frame_height: int,
+    *,
+    margin_top_ratio: float,
+    margin_bottom_ratio: float,
+    tile_px: int,
+) -> tuple[int, int, int, int]:
+    """타일 밴드 (x0, y0, x1, y1) — 부제목 배치·크기 산출용."""
+    fw = max(1, int(frame_width))
+    fh = max(1, int(frame_height))
+    band_y0, band_y1 = layout_tile_band_y(
+        fh,
+        margin_top_ratio=margin_top_ratio,
+        margin_bottom_ratio=margin_bottom_ratio,
+        tile_px=max(1, int(tile_px)),
+    )
+    return 0, band_y0, fw, band_y1
 
 
 TITLE_PREVIEW_FONTS: dict[str, tuple[str, int, str]] = {
@@ -816,6 +967,34 @@ def _list_game_asset_stems(directory: Path) -> list[str]:
     return sorted(stems)
 
 
+def list_word_memorize_game_text_tiles() -> list[str]:
+    """resource/image/game/text_tile 내 글자 타일 PNG stem 목록."""
+    return _list_game_asset_stems(WORD_MEMORIZE_GAME_TEXT_TILES_DIR)
+
+
+def normalize_word_memorize_game_text_tile(raw: str) -> str:
+    """text_tile stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    stem = Path(text).stem
+    if stem in list_word_memorize_game_text_tiles():
+        return stem
+    return ""
+
+
+def word_memorize_game_text_tile_path(stem: str) -> Path:
+    """text_tile PNG 절대 경로."""
+    name = normalize_word_memorize_game_text_tile(stem)
+    if not name:
+        return WORD_MEMORIZE_GAME_TEXT_TILES_DIR / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = WORD_MEMORIZE_GAME_TEXT_TILES_DIR / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return WORD_MEMORIZE_GAME_TEXT_TILES_DIR / f"{name}.png"
+
+
 def list_word_memorize_game_tiles() -> list[str]:
     """resource/image/game/tiles 내 타일 PNG stem 목록."""
     return _list_game_asset_stems(WORD_MEMORIZE_GAME_TILES_DIR)
@@ -952,6 +1131,23 @@ def box_game_trap(box: WordMemorizeBox) -> str:
 def box_uses_trap(box: WordMemorizeBox) -> bool:
     """박스가 trap 카드인지."""
     return bool(box_game_trap(box))
+
+
+def layout_subtitle_text_tile(layout: WordMemorizeLayout) -> str:
+    """레이아웃 부제목 기본 text_tile stem (없으면 '')."""
+    return normalize_word_memorize_game_text_tile(
+        str(getattr(layout, "subtitle_text_tile", "") or "")
+    )
+
+
+def resolve_subtitle_line_text_tile(
+    layout: WordMemorizeLayout, spec: SubtitleLineSpec
+) -> str:
+    """줄별 text_tile — 줄 설정 우선, 없으면 레이아웃 기본."""
+    line_tile = normalize_word_memorize_game_text_tile(spec.text_tile)
+    if line_tile:
+        return line_tile
+    return layout_subtitle_text_tile(layout)
 
 
 def layout_game_tile(layout: WordMemorizeLayout) -> str:
@@ -1096,6 +1292,11 @@ class WordMemorizeLayout:
     title_font: str = DEFAULT_TITLE_FONT
     title_font_pt: int = DEFAULT_TITLE_FONT_PT
     title_lines: list[TitleLineSpec] = field(default_factory=list)
+    subtitle: str = ""
+    subtitle_text_tile: str = ""
+    subtitle_font: str = DEFAULT_TITLE_FONT
+    subtitle_y_offset_px: int = 0
+    subtitle_lines: list[SubtitleLineSpec] = field(default_factory=list)
     selection_highlight: SelectionHighlightType = DEFAULT_SELECTION_HIGHLIGHT
     # 재생 중인 단어와 y·h가 같은 줄 강조 (카드 효과와 별도)
     row_highlight: RowHighlightType = DEFAULT_ROW_HIGHLIGHT
@@ -1134,6 +1335,7 @@ class WordMemorizeLayout:
 
     def to_dict(self) -> dict[str, Any]:
         sync_layout_title_fields(self)
+        sync_layout_subtitle_fields(self)
         self.title_x = int(self.frame_width) // 2
         return {
             "version": LAYOUT_VERSION,
@@ -1151,6 +1353,11 @@ class WordMemorizeLayout:
             "title_font": normalize_title_font(self.title_font),
             "title_font_pt": normalize_title_font_pt(self.title_font_pt),
             "title_lines": [s.to_dict() for s in self.title_lines],
+            "subtitle": (self.subtitle or "").strip(),
+            "subtitle_text_tile": layout_subtitle_text_tile(self),
+            "subtitle_font": normalize_title_font(self.subtitle_font),
+            "subtitle_y_offset_px": int(self.subtitle_y_offset_px),
+            "subtitle_lines": [s.to_dict() for s in self.subtitle_lines],
             "selection_highlight": normalize_selection_highlight(self.selection_highlight),
             "row_highlight": normalize_row_highlight(self.row_highlight),
             "use_base_slot": bool(self.use_base_slot),
@@ -1221,6 +1428,28 @@ class WordMemorizeLayout:
             )
         sync_layout_title_fields(layout)
         layout.title_x = int(layout.frame_width) // 2
+        layout.subtitle = str(data.get("subtitle", "") or "").strip()
+        layout.subtitle_text_tile = normalize_word_memorize_game_text_tile(
+            str(data.get("subtitle_text_tile", "") or "")
+        )
+        layout.subtitle_font = normalize_title_font(
+            str(data.get("subtitle_font", DEFAULT_TITLE_FONT) or DEFAULT_TITLE_FONT)
+        )
+        layout.subtitle_y_offset_px = int(data.get("subtitle_y_offset_px", 0) or 0)
+        raw_sub_lines = data.get("subtitle_lines")
+        if isinstance(raw_sub_lines, list) and raw_sub_lines:
+            layout.subtitle_lines = [
+                SubtitleLineSpec.from_dict(item)
+                for item in raw_sub_lines
+                if isinstance(item, dict)
+            ]
+        else:
+            layout.subtitle_lines = subtitle_line_specs_from_legacy_layout(
+                layout.subtitle,
+                font=layout.subtitle_font,
+                text_tile=layout.subtitle_text_tile,
+            )
+        sync_layout_subtitle_fields(layout)
         raw_highlight = str(
             data.get("selection_highlight", DEFAULT_SELECTION_HIGHLIGHT) or ""
         ).strip()

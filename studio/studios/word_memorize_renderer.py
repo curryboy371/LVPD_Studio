@@ -63,8 +63,13 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_particle_path,
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
+    word_memorize_game_text_tile_path,
     word_memorize_game_trap_path,
     TRAP_REGROW_SEC,
+)
+from studio.studios.word_memorize_tile_text import (
+    apply_tile_subtitle,
+    subtitle_bake_cache_token,
 )
 from studio.studios.word_memorize_trap import (
     TrapLandSmokeSystem,
@@ -732,7 +737,8 @@ class WordMemorizeRenderer:
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
         self._word_image_path_cache: dict[int, Path | None] = {}
         self._game_tile_cache: dict[tuple[str, int], pygame.Surface | None] = {}
-        self._game_tile_overlay_base: dict[tuple[str, int, int], pygame.Surface | None] = {}
+        self._text_tile_cache: dict[tuple[str, int], pygame.Surface | None] = {}
+        self._game_tile_overlay_base: dict[tuple[Any, ...], pygame.Surface | None] = {}
         self._pick_cache: dict[tuple[str, int], pygame.Surface | None] = {}
         self._trap_surface_cache: dict[tuple[str, int, int], pygame.Surface | None] = {}
         self._particle_sprite_cache: dict[str, list[pygame.Surface]] = {}
@@ -1365,6 +1371,7 @@ class WordMemorizeRenderer:
             px,
             band_y0,
             band_y1,
+            subtitle_bake_cache_token(layout),
         )
         if key in self._game_tile_overlay_base:
             return self._game_tile_overlay_base[key]
@@ -1374,8 +1381,39 @@ class WordMemorizeRenderer:
             return None
         layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
         _blit_tiled(layer, tile, fw, fh, y0=band_y0, y1=band_y1)
+        self._bake_subtitle_on_tile_layer(layer, layout, fw, fh, px)
         self._game_tile_overlay_base[key] = layer
         return layer
+
+    def _get_text_tile_surface(
+        self, text_tile_stem: str, fw: int
+    ) -> pygame.Surface | None:
+        key = (text_tile_stem, game_tile_display_px(frame_width=fw))
+        if key in self._text_tile_cache:
+            return self._text_tile_cache[key]
+        path = word_memorize_game_text_tile_path(text_tile_stem)
+        px = game_tile_display_px(frame_width=fw)
+        surf = _load_tile_image(path, display_px=px, frame_width=fw)
+        self._text_tile_cache[key] = surf
+        return surf
+
+    def _bake_subtitle_on_tile_layer(
+        self,
+        layer: pygame.Surface,
+        layout: WordMemorizeLayout,
+        fw: int,
+        fh: int,
+        tile_px: int,
+    ) -> None:
+        """타일 베이스(pristine)에 부제목 text_tile을 굽는다 — 채굴·복구와 동기."""
+        apply_tile_subtitle(
+            layer,
+            layout,
+            load_text_tile=lambda stem: self._get_text_tile_surface(stem, fw),
+            tile_px=tile_px,
+            frame_width=fw,
+            frame_height=fh,
+        )
 
     def _get_pick_surface(self, pick_stem: str, max_px: int) -> pygame.Surface | None:
         key = (pick_stem, max(1, int(max_px)))
@@ -1591,6 +1629,7 @@ class WordMemorizeRenderer:
             tile_px=px,
         )
         _blit_tiled(surface, tile, fw, fh, y0=band_y0, y1=band_y1)
+        self._bake_subtitle_on_tile_layer(surface, layout, fw, fh, px)
 
     def _draw_background(
         self,

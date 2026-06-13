@@ -21,6 +21,27 @@
       "font_pt": 68
     }
   ],
+  "subtitle": "어떻게 나오\n확인해보자\n잘 되고 있는가",
+  "subtitle_text_tile": "black",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "어떻게 나오",
+      "font": "kr_cn",
+      "text_tile": ""
+    },
+    {
+      "text": "확인해보자",
+      "font": "kr_cn",
+      "text_tile": ""
+    },
+    {
+      "text": "잘 되고 있는가",
+      "font": "kr_cn",
+      "text_tile": ""
+    }
+  ],
   "selection_highlight": "gradient",
   "row_highlight": "none",
   "use_base_slot": false,
