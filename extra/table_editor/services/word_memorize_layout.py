@@ -1154,8 +1154,172 @@ def box_game_trap(box: WordMemorizeBox) -> str:
 
 
 def box_uses_trap(box: WordMemorizeBox) -> bool:
-    """박스가 trap 카드인지."""
-    return bool(box_game_trap(box))
+    """하위 호환 — 채굴 후 타일 복구(조각모음) 카드."""
+    return box_uses_mining_regrow(box)
+
+
+MINING_MASK_NONE = ""
+MINING_MASK_HANZI = "hanzi"
+MINING_MASK_HANZI_PINYIN = "hanzi_pinyin"
+MINING_MASK_HANZI_PINYIN_MEANING = "hanzi_pinyin_meaning"
+
+CARD_TYPE_NONE = ""
+CARD_TYPE_SUBSCRIBE = "subscribe"
+CARD_TYPE_LIKE = "like"
+CARD_TYPE_TOPIC_RECOMMEND = "topic_recommend"
+
+CARD_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
+    ("없음", CARD_TYPE_NONE),
+    ("구독", CARD_TYPE_SUBSCRIBE),
+    ("좋아요", CARD_TYPE_LIKE),
+    ("주제추천", CARD_TYPE_TOPIC_RECOMMEND),
+)
+_VALID_CARD_TYPES = frozenset(value for _label, value in CARD_TYPE_CHOICES)
+_LEGACY_TRAP_CARD_TYPE = CARD_TYPE_TOPIC_RECOMMEND
+CARD_TYPE_CTA_HANZI: dict[str, str] = {
+    CARD_TYPE_SUBSCRIBE: "订阅",
+    CARD_TYPE_LIKE: "点赞",
+}
+CARD_TYPE_CTA_AUDIO_REL: dict[str, str] = {
+    CARD_TYPE_SUBSCRIBE: "resource/sound/tts/구독.mp3",
+    CARD_TYPE_LIKE: "resource/sound/tts/좋아.mp3",
+    CARD_TYPE_TOPIC_RECOMMEND: "resource/sound/tts/주제추천.mp3",
+}
+CARD_TYPE_CTA_CAPTION: dict[str, str] = {
+    CARD_TYPE_SUBSCRIBE: "구독 부탁드립니다",
+    CARD_TYPE_LIKE: "좋아요 부탁드립니다",
+    CARD_TYPE_TOPIC_RECOMMEND: "원하시는 주제를 댓글에 남겨주세요",
+}
+_LEGACY_MINING_MASK_TO_CARD_TYPE: dict[str, str] = {
+    MINING_MASK_HANZI: CARD_TYPE_TOPIC_RECOMMEND,
+    MINING_MASK_HANZI_PINYIN: CARD_TYPE_TOPIC_RECOMMEND,
+    MINING_MASK_HANZI_PINYIN_MEANING: CARD_TYPE_TOPIC_RECOMMEND,
+}
+
+
+def normalize_card_type(raw: str) -> str:
+    """카드 CTA 타입 정규화."""
+    text = (raw or "").strip()
+    if text in _VALID_CARD_TYPES:
+        return text
+    for label, value in CARD_TYPE_CHOICES:
+        if text == label:
+            return value
+    return CARD_TYPE_NONE
+
+
+def card_type_label_for_value(raw: str) -> str:
+    """저장값 → UI 라벨."""
+    norm = normalize_card_type(raw)
+    for label, value in CARD_TYPE_CHOICES:
+        if value == norm:
+            return label
+    return CARD_TYPE_CHOICES[0][0]
+
+
+def card_type_value_for_label(label: str) -> str:
+    """UI 라벨 → 저장값."""
+    text = (label or "").strip()
+    for lbl, value in CARD_TYPE_CHOICES:
+        if lbl == text:
+            return value
+    return CARD_TYPE_NONE
+
+
+def _legacy_card_type_from_mining_mask(raw: str) -> str:
+    """구 mining_mask → card_type."""
+    text = (raw or "").strip()
+    if text in _LEGACY_MINING_MASK_TO_CARD_TYPE:
+        return _LEGACY_MINING_MASK_TO_CARD_TYPE[text]
+    for _label, value in (
+        ("한자만 가리기", MINING_MASK_HANZI),
+        ("한자·병음 가리기", MINING_MASK_HANZI_PINYIN),
+        ("한자·병음·뜻 가리기", MINING_MASK_HANZI_PINYIN_MEANING),
+    ):
+        if text == _label:
+            return _LEGACY_MINING_MASK_TO_CARD_TYPE[value]
+    return CARD_TYPE_NONE
+
+
+def box_card_type(box: WordMemorizeBox) -> str:
+    """박스 CTA 타입 — 구 mining_mask·game_trap은 주제추천으로 이전."""
+    explicit = normalize_card_type(str(getattr(box, "card_type", "") or ""))
+    if explicit:
+        return explicit
+    legacy_mask = str(getattr(box, "mining_mask", "") or "").strip()
+    migrated = _legacy_card_type_from_mining_mask(legacy_mask)
+    if migrated:
+        return migrated
+    if box_game_trap(box):
+        return _LEGACY_TRAP_CARD_TYPE
+    return CARD_TYPE_NONE
+
+
+def box_uses_mining_regrow(box: WordMemorizeBox) -> bool:
+    """채굴 완료 후 화면 타일 조각모음 복구를 사용하는 카드."""
+    return bool(box_card_type(box))
+
+
+def card_type_cta_hanzi(card_type: str) -> str:
+    """CTA 타입별 단어장 조회 한자 — 없으면 빈 문자열."""
+    return CARD_TYPE_CTA_HANZI.get(normalize_card_type(card_type), "")
+
+
+def box_cta_hanzi(box: WordMemorizeBox) -> str:
+    """박스 CTA 고정 한자(구독→订阅, 좋아요→点赞)."""
+    return card_type_cta_hanzi(box_card_type(box))
+
+
+def card_type_cta_audio_rel(card_type: str) -> str:
+    """CTA 타입별 고정 음성 상대 경로 — 없으면 빈 문자열."""
+    return CARD_TYPE_CTA_AUDIO_REL.get(normalize_card_type(card_type), "")
+
+
+def box_cta_audio_path(box: WordMemorizeBox) -> Path | None:
+    """CTA 타입 박스 고정 mp3 절대 경로 — 일반 단어는 None."""
+    rel = card_type_cta_audio_rel(box_card_type(box))
+    if not rel:
+        return None
+    return get_repo_root() / rel.replace("\\", "/")
+
+
+def card_type_cta_caption(card_type: str) -> str:
+    """CTA 음성 재생 시 하단 자막 문구."""
+    return CARD_TYPE_CTA_CAPTION.get(normalize_card_type(card_type), "")
+
+
+def box_cta_caption(box: WordMemorizeBox) -> str:
+    """박스 CTA 자막 — 없으면 빈 문자열."""
+    return card_type_cta_caption(box_card_type(box))
+
+
+def resolve_cta_caption_position(
+    frame_width: int,
+    frame_height: int,
+    *,
+    margin_bottom_ratio: float = DEFAULT_MARGIN_BOTTOM_RATIO,
+    y_lift_px: int | None = None,
+) -> tuple[int, int]:
+    """CTA 자막 앵커 — 하단 가이드 띠 중앙에서 약간 위."""
+    fw = max(1, int(frame_width))
+    fh = max(1, int(frame_height))
+    y_band_start = int(round((1.0 - float(margin_bottom_ratio)) * fh))
+    lift = (
+        int(y_lift_px)
+        if y_lift_px is not None
+        else max(48, int(90 * fh / 1920))
+    )
+    cx = fw // 2
+    cy = y_band_start + (fh - y_band_start) // 2 - lift
+    cy = max(y_band_start + 24, min(cy, fh - 24))
+    return cx, cy
+
+
+# CTA 자막 — FHD 기준 렌더 스케일
+CTA_CAPTION_FONT_PT_FHD = 58
+CTA_CAPTION_BG_PAD_X_FHD = 28
+CTA_CAPTION_BG_PAD_Y_FHD = 16
+CTA_CAPTION_BG_RADIUS_FHD = 12
 
 
 def layout_subtitle_text_tile(layout: WordMemorizeLayout) -> str:
@@ -1283,7 +1447,10 @@ class WordMemorizeBox:
     w: int
     h: int
     box_key: str = ""
-    # resource/image/game/trap/{stem}.png — 곡괭이 채굴 후 타일 재생성 카드
+    # CTA 카드 타입 — subscribe / like / topic_recommend
+    card_type: str = ""
+    # 구 필드 — 로드 시 card_type으로만 이전
+    mining_mask: str = ""
     game_trap: str = ""
 
     def clamp_to_frame(
@@ -1493,7 +1660,7 @@ class WordMemorizeLayout:
                     "w": b.w,
                     "h": b.h,
                     "box_key": b.box_key,
-                    "game_trap": box_game_trap(b),
+                    "card_type": box_card_type(b),
                 }
                 for b in self.sorted_boxes()
             ],
@@ -1596,10 +1763,22 @@ class WordMemorizeLayout:
                 w=int(raw.get("w", 280)),
                 h=int(raw.get("h", 160)),
                 box_key=str(raw.get("box_key", "")).strip(),
+                card_type=normalize_card_type(
+                    str(raw.get("card_type", "") or "")
+                ),
+                mining_mask=str(raw.get("mining_mask", "") or "").strip(),
                 game_trap=normalize_word_memorize_game_trap(
                     str(raw.get("game_trap", "") or "")
                 ),
             )
+            if not box.card_type:
+                legacy = _legacy_card_type_from_mining_mask(box.mining_mask)
+                if legacy:
+                    box.card_type = legacy
+                elif box.game_trap:
+                    box.card_type = _LEGACY_TRAP_CARD_TYPE
+            box.mining_mask = ""
+            box.game_trap = ""
             box.clamp_to_frame(layout.frame_width, layout.frame_height)
             boxes.append(box)
         layout.boxes = boxes

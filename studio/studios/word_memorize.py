@@ -14,32 +14,36 @@ from core.paths import (
     STUDIO_WORD_MEMORIZE_BG_AUDIO_LINEAR_GAIN,
     get_repo_root,
 )
-from data.table_manager import get_word, load_words_table_from_csv
+from data.table_manager import load_words_table_from_csv
 from extra.table_editor.services.word_memorize_layout import (
     PICK_REVEAL_SEC,
     TRAP_REGROW_SEC,
     TRAP_REGROW_SMOKE_POLL_SEC,
     WordMemorizeBox,
     box_runtime_key,
+    box_uses_mining_regrow,
     box_uses_trap,
     game_tile_display_px,
     layout_uses_pick_mining,
     load_layout,
+)
+from studio.studios.word_memorize_box_resolve import (
+    active_cta_caption_for_box,
+    box_uses_cta_audio,
+    resolve_box_word,
+    resolve_box_word_id,
 )
 from studio.studios.word_memorize_trap import (
     collect_trap_fall_land_impacts,
     layout_trap_regrow_duration_sec,
 )
 from studio.studios.word_memorize_pick import (
-    MiningDirection,
     card_mining_row_count,
     card_mining_state,
     card_mining_swing_index,
-    mining_direction_for_key,
     pick_reveal_progress,
     pick_random_word_memorize_fall_sound_path,
     pick_random_word_memorize_hamer_sound_path,
-    random_mining_direction,
     word_memorize_pick_sound_path,
 )
 from studio.studios.word_memorize_renderer import (
@@ -61,6 +65,7 @@ TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC = 0.8
 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
 # zh: 둘째=한국어 뜻 — 다음 한자로 전환 (ko/en과 동일 0.5s)
 TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
+CTA_PRE_REGROW_HOLD_SEC = 1.0
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 # 단어 외우기 효과음 채널·볼륨 (runner: set_num_channels(8) → 0~7)
@@ -73,7 +78,14 @@ _EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
     _HAMER_EFFECT_CHANNEL: 0.4,
 }
 
-WordSubstep = Literal["", "mining", "trap_regrow", "first", "second"]
+WordSubstep = Literal[
+    "",
+    "mining",
+    "trap_regrow",
+    "cta_pre_regrow",
+    "first",
+    "second",
+]
 
 
 def _normalize_meaning_lang(raw: str) -> MeaningLang:
@@ -122,7 +134,6 @@ class WordMemorizeStudio(IStudio):
         self._active_key: str | None = None
         self._revealed_keys: set[str] = set()
         self._revealed_rows_by_key: dict[str, int] = {}
-        self._mining_direction_by_key: dict[str, MiningDirection] = {}
         self._queued_second_path: Path | None = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
@@ -133,7 +144,6 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
-        self._trap_regrow_mining_direction_by_key: dict[str, MiningDirection] = {}
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -145,7 +155,7 @@ class WordMemorizeStudio(IStudio):
         self._sequence = [
             b
             for b in self._layout.sorted_boxes()
-            if get_word(int(b.word_id)) is not None
+            if resolve_box_word(b) is not None
         ]
         if not self._sequence:
             logger.warning("단어 외우기: 배치에 표시할 단어가 없습니다 — %s", self._layout_path)
@@ -246,7 +256,6 @@ class WordMemorizeStudio(IStudio):
         self._active_key = None
         self._revealed_keys = set()
         self._revealed_rows_by_key = {}
-        self._mining_direction_by_key = {}
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
@@ -257,7 +266,6 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
-        self._trap_regrow_mining_direction_by_key: dict[str, MiningDirection] = {}
         self._done = False
         self._active_effect_sound_until.clear()
 
@@ -329,14 +337,12 @@ class WordMemorizeStudio(IStudio):
 
         tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
         key = self._active_key
-        direction = mining_direction_for_key(key, self._mining_direction_by_key)
         prev = int(self._revealed_rows_by_key.get(key, 0))
         state = card_mining_state(
             box,
             self._pick_mining_elapsed_sec,
             tile_px=tile_px,
             stored_completed_rows=prev,
-            direction=direction,
         )
         new_rows = max(prev, state.completed_rows)
         self._revealed_rows_by_key[key] = new_rows
@@ -349,7 +355,9 @@ class WordMemorizeStudio(IStudio):
                 to_row=new_rows,
                 tile_px=tile_px,
                 revealed_box_keys=self._revealed_keys,
-                direction=direction,
+                words_by_id=self._words_by_id_for_draw(),
+                card_meaning_by_id=self._card_meaning_by_id,
+                meaning_lang=self._meaning_lang,
             )
         if state.is_complete:
             self._revealed_keys.add(key)
@@ -480,7 +488,9 @@ class WordMemorizeStudio(IStudio):
             frame_height=int(self._layout.frame_height),
             revealed_box_keys=self._trap_regrow_revealed_keys,
             revealed_rows_by_key=self._trap_regrow_revealed_rows,
-            mining_direction_by_key=self._trap_regrow_mining_direction_by_key,
+            words_by_id=self._words_by_id_for_draw(),
+            card_meaning_by_id=self._card_meaning_by_id,
+            meaning_lang=self._meaning_lang,
         )
         if not impacts:
             return
@@ -531,9 +541,9 @@ class WordMemorizeStudio(IStudio):
                 to_row=row_count,
                 tile_px=tile_px,
                 revealed_box_keys=self._revealed_keys,
-                direction=mining_direction_for_key(
-                    self._active_key, self._mining_direction_by_key
-                ),
+                words_by_id=self._words_by_id_for_draw(),
+                card_meaning_by_id=self._card_meaning_by_id,
+                meaning_lang=self._meaning_lang,
             )
         self._revealed_rows_by_key[self._active_key] = row_count
         self._revealed_keys.add(self._active_key)
@@ -547,7 +557,6 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_elapsed_sec = 0.0
         self._trap_regrow_revealed_keys = set(self._revealed_keys)
         self._trap_regrow_revealed_rows = dict(self._revealed_rows_by_key)
-        self._trap_regrow_mining_direction_by_key = dict(self._mining_direction_by_key)
         if self._active_key:
             self._trap_regrow_revealed_keys.add(self._active_key)
             box = self._active_mining_box()
@@ -560,18 +569,52 @@ class WordMemorizeStudio(IStudio):
             self._layout,
             revealed_box_keys=self._trap_regrow_revealed_keys,
             revealed_rows_by_key=self._trap_regrow_revealed_rows,
-            mining_direction_by_key=self._trap_regrow_mining_direction_by_key,
+            words_by_id=self._words_by_id_for_draw(),
+            card_meaning_by_id=self._card_meaning_by_id,
+            meaning_lang=self._meaning_lang,
         )
         self._hold_sec = self._trap_regrow_duration_sec
         self._renderer.reset_scorch_layer()
 
     def _finish_trap_regrow(self) -> None:
-        """전체 타일 복구 완료 — 재생 종료."""
+        """타일 복구 완료 — 종료."""
         self._trap_regrow_elapsed_sec = 0.0
         self._word_substep = ""
         self._phase = "outro"
         self._active_key = None
         self._hold_sec = self._outro_hold_sec()
+
+    def _begin_cta_pre_regrow(self) -> None:
+        """CTA 음성 종료 후 1초 대기 — 이후 타일 복구."""
+        self._word_substep = "cta_pre_regrow"
+        self._hold_sec = float(CTA_PRE_REGROW_HOLD_SEC)
+
+    def _apply_word_audio_hold(
+        self,
+        box: WordMemorizeBox,
+        *,
+        first_len: float,
+        second_len: float,
+        second_lead: float,
+        next_lead: float,
+    ) -> None:
+        """첫·둘째 TTS 또는 CTA 단일 음성 대기 시간 설정."""
+        if box_uses_cta_audio(box):
+            self._word_substep = "first"
+            self._hold_sec = max(0.0, first_len)
+            self._queued_second_path = None
+            self._queued_second_len = 0.0
+            return
+        self._word_substep = "first"
+        if first_len > 0:
+            self._hold_sec = max(0.0, first_len - second_lead)
+            return
+        if second_len > 0:
+            self._word_substep = "second"
+            self._hold_sec = max(0.0, second_len - next_lead)
+            return
+        self._word_substep = "second"
+        self._hold_sec = 0.0
 
     def _start_tts_after_mining(self) -> None:
         """채굴 완료 후 TTS·하이라이트 타이머 시작."""
@@ -584,19 +627,19 @@ class WordMemorizeStudio(IStudio):
         self._active_word_duration_sec = self._word_play_duration_sec(box)
         self._queued_second_path = None
         self._queued_second_len = 0.0
+        if box_uses_mining_regrow(box):
+            self._renderer.reset_scorch_layer()
         first_len, second_path, second_len = self._word_tts_paths(box)
         second_lead, next_lead = self._word_tts_leads()
-        self._word_substep = "first"
-        if first_len > 0:
-            self._hold_sec = max(0.0, first_len - second_lead)
-            self._queued_second_path = second_path
-            self._queued_second_len = second_len
-        elif second_len > 0:
-            self._word_substep = "second"
-            self._hold_sec = max(0.0, second_len - next_lead)
-        else:
-            self._word_substep = "second"
-            self._hold_sec = 0.0
+        self._queued_second_path = second_path
+        self._queued_second_len = second_len
+        self._apply_word_audio_hold(
+            box,
+            first_len=first_len,
+            second_len=second_len,
+            second_lead=second_lead,
+            next_lead=next_lead,
+        )
 
     def _begin_word(self, index: int) -> None:
         if index >= len(self._sequence):
@@ -616,35 +659,30 @@ class WordMemorizeStudio(IStudio):
         self._queued_second_path = None
         self._queued_second_len = 0.0
         if layout_uses_pick_mining(self._layout):
-            self._mining_direction_by_key[self._active_key] = random_mining_direction()
             self._word_substep = "mining"
             self._hold_sec = self._mining_hold_sec(box)
             return
         first_len, second_path, second_len = self._word_tts_paths(box)
         second_lead, next_lead = self._word_tts_leads()
-        self._word_substep = "first"
-        if first_len > 0:
-            self._hold_sec = max(0.0, first_len - second_lead)
-            self._queued_second_path = second_path
-            self._queued_second_len = second_len
-        elif second_len > 0:
-            self._word_substep = "second"
-            self._hold_sec = max(0.0, second_len - next_lead)
-            self._queued_second_path = None
-            self._queued_second_len = 0.0
-        else:
-            self._word_substep = "second"
-            self._hold_sec = 0.0
+        self._queued_second_path = second_path
+        self._queued_second_len = second_len
+        self._apply_word_audio_hold(
+            box,
+            first_len=first_len,
+            second_len=second_len,
+            second_lead=second_lead,
+            next_lead=next_lead,
+        )
+        if self._word_substep == "second" and self._hold_sec <= 0.0:
             return
 
     def _advance_word_step(self) -> None:
         if self._word_substep == "mining":
             self._ensure_mining_complete()
-            box = self._active_mining_box()
-            if box is not None and box_uses_trap(box):
-                self._begin_trap_regrow()
-            else:
-                self._start_tts_after_mining()
+            self._start_tts_after_mining()
+            return
+        if self._word_substep == "cta_pre_regrow":
+            self._begin_trap_regrow()
             return
         if self._word_substep == "trap_regrow":
             if self._renderer.trap_land_smoke_visible():
@@ -653,6 +691,16 @@ class WordMemorizeStudio(IStudio):
             self._finish_trap_regrow()
             return
         if self._word_substep == "first":
+            box = self._active_mining_box()
+            if box is not None and box_uses_cta_audio(box):
+                if box_uses_mining_regrow(box):
+                    self._begin_cta_pre_regrow()
+                    return
+                self._word_substep = ""
+                self._queued_second_path = None
+                self._queued_second_len = 0.0
+                self._advance_after_trap()
+                return
             self._word_substep = "second"
             _, next_lead = self._word_tts_leads()
             if self._queued_second_path is not None and self._queued_second_len > 0:
@@ -749,10 +797,22 @@ class WordMemorizeStudio(IStudio):
         from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
         from audio.word_memorize_en import resolve_word_memorize_en_audio_path
         from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
+        from extra.table_editor.services.word_memorize_layout import (
+            box_card_type,
+            box_cta_audio_path,
+            card_type_label_for_value,
+        )
+
+        cta_path = box_cta_audio_path(box)
+        if cta_path is not None:
+            label = card_type_label_for_value(box_card_type(box))
+            return (cta_path, None, label, "", cta_path.name, "")
 
         try:
-            wid = int(box.word_id)
+            wid = resolve_box_word_id(box)
         except (TypeError, ValueError):
+            return None, None, "", "", "", ""
+        if wid is None:
             return None, None, "", "", "", ""
 
         zh_path = resolve_word_memorize_zh_audio_path(wid)
@@ -796,6 +856,12 @@ class WordMemorizeStudio(IStudio):
 
     def _word_play_duration_sec(self, box: WordMemorizeBox) -> float:
         """단어 1개 재생 구간(첫·둘째 TTS) 총 길이 — 레이저 스프라이트 동기화용."""
+        if box_uses_cta_audio(box):
+            from extra.table_editor.services.word_memorize_layout import box_cta_audio_path
+
+            path = box_cta_audio_path(box)
+            if path is not None:
+                return max(self._audio_duration(path), 0.15)
         first_len, _, second_len = self._word_tts_durations(box)
         second_lead, next_lead = self._word_tts_leads()
         total = 0.0
@@ -820,12 +886,19 @@ class WordMemorizeStudio(IStudio):
             return 0.0, None, 0.0
 
         if first_path is None:
-            logger.warning(
-                "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
-                wid,
-                first_label,
-                first_hint,
-            )
+            if box_uses_cta_audio(box):
+                logger.warning(
+                    "card_type=%s: CTA 음성 없음 (%s).",
+                    box.card_type,
+                    first_hint,
+                )
+            else:
+                logger.warning(
+                    "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
+                    wid,
+                    first_label,
+                    first_hint,
+                )
         if second_path is None:
             logger.warning(
                 "word_id=%s: %s TTS 없음 (%s). TTS 생성 후 실행하세요.",
@@ -864,22 +937,29 @@ class WordMemorizeStudio(IStudio):
             logger.debug("TTS 재생 실패 (%s): %s", path, e)
             return 0.0
 
+    def _words_by_id_for_draw(self) -> dict[int, Any]:
+        """렌더용 단어 dict — CTA 타입 포함."""
+        out: dict[int, Any] = {}
+        for box in self._layout.boxes:
+            word = resolve_box_word(box, words_by_id=out)
+            if word is not None:
+                out[int(word.id)] = word
+        return out
+
     def draw(self, screen: Any, config: Any) -> None:
         self._last_config = config
-        words_by_id: dict[int, Any] = {}
-        for box in self._layout.boxes:
-            try:
-                wid = int(box.word_id)
-            except (TypeError, ValueError):
-                continue
-            w = get_word(wid)
-            if w is not None:
-                words_by_id[wid] = w
+        words_by_id: dict[int, Any] = self._words_by_id_for_draw()
 
         highlight = self._phase == "word" and self._active_key is not None
         active_box_key: str | None = self._active_key if highlight else None
         pick_mining = layout_uses_pick_mining(self._layout)
         revealed = frozenset(self._revealed_keys) if pick_mining else frozenset()
+        cta_caption = ""
+        if highlight and self._word_substep == "first":
+            cta_caption = active_cta_caption_for_box(self._active_mining_box())
+        use_mining_elapsed = (
+            highlight and pick_mining and self._word_substep == "mining"
+        )
         self._renderer.draw(
             screen,
             self._layout,
@@ -898,10 +978,10 @@ class WordMemorizeStudio(IStudio):
                 self._active_word_duration_sec if highlight else 0.0
             ),
             active_mining_elapsed_sec=(
-                self._pick_mining_elapsed_sec
-                if highlight and pick_mining
-                else 0.0
+                self._pick_mining_elapsed_sec if use_mining_elapsed else 0.0
             ),
+            active_use_mining_elapsed=use_mining_elapsed,
+            show_mining_pick=use_mining_elapsed,
             revealed_box_keys=revealed,
             revealed_rows_by_key=dict(self._revealed_rows_by_key),
             trap_regrow_active=self._word_substep == "trap_regrow",
@@ -930,12 +1010,8 @@ class WordMemorizeStudio(IStudio):
                 if self._word_substep == "trap_regrow"
                 else None
             ),
-            mining_direction_by_key=dict(self._mining_direction_by_key),
-            trap_regrow_mining_direction_by_key=(
-                self._trap_regrow_mining_direction_by_key
-                if self._word_substep == "trap_regrow"
-                else None
-            ),
+            cta_caption_text=cta_caption,
+            meaning_lang=self._meaning_lang,
         )
 
     def get_recording_prefix(self) -> Optional[str]:

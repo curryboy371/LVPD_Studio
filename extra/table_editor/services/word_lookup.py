@@ -179,6 +179,45 @@ def lookup_word_details(word_id: str) -> dict[str, str]:
     return dict(get_word_details_by_id().get(target, empty))
 
 
+def lookup_word_details_by_hanzi(hanzi: str) -> dict[str, str]:
+    """words 한자 → 한자·뜻·품사·이미지 등."""
+    target = (hanzi or "").strip()
+    empty = {
+        "word": "",
+        "pinyin": "",
+        "masking": "",
+        "meaning": "",
+        "en_meaning": "",
+        "pos": "",
+        "type": "",
+        "img_path": "",
+        "sheet": "",
+    }
+    if not target:
+        return empty
+    for row in _iter_all_word_search_rows():
+        if (row.get("word") or "").strip() == target:
+            return lookup_word_details(row["id"])
+    return empty
+
+
+def lookup_word_details_for_box(box: object) -> dict[str, str]:
+    """박스 표시용 단어 상세 — CTA 타입이면 订阅·点赞 단어장 항목."""
+    from extra.table_editor.services.word_memorize_layout import (
+        WordMemorizeBox,
+        box_cta_hanzi,
+    )
+
+    if isinstance(box, WordMemorizeBox):
+        cta = box_cta_hanzi(box)
+        if cta:
+            details = lookup_word_details_by_hanzi(cta)
+            if (details.get("word") or "").strip():
+                return details
+        return lookup_word_details(box.word_id)
+    return lookup_word_details(str(getattr(box, "word_id", "") or ""))
+
+
 def lookup_hanzi_by_word_id(word_id: str) -> str:
     """words.id → 한자 (첫 매칭)."""
     return lookup_word_details(word_id).get("word", "")

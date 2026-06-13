@@ -70,7 +70,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_1",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20104",
@@ -80,7 +80,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_2",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20105",
@@ -90,7 +90,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_3",
-      "game_trap": ""
+      "card_type": "like"
     },
     {
       "word_id": "20106",
@@ -100,7 +100,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_4",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20058",
@@ -110,7 +110,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_5",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20107",
@@ -120,7 +120,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_6",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20108",
@@ -130,7 +130,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_7",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20109",
@@ -140,7 +140,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_8",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20052",
@@ -150,7 +150,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_9",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20055",
@@ -160,7 +160,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_10",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20057",
@@ -170,7 +170,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_12",
-      "game_trap": ""
+      "card_type": ""
     },
     {
       "word_id": "20056",
@@ -180,7 +180,7 @@
       "w": 238,
       "h": 431,
       "box_key": "box_11",
-      "game_trap": "trapcard"
+      "card_type": "subscribe"
     }
   ],
   "holding_word_ids": [],

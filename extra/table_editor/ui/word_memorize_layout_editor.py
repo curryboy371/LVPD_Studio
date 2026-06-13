@@ -13,7 +13,10 @@ from extra.table_editor.ui.combobox_scroll_guard import (
     block_combobox_mousewheel,
     find_scroll_canvas,
 )
-from extra.table_editor.services.word_lookup import lookup_word_details
+from extra.table_editor.services.word_lookup import (
+    lookup_word_details,
+    lookup_word_details_for_box,
+)
 from extra.table_editor.services.word_memorize_grid import (
     MIN_USABLE_HEIGHT,
     apply_grid_layout,
@@ -63,7 +66,11 @@ from extra.table_editor.services.word_memorize_layout import (
     list_word_memorize_game_picks,
     list_word_memorize_game_tiles,
     list_word_memorize_game_text_tiles,
-    list_word_memorize_game_traps,
+    CARD_TYPE_CHOICES,
+    box_card_type,
+    card_type_label_for_value,
+    card_type_value_for_label,
+    normalize_card_type,
     list_title_color_labels,
     list_title_font_labels,
     list_row_highlight_labels,
@@ -85,8 +92,6 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_word_memorize_game_pick,
     normalize_word_memorize_game_tile,
     normalize_word_memorize_game_text_tile,
-    normalize_word_memorize_game_trap,
-    box_game_trap,
     save_layout,
     sync_layout_game_tile_fields,
     sync_layout_game_particle_fields,
@@ -111,7 +116,6 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
     word_memorize_game_text_tile_path,
-    word_memorize_game_trap_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
     WordMemorizeVocabImportDialog,
@@ -927,32 +931,30 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             command=self._change_selected_word_id,
         ).pack(side=tk.LEFT, padx=(2, 2), fill=tk.X, expand=True)
 
-        trap_row = ttk.Frame(order_frame)
-        trap_row.pack(fill=tk.X, padx=4, pady=(0, 6))
-        ttk.Label(trap_row, text="trap").pack(side=tk.LEFT)
-        self._box_trap_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
-        trap_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_traps()
-        self._box_trap_combo = ttk.Combobox(
-            trap_row,
-            textvariable=self._box_trap_var,
-            values=trap_choices,
+        type_row = ttk.Frame(order_frame)
+        type_row.pack(fill=tk.X, padx=4, pady=(0, 6))
+        ttk.Label(type_row, text="타입").pack(side=tk.LEFT)
+        type_labels = [label for label, _value in CARD_TYPE_CHOICES]
+        self._box_card_type_var = tk.StringVar(value=type_labels[0])
+        self._box_card_type_combo = ttk.Combobox(
+            type_row,
+            textvariable=self._box_card_type_var,
+            values=type_labels,
             state="readonly",
-            width=14,
+            width=22,
         )
-        self._box_trap_combo.pack(side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True)
-        self._box_trap_combo.bind(
-            "<<ComboboxSelected>>", self._on_box_trap_changed, add="+"
+        self._box_card_type_combo.pack(side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True)
+        self._box_card_type_combo.bind(
+            "<<ComboboxSelected>>", self._on_box_card_type_changed, add="+"
         )
-        self._box_trap_preview_label = ttk.Label(trap_row, text="(미리보기)")
-        self._box_trap_preview_label.pack(side=tk.RIGHT)
         ttk.Label(
             order_frame,
-            text="선택 카드 trap: trap 이미지만 표시 · 채굴 완료 size-up → 조각모음식 타일 채우기 후 종료",
+            text="선택 카드: CTA 타입(구독·좋아요·주제추천) · 채굴 완료 후 조각모음식 타일 복구",
             foreground="#666",
             wraplength=RIGHT_PANEL_WIDTH - 28,
             font=("Segoe UI", 8),
         ).pack(anchor="w", padx=4, pady=(0, 4))
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
 
         self._path_var = tk.StringVar(value="(새 배치 — 저장 전)")
         ttk.Label(
@@ -1623,42 +1625,31 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         elif choices:
             self._bg_music_var.set(choices[0])
 
-    def _on_box_trap_changed(self, _event: tk.Event | None = None) -> None:
+    def _on_box_card_type_changed(self, _event: tk.Event | None = None) -> None:
         box = self._selected_box()
         if box is None:
             return
-        raw = self._box_trap_var.get()
-        val = normalize_word_memorize_game_trap(
-            "" if raw == GAME_ASSET_NONE_LABEL else raw
-        )
-        if val != box_game_trap(box):
-            box.game_trap = val
+        raw = self._box_card_type_var.get()
+        val = card_type_value_for_label(raw)
+        if val != box_card_type(box):
+            box.card_type = val
+            box.mining_mask = ""
+            box.game_trap = ""
             self._mark_dirty()
             self._redraw_canvas()
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
 
-    def _sync_box_trap_combo(self) -> None:
-        trap_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_traps()
-        self._box_trap_combo.configure(values=trap_choices)
+    def _sync_box_card_type_combo(self) -> None:
+        type_labels = [label for label, _value in CARD_TYPE_CHOICES]
+        self._box_card_type_combo.configure(values=type_labels)
         box = self._selected_box()
         if box is None:
-            self._box_trap_var.set(GAME_ASSET_NONE_LABEL)
-            self._box_trap_preview_label.configure(image="", text="(없음)")
-            self._box_trap_preview_photo = None
-            self._box_trap_combo.configure(state=tk.DISABLED)
+            self._box_card_type_var.set(type_labels[0])
+            self._box_card_type_combo.configure(state=tk.DISABLED)
             return
-        self._box_trap_combo.configure(state="readonly")
-        current = box_game_trap(box)
-        label = current if current else GAME_ASSET_NONE_LABEL
-        self._box_trap_var.set(
-            label if label in trap_choices else GAME_ASSET_NONE_LABEL
-        )
-        self._update_game_asset_preview_label(
-            stem=current,
-            path_fn=word_memorize_game_trap_path,
-            label=self._box_trap_preview_label,
-            attr="_box_trap_preview_photo",
-            size=40,
+        self._box_card_type_combo.configure(state="readonly")
+        self._box_card_type_var.set(
+            card_type_label_for_value(box_card_type(box))
         )
 
     def _on_selection_highlight_changed(self, _event: tk.Event | None = None) -> None:
@@ -2098,7 +2089,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_card_background_color_controls()
         self._show_images_var.set(bool(getattr(self._layout, "show_images", True)))
         self._sync_game_asset_combos()
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.bg_music_path = normalize_vocab_bg_path(
@@ -2495,7 +2486,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
     def _refresh_order_list(self) -> None:
         self._order_list.delete(0, tk.END)
         for box in self._layout.sorted_boxes():
-            details = lookup_word_details(box.word_id)
+            details = lookup_word_details_for_box(box)
             hanzi = details.get("word", "?")
             meaning = (details.get("meaning") or "").strip()
             en = (details.get("en_meaning") or "").strip()
@@ -2606,7 +2597,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._selected_key = box_a.box_key
         self._order_list.selection_clear(0, tk.END)
         self._order_list.selection_set(idx_a, idx_b)
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
         self._redraw_canvas()
         self._mark_dirty()
 
@@ -2614,7 +2605,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._selected_key = key
         if sync_order_list:
             self._sync_order_list_selection()
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
         self._redraw_canvas()
 
     def _screen_rect(self, box: WordMemorizeBox) -> tuple[int, int, int, int]:
@@ -3132,11 +3123,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         y2: int,
         details: dict[str, str],
     ) -> None:
-        """박스 안: trap이면 trap PNG만, 아니면 병음·한자·영어·이미지."""
-        trap_stem = box_game_trap(box)
-        if trap_stem:
-            self._draw_trap_box_content(c, box, x1, y1, x2, y2, trap_stem)
-            return
+        """박스 안: 병음·한자·영어·이미지."""
         cx = (x1 + x2) // 2
         inner_w = max(24, x2 - x1 - BOX_CONTENT_PAD * 2)
         pad_top = BOX_CONTENT_PAD + 14
@@ -3435,7 +3422,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
     def _draw_box(self, c: tk.Canvas, box: WordMemorizeBox) -> None:
         is_selected = box_runtime_key(box) == (self._selected_key or "")
         x1, y1, x2, y2 = self._screen_rect(box)
-        details = lookup_word_details(box.word_id)
+        details = lookup_word_details_for_box(box)
         card_highlight = normalize_selection_highlight(
             getattr(self._layout, "selection_highlight", "")
         )
@@ -3487,12 +3474,17 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             font=BOX_BADGE_FONT,
             tags=("box", box.box_key),
         )
-        trap_stem = box_game_trap(box)
-        if trap_stem:
+        card_type = box_card_type(box)
+        if card_type:
+            short = {
+                "subscribe": "구독",
+                "like": "좋아요",
+                "topic_recommend": "주제",
+            }.get(card_type, "CTA")
             c.create_text(
                 x2 - 6,
                 y1 + 6,
-                text="trap",
+                text=short,
                 anchor="ne",
                 fill="#e65100",
                 font=("Segoe UI", 9, "bold"),
@@ -3629,7 +3621,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
         self._sync_game_asset_combos()
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
         self._sync_title_var()
         self._sync_subtitle_var()
 
@@ -3678,7 +3670,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
         self._sync_game_asset_combos()
-        self._sync_box_trap_combo()
+        self._sync_box_card_type_combo()
         self._sync_title_var()
         self._sync_subtitle_var()
 

@@ -9,6 +9,7 @@ from typing import Any
 
 import pygame
 
+from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
     TRAP_CARD_SCALE_END,
     TRAP_CARD_SCALE_START,
@@ -19,6 +20,7 @@ from extra.table_editor.services.word_memorize_layout import (
     PICK_REVEAL_SEC,
     WordMemorizeBox,
     WordMemorizeLayout,
+    box_uses_mining_regrow,
     box_uses_trap,
     game_tile_display_px,
     layout_tile_band_y,
@@ -26,7 +28,6 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_trap_path,
 )
 from studio.studios.word_memorize_pick import (
-    MiningDirection,
     box_runtime_key,
     card_mining_row_count,
     card_mining_state,
@@ -95,12 +96,10 @@ class TrapDefragCellState:
 def _mining_snapshot_key(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> tuple[Any, ...]:
     return (
         frozenset(revealed_box_keys),
         tuple(sorted((k, int(v)) for k, v in revealed_rows_by_key.items())),
-        tuple(sorted((mining_direction_by_key or {}).items())),
     )
 
 
@@ -115,7 +114,9 @@ def _punched_band_cells(
     frame_height: int,
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
+    words_by_id: dict[int, Word] | None = None,
+    card_meaning_by_id: dict[int, str] | None = None,
+    meaning_lang: str = "ko",
 ) -> set[tuple[int, int]]:
     """밴드 격자 (col, row_index) 중 채굴로 비어 있는 칸."""
     px = max(1, int(tile_px))
@@ -127,7 +128,9 @@ def _punched_band_cells(
         tile_px=px,
         frame_width=frame_width,
         frame_height=frame_height,
-        mining_direction_by_key=mining_direction_by_key,
+        words_by_id=words_by_id,
+        card_meaning_by_id=card_meaning_by_id,
+        meaning_lang=meaning_lang,
     ):
         col = int(rect.x) // px
         row_index = (int(rect.y) - int(band_y0)) // px
@@ -153,7 +156,9 @@ def build_trap_defrag_schedule(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
     tile_px: int | None = None,
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
+    words_by_id: dict[int, Word] | None = None,
+    card_meaning_by_id: dict[int, str] | None = None,
+    meaning_lang: str = "ko",
 ) -> tuple[list[TrapDefragFill], int, int, int]:
     """비어 있는 밴드 칸 — 랜덤 순서·랜덤 출발 위치에서 채움."""
     px = max(1, int(tile_px or game_tile_display_px(frame_width=int(frame_width))))
@@ -180,7 +185,6 @@ def build_trap_defrag_schedule(
         _mining_snapshot_key(
             revealed_box_keys,
             revealed_rows_by_key,
-            mining_direction_by_key,
         ),
     )
     cached = _defrag_schedule_cache.get(cache_key)
@@ -196,7 +200,9 @@ def build_trap_defrag_schedule(
         frame_height=fh,
         revealed_box_keys=revealed_box_keys,
         revealed_rows_by_key=revealed_rows_by_key,
-        mining_direction_by_key=mining_direction_by_key,
+        words_by_id=words_by_id,
+        card_meaning_by_id=card_meaning_by_id,
+        meaning_lang=meaning_lang,
     )
     cells = list(punched)
     rng = _defrag_schedule_seed(cache_key, punched)
@@ -288,7 +294,9 @@ def layout_trap_regrow_duration_sec(
     *,
     revealed_box_keys: set[str] | None = None,
     revealed_rows_by_key: dict[str, int] | None = None,
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
+    words_by_id: dict[int, Word] | None = None,
+    card_meaning_by_id: dict[int, str] | None = None,
+    meaning_lang: str = "ko",
 ) -> float:
     """타일 채우기 구간 길이(초) — 연기 소멸 대기는 재생 로직에서 별도 처리."""
     keys = revealed_box_keys if revealed_box_keys is not None else set()
@@ -299,7 +307,9 @@ def layout_trap_regrow_duration_sec(
         frame_height=int(layout.frame_height),
         revealed_box_keys=keys,
         revealed_rows_by_key=rows,
-        mining_direction_by_key=mining_direction_by_key,
+        words_by_id=words_by_id,
+        card_meaning_by_id=card_meaning_by_id,
+        meaning_lang=meaning_lang,
     )
     if not schedule:
         return float(TRAP_REGROW_SEC)
@@ -365,7 +375,9 @@ def collect_trap_fall_land_impacts(
     frame_height: int,
     revealed_box_keys: set[str] | None = None,
     revealed_rows_by_key: dict[str, int] | None = None,
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
+    words_by_id: dict[int, Word] | None = None,
+    card_meaning_by_id: dict[int, str] | None = None,
+    meaning_lang: str = "ko",
 ) -> list[tuple[float, float]]:
     """이번 프레임에 착지한 타일 중심 — 연기 이펙트용."""
     if curr_elapsed_sec <= prev_elapsed_sec:
@@ -380,7 +392,9 @@ def collect_trap_fall_land_impacts(
         tile_px=px,
         revealed_box_keys=keys,
         revealed_rows_by_key=rows,
-        mining_direction_by_key=mining_direction_by_key,
+        words_by_id=words_by_id,
+        card_meaning_by_id=card_meaning_by_id,
+        meaning_lang=meaning_lang,
     )
     prev_t = max(0.0, float(prev_elapsed_sec))
     curr_t = max(0.0, float(curr_elapsed_sec))
@@ -423,7 +437,9 @@ def apply_full_frame_trap_regrow(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
     regrow_sec: float = 0.0,
-    mining_direction_by_key: dict[str, MiningDirection] | None = None,
+    words_by_id: dict[int, Word] | None = None,
+    card_meaning_by_id: dict[int, str] | None = None,
+    meaning_lang: str = "ko",
 ) -> None:
     """조각모음식 랜덤 채우기 후 최초 타일 밴드와 동일 화면."""
     _ = regrow_sec
@@ -437,7 +453,9 @@ def apply_full_frame_trap_regrow(
         tile_px=px,
         revealed_box_keys=revealed_box_keys,
         revealed_rows_by_key=revealed_rows_by_key,
-        mining_direction_by_key=mining_direction_by_key,
+        words_by_id=words_by_id,
+        card_meaning_by_id=card_meaning_by_id,
+        meaning_lang=meaning_lang,
     )
     last_land = trap_defrag_last_land_time(schedule)
     if not schedule or elapsed_sec >= last_land:
@@ -559,18 +577,17 @@ def should_show_trap_card_image(
     active_elapsed_sec: float,
     tile_px: int,
 ) -> bool:
-    """trap 카드 — 일반 카드와 같은 가시성(타일 뒤→노출), trap PNG만 그림."""
-    _ = tile_px
-    if not box_uses_trap(box):
-        return False
-    if not pick_mining:
-        return True
-    if runtime_key in revealed_keys:
-        return True
-    if int(revealed_rows_by_key.get(runtime_key, 0)) > 0:
-        return True
-    if is_active and pick_reveal_progress(active_elapsed_sec) > 0.0:
-        return True
+    """구 trap 이미지 카드 — CTA 타입으로 대체되어 항상 False."""
+    _ = (
+        box,
+        pick_mining,
+        runtime_key,
+        revealed_keys,
+        revealed_rows_by_key,
+        is_active,
+        active_elapsed_sec,
+        tile_px,
+    )
     return False
 
 
@@ -612,8 +629,8 @@ def trap_card_reveal_scale(
     tile_px: int,
     trap_regrow_active: bool = False,
 ) -> float | None:
-    """trap 카드 채굴 완료 후 size-up 배율. 진행 전·비-trap이면 None."""
-    if not box_uses_trap(box):
+    """CTA 카드 — 채굴 완료 후 size-up 배율. 진행 전·비-regrow이면 None."""
+    if not box_uses_mining_regrow(box):
         return None
     if trap_regrow_active:
         return float(TRAP_CARD_SCALE_END)

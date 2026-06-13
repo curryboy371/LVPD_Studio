@@ -361,7 +361,6 @@ def spawn_mining_rows_particles(
     box_key: str | None = None,
     revealed_box_keys: set[str] | None = None,
     rng: random.Random | None = None,
-    direction: str = "top_down",
 ) -> None:
     """새로 부서진 타일 칸(가장자리·인접 빈 영역 포함)에 파티클 생성."""
     from extra.table_editor.services.word_memorize_layout import layout_tile_band_y
@@ -393,7 +392,6 @@ def spawn_mining_rows_particles(
         "tile_band_y1": band_y1,
         "layout": layout,
         "revealed_box_keys": revealed_box_keys or set(),
-        "direction": direction,
     }
     # 채굴 완료 시 상·하 vertical fringe는 타일 구멍 연출용이며,
     # 곡괭이 위치와 무관 — 파티클은 실제 행 채굴 diff만 반영한다.
