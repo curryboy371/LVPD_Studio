@@ -41,10 +41,11 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_card_content_vertical,
     layout_card_background_rgb,
     layout_use_card_background,
-    layout_game_particle,
-    layout_game_tile,
-    layout_uses_pick_mining,
+    layout_game_particles,
+    layout_game_tiles,
+    layout_game_tile_seed,
     layout_game_pick,
+    layout_uses_pick_mining,
     layout_title_line_specs,
     is_laser_selection_highlight,
     normalize_row_highlight,
@@ -58,6 +59,8 @@ from extra.table_editor.services.word_memorize_layout import (
     resolve_word_memorize_bg_image_path,
     resolve_word_memorize_bg_video_path,
     game_tile_display_px,
+    trap_card_image_inner_dimensions,
+    trap_card_image_margin_px,
     layout_tile_band_y,
     PICK_DISPLAY_CARD_RATIO,
     word_memorize_game_particle_path,
@@ -69,6 +72,7 @@ from extra.table_editor.services.word_memorize_layout import (
 )
 from studio.studios.word_memorize_tile_text import (
     apply_tile_subtitle,
+    blit_mixed_tile_band,
     subtitle_bake_cache_token,
 )
 from studio.studios.word_memorize_trap import (
@@ -741,7 +745,7 @@ class WordMemorizeRenderer:
         self._game_tile_overlay_base: dict[tuple[Any, ...], pygame.Surface | None] = {}
         self._pick_cache: dict[tuple[str, int], pygame.Surface | None] = {}
         self._trap_surface_cache: dict[tuple[str, int, int], pygame.Surface | None] = {}
-        self._particle_sprite_cache: dict[str, list[pygame.Surface]] = {}
+        self._particle_sprite_cache: dict[tuple[str, ...], list[pygame.Surface]] = {}
         self._mining_particles = MiningParticleSystem()
         self._trap_land_smoke = TrapLandSmokeSystem()
         self._mining_overlay_cache_key: tuple[Any, ...] | None = None
@@ -1287,7 +1291,15 @@ class WordMemorizeRenderer:
         """trap 카드 — 배경 + trap PNG만 (한자·병음·뜻 없음)."""
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         stem = box_game_trap(box)
-        trap_img = self._get_trap_surface(stem, base.width, base.height) if stem else None
+        margin = trap_card_image_margin_px(
+            frame_width=int(layout.frame_width),
+        )
+        _, inner_w, inner_h = trap_card_image_inner_dimensions(
+            base.width, base.height, margin_px=margin
+        )
+        trap_img = (
+            self._get_trap_surface(stem, inner_w, inner_h) if stem else None
+        )
 
         use_card_bg = layout_use_card_background(layout)
         card_fill_rgb = layout_card_background_rgb(layout) if use_card_bg else BOX_FILL
@@ -1308,7 +1320,8 @@ class WordMemorizeRenderer:
                 border_radius=ACTIVE_BORDER_RADIUS,
             )
         if trap_img is not None:
-            draw_trap_on_rect(layer, trap_img, local)
+            inner_rect = pygame.Rect(margin, margin, inner_w, inner_h)
+            draw_trap_on_rect(layer, trap_img, inner_rect)
 
         if scale != 1.0:
             sw = max(1, int(base.width * scale))
@@ -1355,8 +1368,12 @@ class WordMemorizeRenderer:
         )
 
     def _get_game_tile_overlay_base(
-        self, tile_stem: str, layout: WordMemorizeLayout, fw: int, fh: int
+        self, layout: WordMemorizeLayout, fw: int, fh: int
     ) -> pygame.Surface | None:
+        stems = layout_game_tiles(layout)
+        if not stems:
+            return None
+        seed = layout_game_tile_seed(layout)
         px = game_tile_display_px(frame_width=fw)
         band_y0, band_y1 = layout_tile_band_y(
             fh,
@@ -1365,7 +1382,8 @@ class WordMemorizeRenderer:
             tile_px=px,
         )
         key = (
-            tile_stem,
+            tuple(stems),
+            seed,
             fw,
             fh,
             px,
@@ -1375,12 +1393,26 @@ class WordMemorizeRenderer:
         )
         if key in self._game_tile_overlay_base:
             return self._game_tile_overlay_base[key]
-        tile = self._get_game_tile_surface(tile_stem, fw)
-        if tile is None:
+        tile_by_stem: dict[str, pygame.Surface] = {}
+        for stem in stems:
+            surf = self._get_game_tile_surface(stem, fw)
+            if surf is not None:
+                tile_by_stem[stem] = surf
+        if not tile_by_stem:
             self._game_tile_overlay_base[key] = None
             return None
         layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
-        _blit_tiled(layer, tile, fw, fh, y0=band_y0, y1=band_y1)
+        blit_mixed_tile_band(
+            layer,
+            tile_by_stem,
+            stems,
+            fw,
+            fh,
+            y0=band_y0,
+            y1=band_y1,
+            tile_px=px,
+            seed=seed,
+        )
         self._bake_subtitle_on_tile_layer(layer, layout, fw, fh, px)
         self._game_tile_overlay_base[key] = layer
         return layer
@@ -1445,10 +1477,9 @@ class WordMemorizeRenderer:
         """타일+곡괭이 모드: 카드 위 타일 오버레이."""
         if not layout_uses_pick_mining(layout):
             return
-        tile_stem = layout_game_tile(layout)
-        if not tile_stem or not layout_game_pick(layout):
+        if not layout_game_tiles(layout) or not layout_game_pick(layout):
             return
-        base = self._get_game_tile_overlay_base(tile_stem, layout, fw, fh)
+        base = self._get_game_tile_overlay_base(layout, fw, fh)
         if base is None:
             return
 
@@ -1526,7 +1557,8 @@ class WordMemorizeRenderer:
                 round(trap_regrow_elapsed_sec * TRAP_REGROW_OVERLAY_FPS)
             )
         return (
-            layout_game_tile(layout),
+            tuple(layout_game_tiles(layout)),
+            layout_game_tile_seed(layout),
             fw,
             fh,
             float(layout.margin_top_ratio),
@@ -1547,13 +1579,18 @@ class WordMemorizeRenderer:
     def _get_particle_sprites(
         self, layout: WordMemorizeLayout
     ) -> list[pygame.Surface]:
-        stem = layout_game_particle(layout)
-        if not stem:
+        stems = layout_game_particles(layout)
+        if not stems:
             return []
-        if stem in self._particle_sprite_cache:
-            return self._particle_sprite_cache[stem]
-        sprites = load_particle_sprites(word_memorize_game_particle_path(stem))
-        self._particle_sprite_cache[stem] = sprites
+        key = tuple(stems)
+        if key in self._particle_sprite_cache:
+            return self._particle_sprite_cache[key]
+        sprites: list[pygame.Surface] = []
+        for stem in stems:
+            loaded = load_particle_sprites(word_memorize_game_particle_path(stem))
+            if loaded:
+                sprites.extend(loaded)
+        self._particle_sprite_cache[key] = sprites
         return sprites
 
     def _draw_mining_pick(
@@ -1615,12 +1652,10 @@ class WordMemorizeRenderer:
         """선택 타일로 프레임 배경 전체를 타일링 (채굴 모드는 오버레이만 사용)."""
         if layout_uses_pick_mining(layout):
             return
-        tile_stem = layout_game_tile(layout)
-        if not tile_stem:
+        stems = layout_game_tiles(layout)
+        if not stems:
             return
-        tile = self._get_game_tile_surface(tile_stem, fw)
-        if tile is None:
-            return
+        seed = layout_game_tile_seed(layout)
         px = game_tile_display_px(frame_width=fw)
         band_y0, band_y1 = layout_tile_band_y(
             fh,
@@ -1628,7 +1663,24 @@ class WordMemorizeRenderer:
             margin_bottom_ratio=layout.margin_bottom_ratio,
             tile_px=px,
         )
-        _blit_tiled(surface, tile, fw, fh, y0=band_y0, y1=band_y1)
+        tile_by_stem: dict[str, pygame.Surface] = {}
+        for stem in stems:
+            surf = self._get_game_tile_surface(stem, fw)
+            if surf is not None:
+                tile_by_stem[stem] = surf
+        if not tile_by_stem:
+            return
+        blit_mixed_tile_band(
+            surface,
+            tile_by_stem,
+            stems,
+            fw,
+            fh,
+            y0=band_y0,
+            y1=band_y1,
+            tile_px=px,
+            seed=seed,
+        )
         self._bake_subtitle_on_tile_layer(surface, layout, fw, fh, px)
 
     def _draw_background(

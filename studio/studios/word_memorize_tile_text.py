@@ -22,6 +22,7 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_title_font,
     resolve_subtitle_line_text_tile,
     resolve_subtitle_position,
+    pick_game_tile_stem_for_cell,
     snap_tile_coord,
     subtitle_cell_px,
     subtitle_tile_band_rect,
@@ -34,11 +35,29 @@ TextTileLoaderFn = Callable[[str], pygame.Surface | None]
 def ensure_pygame_minimal() -> None:
     """편집기 미리보기 등 — tkinter와 별도로 headless pygame만 켠다.
 
-    studio.runner 디버그 창과 섞이지 않도록, 아직 pygame이 없을 때만 dummy 드라이버 사용.
+    dummy 드라이버는 init 직후 환경 변수에서 제거한다.
+    (남겨 두면 F5 미리보기 subprocess가 SDL_VIDEODRIVER=dummy 를 물려받아 창이 안 뜸)
     """
-    if not pygame.get_init():
-        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    if pygame.get_init():
+        if pygame.display.get_surface() is None:
+            try:
+                pygame.display.set_mode((1, 1))
+            except pygame.error:
+                pass
+        return
+
+    had_driver = "SDL_VIDEODRIVER" in os.environ
+    prev_driver = os.environ.get("SDL_VIDEODRIVER")
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    try:
         pygame.init()
+    finally:
+        if had_driver:
+            if prev_driver is not None:
+                os.environ["SDL_VIDEODRIVER"] = prev_driver
+        else:
+            os.environ.pop("SDL_VIDEODRIVER", None)
+
     if pygame.display.get_surface() is None:
         try:
             pygame.display.set_mode((1, 1))
@@ -69,6 +88,41 @@ def blit_tiled_band(
         for x in range(0, fw, tw):
             if x + tw > fw:
                 break
+            surface.blit(tile, (x, y))
+
+
+def blit_mixed_tile_band(
+    surface: pygame.Surface,
+    tile_by_stem: dict[str, pygame.Surface],
+    stems: list[str],
+    frame_width: int,
+    frame_height: int,
+    *,
+    y0: int = 0,
+    y1: int | None = None,
+    tile_px: int,
+    seed: int = 0,
+) -> None:
+    """타일 목록에서 격자 칸마다 시드·좌표로 고정 선택해 채운다."""
+    if not stems or tile_px <= 0:
+        return
+    fw = int(frame_width)
+    fh = int(frame_height)
+    px = max(1, int(tile_px))
+    y_start = max(0, int(y0))
+    y_end = fh if y1 is None else max(y_start, min(fh, int(y1)))
+    for y in range(y_start, y_end, px):
+        if y + px > y_end:
+            break
+        row = y // px
+        for x in range(0, fw, px):
+            if x + px > fw:
+                break
+            col = x // px
+            stem = pick_game_tile_stem_for_cell(stems, col, row, seed)
+            tile = tile_by_stem.get(stem)
+            if tile is None:
+                continue
             surface.blit(tile, (x, y))
 
 

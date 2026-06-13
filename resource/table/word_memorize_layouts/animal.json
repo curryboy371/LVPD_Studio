@@ -22,24 +22,24 @@
     }
   ],
   "subtitle": "어떻게 나오\n확인해보자\n잘 되고 있는가",
-  "subtitle_text_tile": "black",
+  "subtitle_text_tile": "green",
   "subtitle_font": "kr_cn",
   "subtitle_y_offset_px": 0,
   "subtitle_lines": [
     {
       "text": "어떻게 나오",
       "font": "kr_cn",
-      "text_tile": ""
+      "text_tile": "white"
     },
     {
       "text": "확인해보자",
       "font": "kr_cn",
-      "text_tile": ""
+      "text_tile": "black"
     },
     {
       "text": "잘 되고 있는가",
       "font": "kr_cn",
-      "text_tile": ""
+      "text_tile": "red"
     }
   ],
   "selection_highlight": "gradient",
@@ -49,15 +49,24 @@
   "card_background_color": "#ffffff",
   "show_images": true,
   "bg_music_path": "resource/sound/bg_short/쇼츠-왈츠.mp3",
-  "game_tile": "tile_000_000",
+  "game_tile": "tile_000_002",
+  "game_tiles": [
+    "tile_000_002",
+    "tile_001_001"
+  ],
+  "game_tile_seed": 791271932,
   "game_particle": "particle_000",
+  "game_particles": [
+    "particle_000",
+    "particle_001"
+  ],
   "game_pick": "pick1",
   "boxes": [
     {
       "word_id": "20103",
       "order": 1,
-      "x": 40,
-      "y": 250,
+      "x": 294,
+      "y": 697,
       "w": 238,
       "h": 431,
       "box_key": "box_1",
@@ -66,8 +75,8 @@
     {
       "word_id": "20104",
       "order": 2,
-      "x": 294,
-      "y": 250,
+      "x": 802,
+      "y": 1144,
       "w": 238,
       "h": 431,
       "box_key": "box_2",
@@ -86,8 +95,8 @@
     {
       "word_id": "20106",
       "order": 4,
-      "x": 802,
-      "y": 250,
+      "x": 40,
+      "y": 697,
       "w": 238,
       "h": 431,
       "box_key": "box_4",
@@ -97,7 +106,7 @@
       "word_id": "20058",
       "order": 5,
       "x": 40,
-      "y": 697,
+      "y": 1144,
       "w": 238,
       "h": 431,
       "box_key": "box_5",
@@ -106,12 +115,12 @@
     {
       "word_id": "20107",
       "order": 6,
-      "x": 294,
-      "y": 697,
+      "x": 40,
+      "y": 250,
       "w": 238,
       "h": 431,
       "box_key": "box_6",
-      "game_trap": "trapcard"
+      "game_trap": ""
     },
     {
       "word_id": "20108",
@@ -126,8 +135,8 @@
     {
       "word_id": "20109",
       "order": 8,
-      "x": 802,
-      "y": 697,
+      "x": 294,
+      "y": 250,
       "w": 238,
       "h": 431,
       "box_key": "box_8",
@@ -136,8 +145,8 @@
     {
       "word_id": "20052",
       "order": 9,
-      "x": 40,
-      "y": 1144,
+      "x": 802,
+      "y": 250,
       "w": 238,
       "h": 431,
       "box_key": "box_9",
@@ -167,7 +176,7 @@
       "word_id": "20056",
       "order": 12,
       "x": 802,
-      "y": 1144,
+      "y": 697,
       "w": 238,
       "h": 431,
       "box_key": "box_11",

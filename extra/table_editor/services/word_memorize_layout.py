@@ -36,6 +36,8 @@ TRAP_REGROW_SMOKE_POLL_SEC = 0.05
 TRAP_CARD_SIZE_UP_SEC = 0.55
 TRAP_CARD_SCALE_START = 0.82
 TRAP_CARD_SCALE_END = 1.03
+# trap PNG — 인접 카드 채굴로 깨질 수 있는 가장자리 타일 링만큼 안쪽 여백
+TRAP_CARD_EDGE_MARGIN_TILES = 1
 # 재생·미리보기 타일링 시 한 칸 픽셀 크기 (FHD 기준, 프레임 너비에 비례)
 GAME_TILE_DISPLAY_PX = 16
 # 곡괭이 한 바퀴(360°)로 카드 타일 제거 — 카드당 총 채굴 시간(초). 타일 깨는 속도 기준.
@@ -52,6 +54,29 @@ def game_tile_display_px(*, frame_width: int = SHORTS_WIDTH) -> int:
     """타일 한 칸 표시 크기 — frame_width 기준으로 GAME_TILE_DISPLAY_PX 비례."""
     fw = max(1, int(frame_width))
     return max(1, int(round(GAME_TILE_DISPLAY_PX * fw / float(SHORTS_WIDTH))))
+
+
+def trap_card_image_margin_px(
+    *,
+    frame_width: int = SHORTS_WIDTH,
+    tile_px: int | None = None,
+) -> int:
+    """trap 카드 PNG가 카드 가장자리에서 떨어질 픽셀(타일 링)."""
+    px = tile_px if tile_px is not None else game_tile_display_px(frame_width=frame_width)
+    return max(0, int(px)) * max(0, int(TRAP_CARD_EDGE_MARGIN_TILES))
+
+
+def trap_card_image_inner_dimensions(
+    card_w: int,
+    card_h: int,
+    *,
+    margin_px: int,
+) -> tuple[int, int, int]:
+    """(margin, inner_w, inner_h) — trap 이미지 배치용 내부 크기."""
+    margin = max(0, int(margin_px))
+    inner_w = max(1, int(card_w) - 2 * margin)
+    inner_h = max(1, int(card_h) - 2 * margin)
+    return margin, inner_w, inner_h
 
 
 def layout_tile_band_y(
@@ -1151,17 +1176,90 @@ def resolve_subtitle_line_text_tile(
 
 
 def layout_game_tile(layout: WordMemorizeLayout) -> str:
-    """레이아웃에 설정된 게임 타일 stem (없으면 '')."""
-    return normalize_word_memorize_game_tile(
+    """레이아웃 첫 타일 stem (레거시·없으면 '')."""
+    stems = layout_game_tiles(layout)
+    return stems[0] if stems else ""
+
+
+def layout_game_tiles(layout: WordMemorizeLayout) -> list[str]:
+    """레이아웃 게임 타일 stem 목록 — 중복 제거, 순서 유지."""
+    raw = getattr(layout, "game_tiles", None)
+    if isinstance(raw, list):
+        stems: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            stem = normalize_word_memorize_game_tile(str(item or ""))
+            if stem and stem not in seen:
+                seen.add(stem)
+                stems.append(stem)
+        if stems:
+            return stems
+    legacy = normalize_word_memorize_game_tile(
         str(getattr(layout, "game_tile", "") or "")
     )
+    return [legacy] if legacy else []
+
+
+def layout_game_tile_seed(layout: WordMemorizeLayout) -> int:
+    """타일 격자 배치 시드 — 칸마다 타일 선택을 고정."""
+    try:
+        return int(getattr(layout, "game_tile_seed", 0) or 0) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return 0
+
+
+def pick_game_tile_stem_for_cell(
+    stems: list[str], col: int, row: int, seed: int
+) -> str:
+    """격자 (col, row)에 배치할 타일 stem — 시드·좌표로 결정(재현 가능)."""
+    if not stems:
+        return ""
+    if len(stems) == 1:
+        return stems[0]
+    h = int(seed) & 0xFFFFFFFF
+    h ^= (int(col) & 0xFFFF) * 374761393
+    h ^= (int(row) & 0xFFFF) * 668265263
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+    return stems[h % len(stems)]
+
+
+def sync_layout_game_tile_fields(layout: WordMemorizeLayout) -> None:
+    """game_tiles → 레거시 game_tile(첫 항목)."""
+    stems = layout_game_tiles(layout)
+    layout.game_tiles = list(stems)
+    layout.game_tile = stems[0] if stems else ""
 
 
 def layout_game_particle(layout: WordMemorizeLayout) -> str:
-    """레이아웃에 설정된 게임 파티클 stem (없으면 '')."""
-    return normalize_word_memorize_game_particle(
+    """레이아웃 첫 파티클 stem (레거시·없으면 '')."""
+    stems = layout_game_particles(layout)
+    return stems[0] if stems else ""
+
+
+def layout_game_particles(layout: WordMemorizeLayout) -> list[str]:
+    """레이아웃 파티클 stem 목록 — 중복 제거, 순서 유지."""
+    raw = getattr(layout, "game_particles", None)
+    if isinstance(raw, list):
+        stems: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            stem = normalize_word_memorize_game_particle(str(item or ""))
+            if stem and stem not in seen:
+                seen.add(stem)
+                stems.append(stem)
+        if stems:
+            return stems
+    legacy = normalize_word_memorize_game_particle(
         str(getattr(layout, "game_particle", "") or "")
     )
+    return [legacy] if legacy else []
+
+
+def sync_layout_game_particle_fields(layout: WordMemorizeLayout) -> None:
+    """game_particles → 레거시 game_particle(첫 항목)."""
+    stems = layout_game_particles(layout)
+    layout.game_particles = list(stems)
+    layout.game_particle = stems[0] if stems else ""
 
 
 def layout_game_pick(layout: WordMemorizeLayout) -> str:
@@ -1173,7 +1271,7 @@ def layout_game_pick(layout: WordMemorizeLayout) -> str:
 
 def layout_uses_pick_mining(layout: WordMemorizeLayout) -> bool:
     """타일+곡괭이 채굴 연출 사용 여부."""
-    return bool(layout_game_tile(layout) and layout_game_pick(layout))
+    return bool(layout_game_tiles(layout) and layout_game_pick(layout))
 
 
 @dataclass
@@ -1210,6 +1308,14 @@ def boxes_overlap(a: WordMemorizeBox, b: WordMemorizeBox) -> bool:
     ax2, ay2 = a.x + a.w, a.y + a.h
     bx2, by2 = b.x + b.w, b.y + b.h
     return not (ax2 <= b.x or bx2 <= a.x or ay2 <= b.y or by2 <= a.y)
+
+
+def swap_box_rects(a: WordMemorizeBox, b: WordMemorizeBox) -> None:
+    """두 word box의 위치·크기(x, y, w, h)만 교환한다. order·word_id 등은 유지."""
+    a.x, b.x = b.x, a.x
+    a.y, b.y = b.y, a.y
+    a.w, b.w = b.w, a.w
+    a.h, b.h = b.h, a.h
 
 
 def box_overlaps_any(
@@ -1310,10 +1416,13 @@ class WordMemorizeLayout:
     show_images: bool = True
     # resource/sound/bg_short 상대 경로. 비우면 재생 시 bg_short 랜덤.
     bg_music_path: str = ""
-    # resource/image/game/tiles/{stem}.png — 시작 시 화면 타일 채우기
+    # resource/image/game/tiles/{stem}.png — 화면 타일(복수·격자별 랜덤 배치)
     game_tile: str = ""
-    # resource/image/game/particles/{stem}.png
+    game_tiles: list[str] = field(default_factory=list)
+    game_tile_seed: int = 0
+    # resource/image/game/particles/{stem}.png — 채굴 파편 (복수 선택 가능)
     game_particle: str = ""
+    game_particles: list[str] = field(default_factory=list)
     # resource/image/game/picks/{stem}.png — 카드 중앙 360° 회전 채굴
     game_pick: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -1336,6 +1445,8 @@ class WordMemorizeLayout:
     def to_dict(self) -> dict[str, Any]:
         sync_layout_title_fields(self)
         sync_layout_subtitle_fields(self)
+        sync_layout_game_tile_fields(self)
+        sync_layout_game_particle_fields(self)
         self.title_x = int(self.frame_width) // 2
         return {
             "version": LAYOUT_VERSION,
@@ -1368,7 +1479,10 @@ class WordMemorizeLayout:
             "show_images": bool(self.show_images),
             "bg_music_path": (self.bg_music_path or "").strip(),
             "game_tile": layout_game_tile(self),
+            "game_tiles": list(layout_game_tiles(self)),
+            "game_tile_seed": int(layout_game_tile_seed(self)),
             "game_particle": layout_game_particle(self),
+            "game_particles": list(layout_game_particles(self)),
             "game_pick": layout_game_pick(self),
             "boxes": [
                 {
@@ -1515,12 +1629,38 @@ class WordMemorizeLayout:
         layout.bg_music_path = normalize_vocab_bg_path(
             str(data.get("bg_music_path", "") or "")
         )
-        layout.game_tile = normalize_word_memorize_game_tile(
-            str(data.get("game_tile", "") or "")
-        )
-        layout.game_particle = normalize_word_memorize_game_particle(
-            str(data.get("game_particle", "") or "")
-        )
+        raw_tiles = data.get("game_tiles")
+        if isinstance(raw_tiles, list):
+            layout.game_tiles = [
+                normalize_word_memorize_game_tile(str(item or ""))
+                for item in raw_tiles
+            ]
+            layout.game_tiles = [s for s in layout.game_tiles if s]
+        else:
+            single_tile = normalize_word_memorize_game_tile(
+                str(data.get("game_tile", "") or "")
+            )
+            layout.game_tiles = [single_tile] if single_tile else []
+        try:
+            layout.game_tile_seed = int(data.get("game_tile_seed", 0) or 0) & 0xFFFFFFFF
+        except (TypeError, ValueError):
+            layout.game_tile_seed = 0
+        sync_layout_game_tile_fields(layout)
+        raw_particles = data.get("game_particles")
+        if isinstance(raw_particles, list):
+            layout.game_particles = [
+                normalize_word_memorize_game_particle(str(item or ""))
+                for item in raw_particles
+            ]
+            layout.game_particles = [
+                s for s in layout.game_particles if s
+            ]
+        else:
+            single = normalize_word_memorize_game_particle(
+                str(data.get("game_particle", "") or "")
+            )
+            layout.game_particles = [single] if single else []
+        sync_layout_game_particle_fields(layout)
         layout.game_pick = normalize_word_memorize_game_pick(
             str(data.get("game_pick", "") or "")
         )

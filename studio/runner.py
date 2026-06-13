@@ -324,6 +324,8 @@ def run(
     if mode == "record":
         os.environ["SDL_VIDEODRIVER"] = "dummy"
     elif mode == "debug":
+        # 편집기 headless pygame 등에서 물려온 dummy 제거 — 창 미표시·소리만 재생 방지
+        os.environ.pop("SDL_VIDEODRIVER", None)
         os.environ["SDL_VIDEO_CENTERED"] = "1"
     from core.paths import STUDIO_AUDIO_SAMPLE_RATE
 

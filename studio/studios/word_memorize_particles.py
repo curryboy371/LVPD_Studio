@@ -11,7 +11,7 @@ import pygame
 from extra.table_editor.services.word_memorize_layout import (
     WordMemorizeBox,
     WordMemorizeLayout,
-    layout_game_particle,
+    layout_game_particles,
     word_memorize_game_particle_path,
 )
 
@@ -34,7 +34,19 @@ PARTICLE_SIZE_LARGE_MAX_RATIO = 1.18
 PARTICLE_SIZE_TINY_CHANCE = 0.38
 PARTICLE_SIZE_LARGE_CHANCE = 0.22
 PARTICLE_POSITION_NOISE_RATIO = 0.55
-PARTICLE_UPWARD_ANGLE_MAX_RAD = 0.22
+# 폭발 방향 — 10·2·6시 위주, 12시(위) 직진은 거의 없음
+PARTICLE_DIRECTION_BINS: tuple[tuple[float, float, float], ...] = (
+    (-2.0 * math.pi / 3.0, 0.32, math.radians(24.0)),  # 10시
+    (-math.pi / 3.0, 0.32, math.radians(24.0)),  # 2시
+    (math.pi / 2.0, 0.26, math.radians(30.0)),  # 6시
+    (math.pi / 4.0, 0.05, math.radians(18.0)),  # 4시 (아래·오른쪽)
+    (3.0 * math.pi / 4.0, 0.05, math.radians(18.0)),  # 8시 (아래·왼쪽)
+)
+# 12시(-π/2)에 가까울수록 알파를 더 빨리 줄임 — 단어 가림 방지
+CLOCK12_ANGLE_RAD = -math.pi / 2.0
+CLOCK12_PROXIMITY_ANGLE_RAD = math.radians(38.0)
+CLOCK12_FADE_START_REDUCE = 0.42
+CLOCK12_FADE_POWER_BOOST = 2.4
 PARTICLE_ROT_SPEED_MIN_DEG = -520.0
 PARTICLE_ROT_SPEED_MAX_DEG = 520.0
 PARTICLE_FADE_START_MIN_RATIO = 0.0
@@ -57,6 +69,7 @@ class MiningParticle:
     lifetime_sec: float
     fade_start_ratio: float
     fade_power: float
+    clock12_proximity: float
     display_px: int
     sprite: pygame.Surface
 
@@ -95,6 +108,7 @@ class MiningParticleSystem:
                     lifetime_sec=particle.lifetime_sec,
                     fade_start_ratio=particle.fade_start_ratio,
                     fade_power=particle.fade_power,
+                    clock12_proximity=particle.clock12_proximity,
                     display_px=particle.display_px,
                     sprite=particle.sprite,
                 )
@@ -128,7 +142,7 @@ class MiningParticleSystem:
                 speed *= randomizer.uniform(
                     PARTICLE_BURST_SPEED_MULT_MIN, PARTICLE_BURST_SPEED_MULT_MAX
                 )
-            vx, vy = _random_burst_velocity(randomizer, speed)
+            vx, vy, clock12_prox = _random_burst_velocity(randomizer, speed)
             lifetime = randomizer.uniform(
                 PARTICLE_LIFETIME_MIN_SEC, PARTICLE_LIFETIME_MAX_SEC
             )
@@ -152,6 +166,7 @@ class MiningParticleSystem:
                     lifetime_sec=lifetime,
                     fade_start_ratio=fade_start,
                     fade_power=fade_power,
+                    clock12_proximity=clock12_prox,
                     display_px=display_px,
                     sprite=sprite,
                 )
@@ -185,10 +200,18 @@ class MiningParticleSystem:
         for particle in self.particles:
             life = max(1e-6, particle.lifetime_sec)
             t = max(0.0, min(1.0, particle.age_sec / life))
+            fade_start = particle.fade_start_ratio
+            fade_power = particle.fade_power
+            prox = max(0.0, min(1.0, particle.clock12_proximity))
+            if prox > 0.0:
+                fade_start = max(
+                    0.0, fade_start - CLOCK12_FADE_START_REDUCE * prox
+                )
+                fade_power = fade_power * (1.0 + CLOCK12_FADE_POWER_BOOST * prox)
             alpha = _particle_alpha(
                 t,
-                fade_start_ratio=particle.fade_start_ratio,
-                fade_power=particle.fade_power,
+                fade_start_ratio=fade_start,
+                fade_power=fade_power,
             )
             if alpha <= 0:
                 continue
@@ -210,16 +233,36 @@ def _random_particle_size_ratio(rng: random.Random) -> float:
     return rng.uniform(PARTICLE_SIZE_MED_MIN_RATIO, PARTICLE_SIZE_MED_MAX_RATIO)
 
 
-def _random_burst_velocity(rng: random.Random, speed: float) -> tuple[float, float]:
-    """위·옆으로 퍼지도록 각도를 치우친 초기 속도."""
-    # pygame y+ = 아래 → 위쪽 반원(-pi~0) 위주, 약간 아래로도 튀게
-    angle = rng.uniform(-math.pi, PARTICLE_UPWARD_ANGLE_MAX_RAD)
+def _clock12_proximity(angle_rad: float) -> float:
+    """12시(-π/2) 방향과의 각도 근접도 0~1."""
+    diff = angle_rad - CLOCK12_ANGLE_RAD
+    while diff > math.pi:
+        diff -= 2.0 * math.pi
+    while diff < -math.pi:
+        diff += 2.0 * math.pi
+    threshold = max(1e-6, CLOCK12_PROXIMITY_ANGLE_RAD)
+    return max(0.0, 1.0 - abs(diff) / threshold)
+
+
+def _random_burst_velocity(
+    rng: random.Random, speed: float
+) -> tuple[float, float, float]:
+    """10·2·6시 위주 폭발 속도 + 12시 근접도(알파 감쇠용)."""
+    bins = PARTICLE_DIRECTION_BINS
+    total_w = sum(item[1] for item in bins)
+    roll = rng.random() * total_w
+    center = bins[-1][0]
+    spread = bins[-1][2]
+    for center_angle, weight, half_spread in bins:
+        roll -= weight
+        if roll <= 0.0:
+            center = center_angle
+            spread = half_spread
+            break
+    angle = center + rng.uniform(-spread, spread)
     vx = math.cos(angle) * speed
     vy = math.sin(angle) * speed
-    # 좌우로 더 퍼지게 수평 성분 보강
-    if rng.random() < 0.55:
-        vx *= rng.uniform(1.15, 1.75)
-    return vx, vy
+    return vx, vy, _clock12_proximity(angle)
 
 
 def _particle_alpha(
@@ -326,7 +369,7 @@ def spawn_mining_rows_particles(
         collect_mining_punch_rects,
     )
 
-    if not layout_game_particle(layout) or not sprites:
+    if not layout_game_particles(layout) or not sprites:
         return
     start = max(0, int(from_row))
     end = max(start, int(to_row))

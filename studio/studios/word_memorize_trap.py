@@ -467,7 +467,7 @@ def apply_full_frame_trap_regrow(
 
 
 def load_trap_surface(path: Path, max_w: int, max_h: int) -> pygame.Surface | None:
-    """trap 카드 PNG — 카드 영역(w×h)에 꽉 차게 스케일."""
+    """trap 카드 PNG — 지정 inner(w×h)에 맞게 스케일."""
     if max_w <= 0 or max_h <= 0 or not path.is_file():
         return None
     try:
@@ -495,7 +495,7 @@ def draw_trap_on_rect(
     *,
     alpha: int = 255,
 ) -> None:
-    """박스 영역 전체에 trap 이미지."""
+    """박스 inner 영역에 trap 이미지."""
     if alpha <= 0:
         return
     if alpha >= 255:

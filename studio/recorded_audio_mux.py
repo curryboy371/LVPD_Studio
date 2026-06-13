@@ -25,6 +25,9 @@ from studio.recording_events import (
 
 logger = logging.getLogger(__name__)
 
+# Windows CreateProcess 명령줄 한도(~8191) — 세그먼트마다 -i·필터가 길어져 단일 pass로는 초과한다.
+_MUX_SEGMENTS_PER_PASS = 16
+
 # 녹화 mux 시 이 확장자는 멀티플렉스 영상(내장 AAC 등)으로 간주.
 _EMBEDDED_VIDEO_AUDIO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".wmv")
 
@@ -188,6 +191,122 @@ def _preextract_embedded_audio_to_wav(
     except OSError:
         pass
     return False
+
+
+def _segment_filter_label(
+    idx: int,
+    path: str,
+    start_sec: float,
+    dur: float,
+    src_start: float,
+    role: str,
+    linear_gain: float | None,
+    *,
+    whole_len: int,
+    shorts_bg_linear_gain: float | None,
+) -> str:
+    """단일 세그먼트용 FFmpeg filter_complex 조각."""
+    delay_ms = int(start_sec * 1000)
+    atrim = f"atrim={src_start}:{src_start + dur}"
+    gain = _mux_volume_prefix(
+        role,
+        shorts_bg_linear_gain=shorts_bg_linear_gain,
+        linear_gain_override=linear_gain,
+    )
+    fade = ""
+    loop = ""
+    if role in ("bg_insert", "bg_insert_shorts"):
+        fade_sec = min(1.0, max(0.1, dur * 0.45))
+        out_start = max(0.0, dur - fade_sec)
+        fade = f"afade=t=in:st=0:d={fade_sec},afade=t=out:st={out_start}:d={fade_sec},"
+        if _is_bg_loop_insert_path(path):
+            loop = "aloop=loop=-1:size=2e+09,"
+    return (
+        f"[{idx + 1}:a]{loop}{atrim},{gain}{fade}adelay={delay_ms}|{delay_ms},"
+        f"apad=whole_len={whole_len}[a{idx}]"
+    )
+
+
+def _run_amix_pass(
+    ffmpeg_cmd: str,
+    base_wav: Path,
+    segments: List[tuple[str, float, float, float, str, float | None]],
+    output_wav: Path,
+    duration_sec: float,
+    *,
+    shorts_bg_linear_gain: float | None,
+    sr: int,
+    ch: int,
+    creationflags: int,
+) -> bool:
+    """무음·이전 pass 결과(base_wav) 위에 segments를 amix한다."""
+    import shutil
+
+    if not segments:
+        shutil.copy(base_wav, output_wav)
+        return True
+
+    whole_len = max(1, int(round(duration_sec * sr)))
+    inputs = ["-i", str(base_wav)]
+    filter_parts: List[str] = []
+    for idx, row in enumerate(segments):
+        path, start_sec, dur, src_start, role, linear_gain = row
+        inputs.extend(["-i", path])
+        filter_parts.append(
+            _segment_filter_label(
+                idx,
+                path,
+                start_sec,
+                dur,
+                src_start,
+                role,
+                linear_gain,
+                whole_len=whole_len,
+                shorts_bg_linear_gain=shorts_bg_linear_gain,
+            )
+        )
+    n_seg = len(segments)
+    mix_inputs = "[0]" + "".join(f"[a{i}]" for i in range(n_seg))
+    filter_parts.append(
+        f"{mix_inputs}amix=inputs={n_seg + 1}:duration=longest:normalize=0[mixraw]"
+    )
+    filter_parts.append("[mixraw]aformat=sample_fmts=s16:channel_layouts=stereo[aout]")
+    filter_str = ";".join(filter_parts)
+
+    filter_script = output_wav.parent / f"fc_{output_wav.stem}.txt"
+    filter_script.write_text(filter_str, encoding="utf-8")
+    cmd = [
+        ffmpeg_cmd,
+        "-y",
+        *inputs,
+        "-filter_complex_script",
+        str(filter_script),
+        "-map",
+        "[aout]",
+        "-ac",
+        str(ch),
+        "-ar",
+        str(sr),
+        str(output_wav),
+    ]
+    try:
+        r = subprocess.run(
+            cmd, capture_output=True, timeout=300, creationflags=creationflags
+        )
+    except OSError as e:
+        logger.warning("recorded_audio_mux FFmpeg 실행 실패: %s", e)
+        return False
+    finally:
+        try:
+            if filter_script.exists():
+                filter_script.unlink()
+        except OSError:
+            pass
+    if r.returncode != 0 or not output_wav.exists():
+        err = (r.stderr or b"").decode("utf-8", errors="replace")[:1200]
+        logger.warning("recorded_audio_mux FFmpeg 실패(rc=%s): %s", r.returncode, err)
+        return False
+    return True
 
 
 def build_audio_and_mux(
@@ -357,54 +476,37 @@ def _build_audio_from_events(
             resolved.append(row)
     segments_to_mix = resolved
 
-    # FFmpeg으로 무음 + 각 세그먼트를 해당 시점에 mix
-    # 입력: [0] silence base, [1] segment0, [2] segment1, ...
-    # filter: [0] as is; [1] adelay=start0*1000|start0*1000,atrim=0:duration0,volume=1; ... then amix=inputs=N
-    # 단순화: 두 개씩 mix. [0]aformat=channel_layouts=stereo[s0]; [1]adelay=...|...,atrim=0:d1,volume=1[a1]; [s0][a1]amix=inputs=2[s0]; [2]...
-    # 더 단순: 무음 위에 각 오디오를 adelay+atrim 해서 덮어쓰는 방식은 amix로 가능.
-    # amix = mix multiple inputs with same duration.所以我们用 apad 把每个输入 pad 到 duration_sec 然后 adelay 再 amix.
-    inputs = ["-i", str(base_silence)]
-    filter_parts = []
-    whole_len = max(1, int(round(duration_sec * sr)))
-    for idx, (path, start_sec, dur, src_start, role, linear_gain) in enumerate(
-        segments_to_mix
-    ):
-        inputs.extend(["-i", path])
-        delay_ms = int(start_sec * 1000)
-        # 선추출 WAV는 이미 구간만 담음 → atrim=0:dur. 컨테이너 직입력은 src_start~
-        atrim = f"atrim={src_start}:{src_start + dur}"
-        gain = _mux_volume_prefix(
-            role,
-            shorts_bg_linear_gain=shorts_bg_linear_gain,
-            linear_gain_override=linear_gain,
-        )
-        fade = ""
-        loop = ""
-        if role in ("bg_insert", "bg_insert_shorts"):
-            fade_sec = min(1.0, max(0.1, dur * 0.45))
-            out_start = max(0.0, dur - fade_sec)
-            fade = f"afade=t=in:st=0:d={fade_sec},afade=t=out:st={out_start}:d={fade_sec},"
-            if _is_bg_loop_insert_path(path):
-                loop = "aloop=loop=-1:size=2e+09,"
-        filter_parts.append(
-            f"[{idx + 1}:a]{loop}{atrim},{gain}{fade}adelay={delay_ms}|{delay_ms},"
-            f"apad=whole_len={whole_len}[a{idx}]"
-        )
-    # [0][a0][a1]...amix → aformat 체인으로 [aout]까지 연결
     n_seg = len(segments_to_mix)
-    mix_inputs = "[0]" + "".join(f"[a{i}]" for i in range(n_seg))
-    # normalize=0: 무음 베이스+음성 합성 시 음성이 1/N로 죽지 않게 한다.
-    filter_parts.append(
-        f"{mix_inputs}amix=inputs={n_seg + 1}:duration=longest:normalize=0[mixraw]"
-    )
-    filter_parts.append("[mixraw]aformat=sample_fmts=s16:channel_layouts=stereo[aout]")
-    filter_str = ";".join(filter_parts)
+    if n_seg > _MUX_SEGMENTS_PER_PASS:
+        n_passes = (n_seg + _MUX_SEGMENTS_PER_PASS - 1) // _MUX_SEGMENTS_PER_PASS
+        print(
+            f"[audio] mux: 세그먼트 {n_seg}개 → {_MUX_SEGMENTS_PER_PASS}개씩 "
+            f"{n_passes} pass로 합성 (Windows 명령줄 한도 회피)"
+        )
 
-    cmd = [ffmpeg_cmd, "-y"] + inputs + ["-filter_complex", filter_str, "-map", "[aout]", "-ac", str(ch), "-ar", str(sr), str(output_wav)]
-    r = subprocess.run(cmd, capture_output=True, timeout=120, creationflags=creationflags)
-    if r.returncode != 0 or not output_wav.exists():
-        err = (r.stderr or b"").decode("utf-8", errors="replace")[:1200]
-        logger.warning("recorded_audio_mux FFmpeg 실패(rc=%s): %s", r.returncode, err)
+    current_base = base_silence
+    for pass_idx, start in enumerate(range(0, n_seg, _MUX_SEGMENTS_PER_PASS)):
+        chunk = segments_to_mix[start : start + _MUX_SEGMENTS_PER_PASS]
+        is_last = start + _MUX_SEGMENTS_PER_PASS >= n_seg
+        target = output_wav if is_last else output_wav.parent / f"layer_{pass_idx}.wav"
+        if not _run_amix_pass(
+            ffmpeg_cmd,
+            current_base,
+            chunk,
+            target,
+            duration_sec,
+            shorts_bg_linear_gain=shorts_bg_linear_gain,
+            sr=sr,
+            ch=ch,
+            creationflags=creationflags,
+        ):
+            return
+        if current_base != base_silence and current_base.exists():
+            try:
+                os.remove(current_base)
+            except OSError:
+                pass
+        current_base = target
 
     try:
         if base_silence.exists():

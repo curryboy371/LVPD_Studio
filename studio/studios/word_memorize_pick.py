@@ -42,9 +42,9 @@ MINING_EDGE_KEEP_CHANCE = 0.24
 MINING_FRONTIER_KEEP_CHANCE = 0.30
 MINING_OVERDIG_CHANCE = 0.34
 # 카드 밖 인접 타일 — 거리별 제거 확률(멀수록 감소)
-MINING_VOID_FRINGE_CHANCE = (0.70, 0.54, 0.40, 0.26, 0.15)
-# 카드 전체 완료 시 상·하 빈 영역 제거 확률
-MINING_VERTICAL_VOID_FRINGE_CHANCE = (0.60, 0.46, 0.32, 0.18)
+MINING_VOID_FRINGE_CHANCE = (0.85, 0.70, 0.50, 0.26, 0.15)
+# 카드 위·아래 인접 타일 — 거리별 제거 확률
+MINING_VERTICAL_VOID_FRINGE_CHANCE = (0.50, 0.30, 0.15)
 _punch_rect_cache: dict[tuple[Any, ...], list[pygame.Rect]] = {}
 
 
@@ -328,6 +328,39 @@ def _horizontal_void_distance(
     return max(1, int(math.ceil(gap / max(1, cell_x1 - cell_x0))))
 
 
+def _vertical_void_distance(
+    row_top: int, row_bottom: int, card_y0: int, card_y1: int
+) -> int:
+    """카드 y 구간 밖이면 가장 가까운 타일 거리(1부터), 안이면 0."""
+    if row_bottom <= card_y0:
+        gap = card_y0 - row_bottom
+    elif row_top >= card_y1:
+        gap = row_top - card_y1
+    else:
+        return 0
+    return max(1, int(math.ceil(gap / max(1, row_bottom - row_top))))
+
+
+def _cell_on_active_mining_row(
+    col: int,
+    row_top: int,
+    *,
+    tile_px: int,
+    box: WordMemorizeBox,
+    card_row_index: int,
+) -> bool:
+    """곡괭이가 지나는 격자 행 + 카드 x와 겹침 (y는 격자 스냅으로 어긋날 수 있음)."""
+    px = max(1, int(tile_px))
+    band_top, _ = card_mining_row_band_y(box, card_row_index, px)
+    if snap_tile_coord(row_top, px) != band_top:
+        return False
+    cell_x0 = col * px
+    cell_x1 = cell_x0 + px
+    card_x0 = int(box.x)
+    card_x1 = card_x0 + int(box.w)
+    return _overlap_len(cell_x0, cell_x1, card_x0, card_x1) >= px // 2
+
+
 def _cell_punch_chance(
     *,
     col: int,
@@ -353,23 +386,46 @@ def _cell_punch_chance(
     overlap_y = _overlap_len(row_top, row_bottom, card_y0, card_y1)
     inside_card = overlap_x >= px // 2 and overlap_y >= px // 2
 
+    # 카드 y가 격자와 어긋나면 맨 윗줄이 inside_card·fringe 모두 아님 → 0% 버그 방지
+    if (
+        not is_overdig_row
+        and card_row_index < completed_rows
+        and _cell_on_active_mining_row(
+            col, row_top, tile_px=px, box=box, card_row_index=card_row_index
+        )
+    ):
+        return 1.0
+
     if inside_card:
         if is_overdig_row:
             return MINING_OVERDIG_CHANCE
         # 루프에 포함된 행 = 곡괭이가 이미 지나간 구간 → 카드 안은 전부 제거
         return 1.0
 
-    void_dist = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
-    if void_dist <= 0:
+    void_dist_x = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
+    if void_dist_x > 0:
+        chances = MINING_VOID_FRINGE_CHANCE
+        if void_dist_x > len(chances):
+            return 0.0
+        base = chances[void_dist_x - 1]
+        # 카드 y 밴드와 겹치지 않으면 확률만 소폭 감소
+        if overlap_y <= 0:
+            base *= 0.72
+        elif overlap_y < px // 2:
+            base *= 0.88
+        return base
+
+    void_dist_y = _vertical_void_distance(row_top, row_bottom, card_y0, card_y1)
+    if void_dist_y <= 0:
         return 0.0
-    chances = MINING_VOID_FRINGE_CHANCE
-    if void_dist > len(chances):
+    v_chances = MINING_VERTICAL_VOID_FRINGE_CHANCE
+    if void_dist_y > len(v_chances):
         return 0.0
-    base = chances[void_dist - 1]
-    # 카드 행 y 밴드와 겹치지 않으면 확률만 소폭 감소
-    if overlap_y <= 0:
+    base = v_chances[void_dist_y - 1]
+    # 카드 x 밴드와 겹치지 않으면 확률만 소폭 감소
+    if overlap_x <= 0:
         base *= 0.72
-    elif overlap_y < px // 2:
+    elif overlap_x < px // 2:
         base *= 0.88
     return base
 
@@ -394,24 +450,52 @@ def _unrevealed_peer_card_rects(
     return rects
 
 
+def _cell_overlaps_card(
+    col: int,
+    row_top: int,
+    tile_px: int,
+    card: pygame.Rect,
+) -> bool:
+    """타일 칸이 카드 영역과 충분히 겹치는지."""
+    px = max(1, int(tile_px))
+    cell_x0 = col * px
+    cell_x1 = cell_x0 + px
+    row_bottom = row_top + px
+    half = px // 2
+    overlap_x = _overlap_len(cell_x0, cell_x1, card.left, card.right)
+    overlap_y = _overlap_len(row_top, row_bottom, card.top, card.bottom)
+    return overlap_x >= half and overlap_y >= half
+
+
+def _cell_is_interior_of_card(
+    col: int,
+    row_top: int,
+    tile_px: int,
+    card: pygame.Rect,
+) -> bool:
+    """카드 가장자리 링 바로 안쪽 — 미채굴 카드 보호 대상."""
+    if not _cell_overlaps_card(col, row_top, tile_px, card):
+        return False
+    px = max(1, int(tile_px))
+    for dcol, drow in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        if not _cell_overlaps_card(
+            col + dcol, row_top + drow * px, tile_px, card
+        ):
+            return False
+    return True
+
+
 def _cell_blocked_by_unrevealed_card(
     col: int,
     row_top: int,
     tile_px: int,
     protected_cards: list[pygame.Rect],
 ) -> bool:
-    """타일 칸이 아직 깨지 않은 다른 카드 위인지."""
+    """아직 깨지지 않은 다른 카드 내부 타일만 차단 — 가장자리 링은 인접 채굴에 허용."""
     if not protected_cards:
         return False
-    px = max(1, int(tile_px))
-    cell_x0 = col * px
-    cell_x1 = cell_x0 + px
-    row_bottom = row_top + px
-    half = px // 2
     for card in protected_cards:
-        overlap_x = _overlap_len(cell_x0, cell_x1, card.left, card.right)
-        overlap_y = _overlap_len(row_top, row_bottom, card.top, card.bottom)
-        if overlap_x >= half and overlap_y >= half:
+        if _cell_is_interior_of_card(col, row_top, tile_px, card):
             return True
     return False
 
@@ -447,6 +531,53 @@ def _should_punch_cell(
     return cell_rng.random() < chance
 
 
+def _fringe_chain_satisfied(
+    col: int,
+    row_top: int,
+    *,
+    tile_px: int,
+    card_x0: int,
+    card_x1: int,
+    card_y0: int,
+    card_y1: int,
+    seen: set[tuple[int, int]],
+) -> bool:
+    """fringe 노이즈 — 카드 쪽 인접 칸이 이미 깨졌을 때만 연쇄 허용."""
+    px = max(1, int(tile_px))
+    rt = snap_tile_coord(row_top, px)
+    cell_x0 = col * px
+    cell_x1 = cell_x0 + px
+    row_bottom = rt + px
+
+    void_dist_x = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
+    if void_dist_x > 0:
+        anchor_col = col + 1 if cell_x1 <= card_x0 else col - 1
+        return (anchor_col, rt) in seen
+
+    void_dist_y = _vertical_void_distance(rt, row_bottom, card_y0, card_y1)
+    if void_dist_y > 0:
+        if rt + px <= card_y0:
+            return (col, rt + px) in seen
+        if rt >= card_y1:
+            return (col, rt - px) in seen
+        return False
+
+    return True
+
+
+def _cell_outside_card_x(
+    col: int,
+    tile_px: int,
+    card_x0: int,
+    card_x1: int,
+) -> bool:
+    """카드 x 밖 fringe 후보."""
+    px = max(1, int(tile_px))
+    cell_x0 = col * px
+    cell_x1 = cell_x0 + px
+    return _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1) > 0
+
+
 def iter_mining_punch_tile_centers(
     box: WordMemorizeBox,
     *,
@@ -455,7 +586,7 @@ def iter_mining_punch_tile_centers(
     frame_width: int,
     frame_height: int,
     box_key: str | None = None,
-    include_vertical_fringe: bool = False,
+    include_vertical_fringe: bool = True,
 ) -> list[tuple[float, float]]:
     """제거되는 타일 칸 중심 — 파티클 스폰용."""
     rects = collect_mining_punch_rects(
@@ -479,7 +610,7 @@ def collect_mining_punch_rects(
     frame_width: int,
     frame_height: int,
     box_key: str | None = None,
-    include_vertical_fringe: bool = False,
+    include_vertical_fringe: bool = True,
     tile_band_y0: int | None = None,
     tile_band_y1: int | None = None,
     layout: WordMemorizeLayout | None = None,
@@ -531,6 +662,12 @@ def collect_mining_punch_rects(
         return cached
     row_count = card_mining_row_count(box, px)
     col_start, col_end = _tile_col_range(box, px, fringe_tiles=MINING_FRINGE_TILES)
+    card_x0 = int(box.x)
+    card_x1 = card_x0 + int(box.w)
+    card_y0 = int(box.y)
+    card_y1 = card_y0 + int(box.h)
+    col_card_start = max(0, card_x0 // px)
+    col_card_end = (card_x1 + px - 1) // px
     punched: list[pygame.Rect] = []
     seen: set[tuple[int, int]] = set()
 
@@ -553,11 +690,109 @@ def collect_mining_punch_rects(
         seen.add(stamp)
         punched.append(pygame.Rect(cell_x, rt, px, px))
 
+    def try_punch_fringe_cell(
+        col: int,
+        row_top: int,
+        *,
+        card_row_index: int,
+        is_overdig_row: bool = False,
+    ) -> None:
+        """fringe — 카드 쪽 연쇄 + 확률 통과 시에만 제거."""
+        if not _fringe_chain_satisfied(
+            col,
+            row_top,
+            tile_px=px,
+            card_x0=card_x0,
+            card_x1=card_x1,
+            card_y0=card_y0,
+            card_y1=card_y1,
+            seen=seen,
+        ):
+            return
+        if not _should_punch_cell(
+            box_key=key,
+            col=col,
+            row_top=row_top,
+            tile_px=px,
+            box=box,
+            card_row_index=card_row_index,
+            completed_rows=rows,
+            row_count=row_count,
+            is_overdig_row=is_overdig_row,
+        ):
+            return
+        add_cell(col, row_top)
+
+    def add_horizontal_fringe_for_row(
+        row_top: int,
+        *,
+        card_row_index: int,
+        is_overdig_row: bool = False,
+    ) -> None:
+        """같은 행 좌·우 fringe — 거리 순 연쇄."""
+        fringe_cols: list[tuple[int, int]] = []
+        for col in range(col_start, col_end):
+            if not _cell_outside_card_x(col, px, card_x0, card_x1):
+                continue
+            cell_x0 = col * px
+            cell_x1 = cell_x0 + px
+            void_dist = _horizontal_void_distance(
+                cell_x0, cell_x1, card_x0, card_x1
+            )
+            fringe_cols.append((void_dist, col))
+        fringe_cols.sort(key=lambda item: item[0])
+        for _void_dist, col in fringe_cols:
+            try_punch_fringe_cell(
+                col,
+                row_top,
+                card_row_index=card_row_index,
+                is_overdig_row=is_overdig_row,
+            )
+
+    def add_vertical_fringe_for_row(
+        row_top: int,
+        row_bottom: int,
+        *,
+        card_row_index: int,
+    ) -> None:
+        """현재 채굴 행 기준 위·아래 fringe — 카드 밖 타일만."""
+        if not include_vertical_fringe:
+            return
+        for dist in range(1, len(MINING_VERTICAL_VOID_FRINGE_CHANCE) + 1):
+            for fringe_row_top in (
+                row_top - dist * px,
+                row_bottom + (dist - 1) * px,
+            ):
+                fringe_row_bottom = fringe_row_top + px
+                if (
+                    _vertical_void_distance(
+                        fringe_row_top, fringe_row_bottom, card_y0, card_y1
+                    )
+                    <= 0
+                ):
+                    continue
+                if not tile_fits_in_band(
+                    fringe_row_top,
+                    px,
+                    band_y0=band_y0,
+                    band_y1=band_y1,
+                    frame_width=fw,
+                ):
+                    continue
+                for col in range(col_card_start, col_card_end):
+                    try_punch_fringe_cell(
+                        col,
+                        fringe_row_top,
+                        card_row_index=card_row_index,
+                    )
+
     for card_row in range(min(rows, row_count)):
         row_top, row_bottom = card_mining_row_band_y(box, card_row, px)
         if row_bottom <= row_top:
             continue
         for col in range(col_start, col_end):
+            if _cell_outside_card_x(col, px, card_x0, card_x1):
+                continue
             if _should_punch_cell(
                 box_key=key,
                 col=col,
@@ -571,10 +806,17 @@ def collect_mining_punch_rects(
             ):
                 add_cell(col, row_top)
 
+        add_horizontal_fringe_for_row(row_top, card_row_index=card_row)
+        add_vertical_fringe_for_row(
+            row_top, row_bottom, card_row_index=card_row
+        )
+
         if card_row == rows - 1 and rows < row_count:
             overdig_top = row_bottom
             if overdig_top + px <= fh:
                 for col in range(col_start, col_end):
+                    if _cell_outside_card_x(col, px, card_x0, card_x1):
+                        continue
                     if _should_punch_cell(
                         box_key=key,
                         col=col,
@@ -587,28 +829,11 @@ def collect_mining_punch_rects(
                         is_overdig_row=True,
                     ):
                         add_cell(col, overdig_top)
-
-    if include_vertical_fringe:
-        card_x0 = int(box.x)
-        card_x1 = card_x0 + int(box.w)
-        card_y0 = int(box.y)
-        card_y1 = card_y0 + int(box.h)
-        grid_top = snap_tile_coord(card_y0, px)
-        grid_bottom = snap_tile_coord(card_y1 - 1, px) + px
-        for dist, chance in enumerate(MINING_VERTICAL_VOID_FRINGE_CHANCE, start=1):
-            for row_top in (grid_top - dist * px, grid_bottom + (dist - 1) * px):
-                if not tile_fits_in_band(
-                    row_top, px, band_y0=band_y0, band_y1=band_y1, frame_width=fw
-                ):
-                    continue
-                for col in range(col_start, col_end):
-                    cell_x0 = col * px
-                    if _overlap_len(cell_x0, cell_x0 + px, card_x0, card_x1) <= 0:
-                        continue
-                    tag = f"{key}:v:{col}:{row_top}:{dist}"
-                    cell_rng = random.Random(hash(tag) & 0xFFFFFFFF)
-                    if cell_rng.random() < chance:
-                        add_cell(col, row_top)
+                add_horizontal_fringe_for_row(
+                    overdig_top,
+                    card_row_index=card_row,
+                    is_overdig_row=True,
+                )
 
     _punch_rect_cache[cache_key] = punched
     return punched
@@ -644,7 +869,6 @@ def punch_card_irregular_holes(
         frame_width=frame_width,
         frame_height=frame_height,
         box_key=box_key,
-        include_vertical_fringe=False,
         tile_band_y0=tile_band_y0,
         tile_band_y1=tile_band_y1,
         layout=layout,
@@ -811,7 +1035,6 @@ def collect_layout_mining_punch_rects(
                 frame_width=frame_width,
                 frame_height=frame_height,
                 box_key=key,
-                include_vertical_fringe=False,
                 tile_band_y0=band_y0,
                 tile_band_y1=band_y1,
                 layout=layout,
