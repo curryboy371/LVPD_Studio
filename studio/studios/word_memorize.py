@@ -16,11 +16,18 @@ from core.paths import (
 from data.table_manager import get_word, load_words_table_from_csv
 from extra.table_editor.services.word_memorize_layout import (
     PICK_REVEAL_SEC,
+    TRAP_REGROW_SEC,
+    TRAP_REGROW_SMOKE_POLL_SEC,
     WordMemorizeBox,
     box_runtime_key,
+    box_uses_trap,
     game_tile_display_px,
     layout_uses_pick_mining,
     load_layout,
+)
+from studio.studios.word_memorize_trap import (
+    collect_trap_fall_land_impacts,
+    layout_trap_regrow_duration_sec,
 )
 from studio.studios.word_memorize_pick import (
     card_mining_row_count,
@@ -49,7 +56,7 @@ TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 
-WordSubstep = Literal["", "mining", "first", "second"]
+WordSubstep = Literal["", "mining", "trap_regrow", "first", "second"]
 
 
 def _normalize_meaning_lang(raw: str) -> MeaningLang:
@@ -103,6 +110,10 @@ class WordMemorizeStudio(IStudio):
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
+        self._trap_regrow_elapsed_sec = 0.0
+        self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
+        self._trap_regrow_revealed_keys: set[str] = set()
+        self._trap_regrow_revealed_rows: dict[str, int] = {}
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -120,6 +131,7 @@ class WordMemorizeStudio(IStudio):
         self._init_bg_player()
         self._reset_playback()
         self._renderer.reset_scorch_layer()
+        self._renderer.reset_mining_particles()
 
     def _init_bg_player(self) -> None:
         from studio.shorts.bg_audio import ShortsBackgroundPlayer
@@ -212,11 +224,16 @@ class WordMemorizeStudio(IStudio):
         self._hold_sec = INTRO_HOLD_SEC
         self._active_key = None
         self._revealed_keys = set()
+        self._revealed_rows_by_key = {}
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
+        self._trap_regrow_elapsed_sec = 0.0
+        self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
+        self._trap_regrow_revealed_keys: set[str] = set()
+        self._trap_regrow_revealed_rows: dict[str, int] = {}
         self._done = False
 
     def get_title(self) -> str:
@@ -248,13 +265,19 @@ class WordMemorizeStudio(IStudio):
             self._begin_word(0)
             return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
+        self._renderer.tick_mining_particles(dt)
         self._renderer.tick_background_video(dt)
         if self._phase == "word":
             if self._word_substep == "mining":
                 self._pick_mining_elapsed_sec += dt
+            elif self._word_substep == "trap_regrow":
+                prev_trap = self._trap_regrow_elapsed_sec
+                self._trap_regrow_elapsed_sec += dt
+                self._sync_trap_fall_impacts(prev_trap, self._trap_regrow_elapsed_sec)
             else:
                 self._active_word_elapsed_sec += dt
-            self._sync_pick_revealed_keys()
+            if self._word_substep == "mining":
+                self._sync_pick_revealed_keys()
         self._timer += dt
         if self._timer < self._hold_sec:
             return
@@ -287,9 +310,43 @@ class WordMemorizeStudio(IStudio):
             tile_px=tile_px,
             stored_completed_rows=prev,
         )
-        self._revealed_rows_by_key[key] = max(prev, state.completed_rows)
+        new_rows = max(prev, state.completed_rows)
+        self._revealed_rows_by_key[key] = new_rows
+        if new_rows > prev:
+            self._renderer.spawn_mining_row_particles(
+                self._layout,
+                box,
+                from_row=prev,
+                to_row=new_rows,
+                tile_px=tile_px,
+                revealed_box_keys=self._revealed_keys,
+            )
         if state.is_complete:
             self._revealed_keys.add(key)
+
+    def _sync_trap_fall_impacts(self, prev_sec: float, curr_sec: float) -> None:
+        """trap 타일 낙하 착지 프레임마다 임팩트 파티클."""
+        if self._word_substep != "trap_regrow":
+            return
+        impacts = collect_trap_fall_land_impacts(
+            self._layout,
+            prev_elapsed_sec=prev_sec,
+            curr_elapsed_sec=curr_sec,
+            frame_width=int(self._layout.frame_width),
+            frame_height=int(self._layout.frame_height),
+            revealed_box_keys=self._trap_regrow_revealed_keys,
+            revealed_rows_by_key=self._trap_regrow_revealed_rows,
+        )
+        if not impacts:
+            return
+        from extra.table_editor.services.word_memorize_layout import game_tile_display_px
+
+        tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
+        self._renderer.spawn_trap_fall_land_particles(
+            self._layout,
+            impacts,
+            tile_px=tile_px,
+        )
 
     def _active_mining_box(self) -> WordMemorizeBox | None:
         if 0 <= self._seq_index < len(self._sequence):
@@ -317,8 +374,51 @@ class WordMemorizeStudio(IStudio):
             return
         tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
         row_count = card_mining_row_count(box, tile_px)
+        prev = int(self._revealed_rows_by_key.get(self._active_key, 0))
+        if row_count > prev:
+            self._renderer.spawn_mining_row_particles(
+                self._layout,
+                box,
+                from_row=prev,
+                to_row=row_count,
+                tile_px=tile_px,
+                revealed_box_keys=self._revealed_keys,
+            )
         self._revealed_rows_by_key[self._active_key] = row_count
         self._revealed_keys.add(self._active_key)
+
+    def _begin_trap_regrow(self) -> None:
+        """trap 카드 채굴 완료 후 — 현재 타일 상태에서 중력 낙하로 벽 복구."""
+        from extra.table_editor.services.word_memorize_layout import game_tile_display_px
+        from studio.studios.word_memorize_pick import card_mining_row_count
+
+        self._word_substep = "trap_regrow"
+        self._trap_regrow_elapsed_sec = 0.0
+        self._trap_regrow_revealed_keys = set(self._revealed_keys)
+        self._trap_regrow_revealed_rows = dict(self._revealed_rows_by_key)
+        if self._active_key:
+            self._trap_regrow_revealed_keys.add(self._active_key)
+            box = self._active_mining_box()
+            if box is not None:
+                tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
+                self._trap_regrow_revealed_rows[self._active_key] = card_mining_row_count(
+                    box, tile_px
+                )
+        self._trap_regrow_duration_sec = layout_trap_regrow_duration_sec(
+            self._layout,
+            revealed_box_keys=self._trap_regrow_revealed_keys,
+            revealed_rows_by_key=self._trap_regrow_revealed_rows,
+        )
+        self._hold_sec = self._trap_regrow_duration_sec
+        self._renderer.reset_scorch_layer()
+
+    def _finish_trap_regrow(self) -> None:
+        """전체 타일 복구 완료 — 재생 종료."""
+        self._trap_regrow_elapsed_sec = 0.0
+        self._word_substep = ""
+        self._phase = "outro"
+        self._active_key = None
+        self._hold_sec = self._outro_hold_sec()
 
     def _start_tts_after_mining(self) -> None:
         """채굴 완료 후 TTS·하이라이트 타이머 시작."""
@@ -385,7 +485,17 @@ class WordMemorizeStudio(IStudio):
     def _advance_word_step(self) -> None:
         if self._word_substep == "mining":
             self._ensure_mining_complete()
-            self._start_tts_after_mining()
+            box = self._active_mining_box()
+            if box is not None and box_uses_trap(box):
+                self._begin_trap_regrow()
+            else:
+                self._start_tts_after_mining()
+            return
+        if self._word_substep == "trap_regrow":
+            if self._renderer.trap_land_smoke_visible():
+                self._hold_sec = float(TRAP_REGROW_SMOKE_POLL_SEC)
+                return
+            self._finish_trap_regrow()
             return
         if self._word_substep == "first":
             self._word_substep = "second"
@@ -402,6 +512,10 @@ class WordMemorizeStudio(IStudio):
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._sync_pick_revealed_keys()
+        self._advance_after_trap()
+
+    def _advance_after_trap(self) -> None:
+        """trap 복구 또는 일반 단어 종료 후 다음 단어로."""
         nxt = self._seq_index + 1
         if nxt < len(self._sequence):
             self._begin_word(nxt)
@@ -612,7 +726,9 @@ class WordMemorizeStudio(IStudio):
             active_box_key=active_box_key,
             dim_inactive=False,
             config=config,
-            use_video_background=True,
+            use_video_background=(
+                str(getattr(self._layout, "background_type", "image")) == "video"
+            ),
             active_word_elapsed_sec=(
                 self._active_word_elapsed_sec if highlight else 0.0
             ),
@@ -626,6 +742,32 @@ class WordMemorizeStudio(IStudio):
             ),
             revealed_box_keys=revealed,
             revealed_rows_by_key=dict(self._revealed_rows_by_key),
+            trap_regrow_active=self._word_substep == "trap_regrow",
+            trap_regrow_elapsed_sec=(
+                self._trap_regrow_elapsed_sec
+                if self._word_substep == "trap_regrow"
+                else 0.0
+            ),
+            trap_regrow_duration_sec=(
+                self._trap_regrow_duration_sec
+                if self._word_substep == "trap_regrow"
+                else 0.0
+            ),
+            trap_regrow_box_key=(
+                self._active_key
+                if self._word_substep == "trap_regrow"
+                else None
+            ),
+            trap_regrow_revealed_keys=(
+                self._trap_regrow_revealed_keys
+                if self._word_substep == "trap_regrow"
+                else None
+            ),
+            trap_regrow_revealed_rows=(
+                self._trap_regrow_revealed_rows
+                if self._word_substep == "trap_regrow"
+                else None
+            ),
         )
 
     def get_recording_prefix(self) -> Optional[str]:

@@ -39,7 +39,8 @@
       "y": 250,
       "w": 238,
       "h": 431,
-      "box_key": "box_1"
+      "box_key": "box_1",
+      "game_trap": ""
     },
     {
       "word_id": "20104",
@@ -48,7 +49,8 @@
       "y": 250,
       "w": 238,
       "h": 431,
-      "box_key": "box_2"
+      "box_key": "box_2",
+      "game_trap": ""
     },
     {
       "word_id": "20105",
@@ -57,7 +59,8 @@
       "y": 250,
       "w": 238,
       "h": 431,
-      "box_key": "box_3"
+      "box_key": "box_3",
+      "game_trap": ""
     },
     {
       "word_id": "20106",
@@ -66,7 +69,8 @@
       "y": 250,
       "w": 238,
       "h": 431,
-      "box_key": "box_4"
+      "box_key": "box_4",
+      "game_trap": ""
     },
     {
       "word_id": "20058",
@@ -75,7 +79,8 @@
       "y": 697,
       "w": 238,
       "h": 431,
-      "box_key": "box_5"
+      "box_key": "box_5",
+      "game_trap": ""
     },
     {
       "word_id": "20107",
@@ -84,7 +89,8 @@
       "y": 697,
       "w": 238,
       "h": 431,
-      "box_key": "box_6"
+      "box_key": "box_6",
+      "game_trap": "trapcard"
     },
     {
       "word_id": "20108",
@@ -93,7 +99,8 @@
       "y": 697,
       "w": 238,
       "h": 431,
-      "box_key": "box_7"
+      "box_key": "box_7",
+      "game_trap": ""
     },
     {
       "word_id": "20109",
@@ -102,7 +109,8 @@
       "y": 697,
       "w": 238,
       "h": 431,
-      "box_key": "box_8"
+      "box_key": "box_8",
+      "game_trap": ""
     },
     {
       "word_id": "20052",
@@ -111,7 +119,8 @@
       "y": 1144,
       "w": 238,
       "h": 431,
-      "box_key": "box_9"
+      "box_key": "box_9",
+      "game_trap": ""
     },
     {
       "word_id": "20055",
@@ -120,7 +129,8 @@
       "y": 1144,
       "w": 238,
       "h": 431,
-      "box_key": "box_10"
+      "box_key": "box_10",
+      "game_trap": ""
     },
     {
       "word_id": "20057",
@@ -129,7 +139,8 @@
       "y": 1144,
       "w": 238,
       "h": 431,
-      "box_key": "box_12"
+      "box_key": "box_12",
+      "game_trap": ""
     },
     {
       "word_id": "20056",
@@ -138,7 +149,8 @@
       "y": 1144,
       "w": 238,
       "h": 431,
-      "box_key": "box_11"
+      "box_key": "box_11",
+      "game_trap": "trapcard"
     }
   ],
   "holding_word_ids": [],

@@ -5,17 +5,18 @@ from pathlib import Path
 
 _IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 WORD_IMAGE_REL = "resource/image/word"
-
-
-def word_image_dir(repo_root: Path) -> Path:
-    """단어 이미지 기본 저장 디렉터리 (resource/image/word)."""
-    return (repo_root.resolve() / "resource" / "image" / "word").resolve()
+_image_stem_index_cache: dict[str, dict[str, Path]] = {}
 
 
 def build_image_stem_index(repo_root: Path) -> dict[str, Path]:
     """resource/image 하위 stem → 절대 경로 (word/ 하위가 동일 stem이면 우선)."""
+    repo_key = repo_root.resolve().as_posix()
+    cached = _image_stem_index_cache.get(repo_key)
+    if cached is not None:
+        return cached
     base = repo_root / "resource" / "image"
     if not base.exists():
+        _image_stem_index_cache[repo_key] = {}
         return {}
     out: dict[str, Path] = {}
     for fp in sorted(base.rglob("*"), key=lambda p: p.as_posix()):
@@ -35,7 +36,18 @@ def build_image_stem_index(repo_root: Path) -> dict[str, Path]:
         new_is_word = WORD_IMAGE_REL in resolved.as_posix()
         if new_is_word and not prev_is_word:
             out[key] = resolved
+    _image_stem_index_cache[repo_key] = out
     return out
+
+
+def clear_image_stem_index_cache() -> None:
+    """이미지 인덱스 캐시 무효화 (리소스 추가·변경 후)."""
+    _image_stem_index_cache.clear()
+
+
+def word_image_dir(repo_root: Path) -> Path:
+    """단어 이미지 기본 저장 디렉터리 (resource/image/word)."""
+    return (repo_root.resolve() / "resource" / "image" / "word").resolve()
 
 
 def _default_word_image_path(repo_root: Path, stem: str) -> Path:

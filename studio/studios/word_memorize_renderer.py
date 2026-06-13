@@ -33,12 +33,15 @@ from extra.table_editor.services.word_memorize_layout import (
     WordMemorizeLayout,
     box_runtime_key,
     boxes_in_row_group,
+    box_game_trap,
+    box_uses_trap,
     default_card_item_gap,
     find_box_by_runtime_key,
     is_base_slot_box,
     layout_card_content_vertical,
     layout_card_background_rgb,
     layout_use_card_background,
+    layout_game_particle,
     layout_game_tile,
     layout_uses_pick_mining,
     layout_game_pick,
@@ -55,9 +58,26 @@ from extra.table_editor.services.word_memorize_layout import (
     resolve_word_memorize_bg_image_path,
     resolve_word_memorize_bg_video_path,
     game_tile_display_px,
+    layout_tile_band_y,
     PICK_DISPLAY_CARD_RATIO,
+    word_memorize_game_particle_path,
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
+    word_memorize_game_trap_path,
+    TRAP_REGROW_SEC,
+)
+from studio.studios.word_memorize_trap import (
+    TrapLandSmokeSystem,
+    TRAP_REGROW_OVERLAY_FPS,
+    draw_trap_on_rect,
+    load_trap_surface,
+    should_show_trap_card_image,
+    trap_card_reveal_scale,
+)
+from studio.studios.word_memorize_particles import (
+    MiningParticleSystem,
+    load_particle_sprites,
+    spawn_mining_rows_particles,
 )
 from studio.studios.word_memorize_pick import (
     build_mining_tile_overlay,
@@ -633,13 +653,27 @@ def _load_tile_image(
         return None
 
 
-def _blit_tiled(surface: pygame.Surface, tile: pygame.Surface, fw: int, fh: int) -> None:
-    """프레임 전체를 타일 이미지로 채운다."""
+def _blit_tiled(
+    surface: pygame.Surface,
+    tile: pygame.Surface,
+    fw: int,
+    fh: int,
+    *,
+    y0: int = 0,
+    y1: int | None = None,
+) -> None:
+    """프레임을 타일 이미지로 채운다. y0~y1 구간만 타일링(기본: 전체 높이)."""
     tw, th = tile.get_size()
     if tw <= 0 or th <= 0:
         return
-    for y in range(0, fh, th):
+    y_start = max(0, int(y0))
+    y_end = fh if y1 is None else max(y_start, min(fh, int(y1)))
+    for y in range(y_start, y_end, th):
+        if y + th > y_end:
+            break
         for x in range(0, fw, tw):
+            if x + tw > fw:
+                break
             surface.blit(tile, (x, y))
 
 
@@ -696,12 +730,20 @@ class WordMemorizeRenderer:
         self._base_font_cache: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._font_title_by_key: dict[tuple[str, int], pygame.font.Font | None] = {}
         self._image_cache: dict[tuple[int, int, int], pygame.Surface | None] = {}
+        self._word_image_path_cache: dict[int, Path | None] = {}
         self._game_tile_cache: dict[tuple[str, int], pygame.Surface | None] = {}
         self._game_tile_overlay_base: dict[tuple[str, int, int], pygame.Surface | None] = {}
         self._pick_cache: dict[tuple[str, int], pygame.Surface | None] = {}
+        self._trap_surface_cache: dict[tuple[str, int, int], pygame.Surface | None] = {}
+        self._particle_sprite_cache: dict[str, list[pygame.Surface]] = {}
+        self._mining_particles = MiningParticleSystem()
+        self._trap_land_smoke = TrapLandSmokeSystem()
+        self._mining_overlay_cache_key: tuple[Any, ...] | None = None
+        self._mining_overlay_cache: pygame.Surface | None = None
         self._bg_video = LoopingBackgroundVideo()
         self._bg_layout_stem = ""
         self._bg_meaning_lang = "ko"
+        self._bg_static_image_cache: dict[tuple[str, str, int, int], pygame.Surface | None] = {}
         self._scorch_layer: pygame.Surface | None = None
         self._scorch_layer_size: tuple[int, int] = (0, 0)
         self._scorch_prev_length_px: float = float(SCORCH_ORIGIN_OFFSET_PX)
@@ -713,6 +755,77 @@ class WordMemorizeRenderer:
         self._scorch_layer_size = (0, 0)
         self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
         self._scorch_active_key = None
+
+    def reset_mining_particles(self) -> None:
+        """재생 세션 시작 시 채굴 파티클·trap 연기 초기화."""
+        from studio.studios.word_memorize_trap import clear_trap_regrow_cache
+
+        self._mining_particles.clear()
+        self._trap_land_smoke.clear()
+        self._mining_overlay_cache_key = None
+        self._mining_overlay_cache = None
+        clear_trap_regrow_cache()
+
+    def _resolve_word_image_path(self, word: Word) -> Path | None:
+        wid = int(word.id)
+        if wid in self._word_image_path_cache:
+            return self._word_image_path_cache[wid]
+        path = _resolve_image_path(self._repo, word) if self._show_images else None
+        self._word_image_path_cache[wid] = path
+        return path
+
+    def tick_mining_particles(self, dt_sec: float) -> None:
+        """채굴 파티클·trap 착지 연기 갱신."""
+        self._mining_particles.tick(dt_sec)
+        self._trap_land_smoke.tick(dt_sec)
+
+    def spawn_mining_row_particles(
+        self,
+        layout: WordMemorizeLayout,
+        box: WordMemorizeBox,
+        *,
+        from_row: int,
+        to_row: int,
+        tile_px: int,
+        revealed_box_keys: set[str] | None = None,
+    ) -> None:
+        """타일 행 제거 시 파티클 생성."""
+        sprites = self._get_particle_sprites(layout)
+        if not sprites:
+            return
+        spawn_mining_rows_particles(
+            self._mining_particles,
+            layout,
+            box,
+            from_row=from_row,
+            to_row=to_row,
+            tile_px=tile_px,
+            frame_width=int(layout.frame_width),
+            frame_height=int(layout.frame_height),
+            sprites=sprites,
+            box_key=box_runtime_key(box),
+            revealed_box_keys=revealed_box_keys,
+        )
+
+    def spawn_trap_fall_land_particles(
+        self,
+        layout: WordMemorizeLayout,
+        land_centers: list[tuple[float, float]],
+        *,
+        tile_px: int,
+    ) -> None:
+        """trap 타일 착지 시 연기 이펙트."""
+        _ = layout
+        if not land_centers:
+            return
+        self._trap_land_smoke.spawn_land_impacts(
+            land_centers,
+            tile_px=tile_px,
+        )
+
+    def trap_land_smoke_visible(self) -> bool:
+        """trap 착지 연기가 아직 화면에 보이는지."""
+        return self._trap_land_smoke.has_visible_puffs()
 
     def _ensure_scorch_layer(self, fw: int, fh: int) -> pygame.Surface:
         if (
@@ -745,6 +858,7 @@ class WordMemorizeRenderer:
         if new_lang != self._bg_meaning_lang:
             self._invalidate_fonts()
         self._bg_meaning_lang = new_lang
+        self._bg_static_image_cache.clear()
         video = resolve_word_memorize_bg_video_path(
             self._bg_layout_stem, meaning_lang=self._bg_meaning_lang
         )
@@ -825,6 +939,12 @@ class WordMemorizeRenderer:
         active_mining_elapsed_sec: float = 0.0,
         revealed_box_keys: frozenset[str] | set[str] | None = None,
         revealed_rows_by_key: dict[str, int] | None = None,
+        trap_regrow_active: bool = False,
+        trap_regrow_elapsed_sec: float = 0.0,
+        trap_regrow_duration_sec: float = 0.0,
+        trap_regrow_box_key: str | None = None,
+        trap_regrow_revealed_keys: set[str] | None = None,
+        trap_regrow_revealed_rows: dict[str, int] | None = None,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -878,6 +998,8 @@ class WordMemorizeRenderer:
         word_timing = (active_word_elapsed_sec, active_word_duration_sec)
         mining_elapsed = active_mining_elapsed_sec
 
+        tile_px = game_tile_display_px(frame_width=fw)
+
         for box, word, card_meaning in inactive:
             runtime_key = box_runtime_key(box)
             if not self._should_draw_word_card(
@@ -889,17 +1011,51 @@ class WordMemorizeRenderer:
                 active_elapsed_sec=0.0,
             ):
                 continue
+            trap_scale = self._trap_card_reveal_scale(
+                box,
+                runtime_key=runtime_key,
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=False,
+                active_elapsed_sec=0.0,
+                frame_width=fw,
+                trap_regrow_active=trap_regrow_active,
+                trap_regrow_box_key=trap_regrow_box_key,
+            )
+            if should_show_trap_card_image(
+                box,
+                pick_mining=pick_mining,
+                runtime_key=runtime_key,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=False,
+                active_elapsed_sec=0.0,
+                tile_px=tile_px,
+            ):
+                self._draw_trap_card(
+                    surface,
+                    box,
+                    layout=layout,
+                    active=trap_scale is not None,
+                    anim_time_sec=t_anim,
+                    card_scale=trap_scale,
+                )
+                continue
+            if box_uses_trap(box) and pick_mining:
+                continue
             self._draw_box(
                 surface,
                 box,
                 word,
                 card_meaning,
                 layout=layout,
-                active=False,
+                active=trap_scale is not None,
                 anim_time_sec=t_anim,
                 word_elapsed_sec=0.0,
                 word_duration_sec=0.0,
                 draw_effects=False,
+                card_scale=trap_scale,
             )
 
         active_card_visible = (
@@ -915,14 +1071,49 @@ class WordMemorizeRenderer:
         )
 
         for box, word, card_meaning in active_cards:
+            runtime_key = active_box_key or ""
+            mining_elapsed_active = mining_elapsed if pick_mining else word_timing[0]
             if not self._should_draw_word_card(
-                active_box_key or "",
+                runtime_key,
                 pick_mining=pick_mining,
                 revealed_keys=revealed,
                 revealed_rows_by_key=rows_by_key,
                 is_active=True,
-                active_elapsed_sec=mining_elapsed if pick_mining else word_timing[0],
+                active_elapsed_sec=mining_elapsed_active,
             ):
+                continue
+            trap_scale = self._trap_card_reveal_scale(
+                box,
+                runtime_key=runtime_key,
+                pick_mining=pick_mining,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=True,
+                active_elapsed_sec=mining_elapsed_active,
+                frame_width=fw,
+                trap_regrow_active=trap_regrow_active,
+                trap_regrow_box_key=trap_regrow_box_key,
+            )
+            if should_show_trap_card_image(
+                box,
+                pick_mining=pick_mining,
+                runtime_key=runtime_key,
+                revealed_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                is_active=True,
+                active_elapsed_sec=mining_elapsed_active,
+                tile_px=tile_px,
+            ):
+                self._draw_trap_card(
+                    surface,
+                    box,
+                    layout=layout,
+                    active=True,
+                    anim_time_sec=t_anim,
+                    card_scale=trap_scale,
+                )
+                continue
+            if box_uses_trap(box) and pick_mining:
                 continue
             self._draw_box(
                 surface,
@@ -935,6 +1126,7 @@ class WordMemorizeRenderer:
                 word_elapsed_sec=word_timing[0],
                 word_duration_sec=word_timing[1],
                 draw_effects=False,
+                card_scale=trap_scale,
             )
 
         self._draw_pick_mining_overlay(
@@ -946,22 +1138,35 @@ class WordMemorizeRenderer:
             revealed_rows_by_key=rows_by_key,
             active_box=active_anchor,
             active_elapsed_sec=mining_elapsed if active_cards else 0.0,
+            trap_regrow_active=trap_regrow_active,
+            trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
+            trap_regrow_duration_sec=trap_regrow_duration_sec,
+            trap_regrow_box_key=trap_regrow_box_key,
+            trap_regrow_revealed_keys=trap_regrow_revealed_keys,
+            trap_regrow_revealed_rows=trap_regrow_revealed_rows,
         )
         if pick_mining:
+            self._draw_mining_particles(surface)
             self._draw_title(surface, layout, fw, fh)
-            self._draw_mining_pick(
-                surface,
-                layout,
-                active_box=active_anchor,
-                active_elapsed_sec=mining_elapsed if active_cards else 0.0,
-                revealed_rows_by_key=rows_by_key,
-            )
+            if not trap_regrow_active:
+                self._draw_mining_pick(
+                    surface,
+                    layout,
+                    active_box=active_anchor,
+                    active_elapsed_sec=mining_elapsed if active_cards else 0.0,
+                    revealed_rows_by_key=rows_by_key,
+                )
 
         if (
             row_highlight_type != "none"
             and active_anchor is not None
             and not active_is_base
             and active_card_visible
+            and not (
+                trap_regrow_active
+                and trap_regrow_box_key
+                and active_box_key == trap_regrow_box_key
+            )
         ):
             draw_row_highlight(
                 surface,
@@ -979,6 +1184,11 @@ class WordMemorizeRenderer:
             and active_cards
             and not active_is_base
             and active_card_visible
+            and not (
+                trap_regrow_active
+                and trap_regrow_box_key
+                and active_box_key == trap_regrow_box_key
+            )
         ):
             self._sync_scorch_active_key(active_box_key)
             scorch = self._ensure_scorch_layer(fw, fh)
@@ -1001,6 +1211,12 @@ class WordMemorizeRenderer:
             )
 
         for box, word, card_meaning in active_cards:
+            if (
+                trap_regrow_active
+                and trap_regrow_box_key
+                and box_runtime_key(box) == trap_regrow_box_key
+            ):
+                continue
             if not self._should_draw_word_card(
                 active_box_key or "",
                 pick_mining=pick_mining,
@@ -1040,11 +1256,116 @@ class WordMemorizeRenderer:
             return True
         return False
 
+    def _get_trap_surface(
+        self, stem: str, max_w: int, max_h: int
+    ) -> pygame.Surface | None:
+        """trap 카드 PNG — stem·크기별 캐시."""
+        key = (stem, int(max_w), int(max_h))
+        if key in self._trap_surface_cache:
+            return self._trap_surface_cache[key]
+        path = word_memorize_game_trap_path(stem)
+        surf = load_trap_surface(path, max_w, max_h)
+        self._trap_surface_cache[key] = surf
+        return surf
+
+    def _draw_trap_card(
+        self,
+        surface: pygame.Surface,
+        box: WordMemorizeBox,
+        *,
+        layout: WordMemorizeLayout,
+        active: bool,
+        anim_time_sec: float,
+        card_scale: float | None = None,
+    ) -> None:
+        """trap 카드 — 배경 + trap PNG만 (한자·병음·뜻 없음)."""
+        base = pygame.Rect(box.x, box.y, box.w, box.h)
+        stem = box_game_trap(box)
+        trap_img = self._get_trap_surface(stem, base.width, base.height) if stem else None
+
+        use_card_bg = layout_use_card_background(layout)
+        card_fill_rgb = layout_card_background_rgb(layout) if use_card_bg else BOX_FILL
+        scale = (
+            float(card_scale)
+            if card_scale is not None
+            else (ACTIVE_CARD_SCALE if active else 1.0)
+        )
+
+        layer = pygame.Surface((base.width, base.height), pygame.SRCALPHA)
+        layer.fill((0, 0, 0, 0))
+        local = pygame.Rect(0, 0, base.width, base.height)
+        if use_card_bg:
+            pygame.draw.rect(
+                layer,
+                (*card_fill_rgb, 255),
+                local,
+                border_radius=ACTIVE_BORDER_RADIUS,
+            )
+        if trap_img is not None:
+            draw_trap_on_rect(layer, trap_img, local)
+
+        if scale != 1.0:
+            sw = max(1, int(base.width * scale))
+            sh = max(1, int(base.height * scale))
+            scaled = pygame.transform.smoothscale(layer, (sw, sh))
+            dest = scaled.get_rect(center=base.center)
+            surface.blit(scaled, dest)
+            return
+
+        surface.blit(layer, base.topleft)
+
+    def _trap_card_reveal_scale(
+        self,
+        box: WordMemorizeBox,
+        *,
+        runtime_key: str,
+        pick_mining: bool,
+        revealed_keys: set[str],
+        revealed_rows_by_key: dict[str, int],
+        is_active: bool,
+        active_elapsed_sec: float,
+        frame_width: int,
+        trap_regrow_active: bool,
+        trap_regrow_box_key: str | None,
+    ) -> float | None:
+        """trap 카드 채굴 완료 후 size-up 배율 (일반 카드는 None)."""
+        if not pick_mining or not box_uses_trap(box):
+            return None
+        tile_px = game_tile_display_px(frame_width=int(frame_width))
+        regrow_for_box = (
+            trap_regrow_active
+            and bool(trap_regrow_box_key)
+            and runtime_key == trap_regrow_box_key
+        )
+        return trap_card_reveal_scale(
+            box,
+            runtime_key=runtime_key,
+            revealed_keys=revealed_keys,
+            revealed_rows_by_key=revealed_rows_by_key,
+            is_active=is_active,
+            active_elapsed_sec=active_elapsed_sec,
+            tile_px=tile_px,
+            trap_regrow_active=regrow_for_box,
+        )
+
     def _get_game_tile_overlay_base(
-        self, tile_stem: str, fw: int, fh: int
+        self, tile_stem: str, layout: WordMemorizeLayout, fw: int, fh: int
     ) -> pygame.Surface | None:
         px = game_tile_display_px(frame_width=fw)
-        key = (tile_stem, fw, fh, px)
+        band_y0, band_y1 = layout_tile_band_y(
+            fh,
+            margin_top_ratio=layout.margin_top_ratio,
+            margin_bottom_ratio=layout.margin_bottom_ratio,
+            tile_px=px,
+        )
+        key = (
+            tile_stem,
+            fw,
+            fh,
+            px,
+            band_y0,
+            band_y1,
+        )
         if key in self._game_tile_overlay_base:
             return self._game_tile_overlay_base[key]
         tile = self._get_game_tile_surface(tile_stem, fw)
@@ -1052,7 +1373,7 @@ class WordMemorizeRenderer:
             self._game_tile_overlay_base[key] = None
             return None
         layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
-        _blit_tiled(layer, tile, fw, fh)
+        _blit_tiled(layer, tile, fw, fh, y0=band_y0, y1=band_y1)
         self._game_tile_overlay_base[key] = layer
         return layer
 
@@ -1076,6 +1397,12 @@ class WordMemorizeRenderer:
         revealed_rows_by_key: dict[str, int] | None = None,
         active_box: WordMemorizeBox | None,
         active_elapsed_sec: float,
+        trap_regrow_active: bool = False,
+        trap_regrow_elapsed_sec: float = 0.0,
+        trap_regrow_duration_sec: float = 0.0,
+        trap_regrow_box_key: str | None = None,
+        trap_regrow_revealed_keys: set[str] | None = None,
+        trap_regrow_revealed_rows: dict[str, int] | None = None,
     ) -> None:
         """타일+곡괭이 모드: 카드 위 타일 오버레이."""
         if not layout_uses_pick_mining(layout):
@@ -1083,8 +1410,28 @@ class WordMemorizeRenderer:
         tile_stem = layout_game_tile(layout)
         if not tile_stem or not layout_game_pick(layout):
             return
-        base = self._get_game_tile_overlay_base(tile_stem, fw, fh)
+        base = self._get_game_tile_overlay_base(tile_stem, layout, fw, fh)
         if base is None:
+            return
+
+        tile_px = game_tile_display_px(frame_width=fw)
+        cache_key = self._mining_overlay_cache_key_for(
+            layout,
+            fw,
+            fh,
+            revealed_box_keys=revealed_box_keys,
+            revealed_rows_by_key=revealed_rows_by_key,
+            active_box=active_box,
+            active_elapsed_sec=active_elapsed_sec,
+            tile_px=tile_px,
+            trap_regrow_active=trap_regrow_active,
+            trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
+        )
+        if (
+            self._mining_overlay_cache is not None
+            and self._mining_overlay_cache_key == cache_key
+        ):
+            surface.blit(self._mining_overlay_cache, (0, 0))
             return
 
         overlay = build_mining_tile_overlay(
@@ -1095,9 +1442,81 @@ class WordMemorizeRenderer:
             revealed_rows_by_key=revealed_rows_by_key,
             active_box=active_box,
             active_elapsed_sec=active_elapsed_sec,
+            trap_regrow_active=trap_regrow_active,
+            trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
+            trap_regrow_duration_sec=trap_regrow_duration_sec,
+            trap_regrow_box_key=trap_regrow_box_key,
+            trap_regrow_revealed_keys=trap_regrow_revealed_keys,
+            trap_regrow_revealed_rows=trap_regrow_revealed_rows,
         )
         if overlay is not None:
+            self._mining_overlay_cache_key = cache_key
+            self._mining_overlay_cache = overlay
             surface.blit(overlay, (0, 0))
+
+    def _mining_overlay_cache_key_for(
+        self,
+        layout: WordMemorizeLayout,
+        fw: int,
+        fh: int,
+        *,
+        revealed_box_keys: set[str],
+        revealed_rows_by_key: dict[str, int] | None,
+        active_box: WordMemorizeBox | None,
+        active_elapsed_sec: float,
+        tile_px: int,
+        trap_regrow_active: bool = False,
+        trap_regrow_elapsed_sec: float = 0.0,
+    ) -> tuple[Any, ...]:
+        """채굴 오버레이 캐시 키 — 행 완료 수만 반영(행 내 회전은 무시)."""
+        rows_map = dict(revealed_rows_by_key or {})
+        active_key: str | None = None
+        active_completed = 0
+        if active_box is not None:
+            active_key = box_runtime_key(active_box)
+            stored = int(rows_map.get(active_key, 0))
+            state = card_mining_state(
+                active_box,
+                active_elapsed_sec,
+                tile_px=tile_px,
+                stored_completed_rows=stored,
+            )
+            active_completed = int(state.completed_rows)
+        trap_regrow_quantized = 0
+        if trap_regrow_active and trap_regrow_elapsed_sec > 0.0:
+            trap_regrow_quantized = int(
+                round(trap_regrow_elapsed_sec * TRAP_REGROW_OVERLAY_FPS)
+            )
+        return (
+            layout_game_tile(layout),
+            fw,
+            fh,
+            float(layout.margin_top_ratio),
+            float(layout.margin_bottom_ratio),
+            frozenset(revealed_box_keys),
+            tuple(sorted(rows_map.items())),
+            active_key,
+            active_completed,
+            bool(trap_regrow_active),
+            trap_regrow_quantized,
+        )
+
+    def _draw_mining_particles(self, surface: pygame.Surface) -> None:
+        """채굴 파티클·trap 착지 연기 — 타일 오버레이 위."""
+        self._mining_particles.draw(surface)
+        self._trap_land_smoke.draw(surface)
+
+    def _get_particle_sprites(
+        self, layout: WordMemorizeLayout
+    ) -> list[pygame.Surface]:
+        stem = layout_game_particle(layout)
+        if not stem:
+            return []
+        if stem in self._particle_sprite_cache:
+            return self._particle_sprite_cache[stem]
+        sprites = load_particle_sprites(word_memorize_game_particle_path(stem))
+        self._particle_sprite_cache[stem] = sprites
+        return sprites
 
     def _draw_mining_pick(
         self,
@@ -1164,7 +1583,14 @@ class WordMemorizeRenderer:
         tile = self._get_game_tile_surface(tile_stem, fw)
         if tile is None:
             return
-        _blit_tiled(surface, tile, fw, fh)
+        px = game_tile_display_px(frame_width=fw)
+        band_y0, band_y1 = layout_tile_band_y(
+            fh,
+            margin_top_ratio=layout.margin_top_ratio,
+            margin_bottom_ratio=layout.margin_bottom_ratio,
+            tile_px=px,
+        )
+        _blit_tiled(surface, tile, fw, fh, y0=band_y0, y1=band_y1)
 
     def _draw_background(
         self,
@@ -1185,7 +1611,18 @@ class WordMemorizeRenderer:
             layout.background_value or self._bg_layout_stem,
             meaning_lang=self._bg_meaning_lang,
         )
-        bg = _load_scaled_image(img_path, fw, fh) if img_path.is_file() else None
+        bg_key = (
+            str(layout.background_value or self._bg_layout_stem),
+            self._bg_meaning_lang,
+            fw,
+            fh,
+        )
+        if bg_key not in self._bg_static_image_cache:
+            loaded = (
+                _load_scaled_image(img_path, fw, fh) if img_path.is_file() else None
+            )
+            self._bg_static_image_cache[bg_key] = loaded
+        bg = self._bg_static_image_cache[bg_key]
         if bg is not None:
             _blit_contained_background(surface, bg, fw, fh)
             self._draw_game_tile_fill(surface, layout, fw, fh)
@@ -1424,6 +1861,7 @@ class WordMemorizeRenderer:
         word_elapsed_sec: float = 0.0,
         word_duration_sec: float = 0.0,
         draw_effects: bool = True,
+        card_scale: float | None = None,
     ) -> None:
         highlight_type = normalize_selection_highlight(
             getattr(layout, "selection_highlight", "gradient")
@@ -1495,6 +1933,43 @@ class WordMemorizeRenderer:
                     impact_elapsed_sec=impact_t,
                     border_radius=ACTIVE_BORDER_RADIUS,
                     laser_variant=highlight_type,
+                )
+            return
+
+        scale = (
+            float(card_scale)
+            if card_scale is not None
+            else (ACTIVE_CARD_SCALE if active else 1.0)
+        )
+        if scale != 1.0 or (card_scale is not None and active):
+            layer = pygame.Surface((base.width, base.height), pygame.SRCALPHA)
+            layer.fill((0, 0, 0, 0))
+            local = pygame.Rect(0, 0, base.width, base.height)
+            self._paint_box(
+                layer,
+                local,
+                word,
+                card_meaning,
+                highlight_type=highlight_type,
+                active=active,
+                draw_border=False,
+                anim_time_sec=anim_time_sec,
+                use_card_background=use_card_bg,
+                card_fill_rgb=card_fill_rgb,
+            )
+            sw = max(1, int(base.width * scale))
+            sh = max(1, int(base.height * scale))
+            scaled = pygame.transform.smoothscale(layer, (sw, sh))
+            dest = scaled.get_rect(center=base.center)
+            surface.blit(scaled, dest)
+            if draw_effects and card_scale is None:
+                _draw_active_highlight(
+                    surface,
+                    dest,
+                    highlight_type=highlight_type,
+                    anim_time_sec=anim_time_sec,
+                    word_elapsed_sec=word_elapsed_sec,
+                    word_duration_sec=word_duration_sec,
                 )
             return
 
@@ -1618,7 +2093,7 @@ class WordMemorizeRenderer:
         inner = rect.inflate(-pad * 2, -pad * 2)
         cx = inner.centerx
 
-        img_path = _resolve_image_path(self._repo, word) if self._show_images else None
+        img_path = self._resolve_word_image_path(word)
         img_surf: pygame.Surface | None = None
         img_h = 0
         if img_path is not None:

@@ -50,6 +50,7 @@ from extra.table_editor.services.word_memorize_layout import (
     list_word_memorize_game_particles,
     list_word_memorize_game_picks,
     list_word_memorize_game_tiles,
+    list_word_memorize_game_traps,
     list_title_color_labels,
     list_title_font_labels,
     list_row_highlight_labels,
@@ -63,10 +64,13 @@ from extra.table_editor.services.word_memorize_layout import (
     normalize_title_font_pt,
     GAME_ASSET_NONE_LABEL,
     game_tile_display_px,
+    layout_tile_band_y,
     normalize_word_memorize_bg_stem,
     normalize_word_memorize_game_particle,
     normalize_word_memorize_game_pick,
     normalize_word_memorize_game_tile,
+    normalize_word_memorize_game_trap,
+    box_game_trap,
     save_layout,
     sync_layout_title_fields,
     normalize_card_background_color,
@@ -85,6 +89,7 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_particle_path,
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
+    word_memorize_game_trap_path,
 )
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
     WordMemorizeVocabImportDialog,
@@ -110,8 +115,10 @@ PREVIEW_WIDTH = 504
 PREVIEW_HEIGHT = 896
 SCALE = PREVIEW_WIDTH / float(SHORTS_WIDTH)
 
-SIDEBAR_WIDTH = 360
-WINDOW_WIDTH = 1320
+SIDEBAR_WIDTH = 300
+LEFT_PANEL_WIDTH = 300
+RIGHT_PANEL_WIDTH = 300
+WINDOW_WIDTH = 1680
 WINDOW_HEIGHT = 1000
 LISTBOX_HEIGHT_HOLDING = 5
 LISTBOX_HEIGHT_DISPLAY = 6
@@ -223,6 +230,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._game_tile_preview_photo: object | None = None
         self._game_particle_preview_photo: object | None = None
         self._game_pick_preview_photo: object | None = None
+        self._box_trap_preview_photo: object | None = None
         self._show_tile_canvas_preview = True
         self._dirty = False
         self._margin_drag: MarginDragMode = ""
@@ -247,7 +255,70 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         x = max(0, (sw - w) // 2)
         y = max(0, (sh - h) // 2)
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.minsize(min(1100, w), min(760, h))
+        self.minsize(min(1280, w), min(760, h))
+
+    def _create_scroll_panel(
+        self,
+        parent: tk.Misc,
+        title: str,
+        width: int,
+        *,
+        side: str = tk.LEFT,
+        padx: tuple[int, int] = (0, 8),
+    ) -> ttk.Frame:
+        """스크롤 가능한 사이드 패널 — 내용용 inner Frame 반환."""
+        outer = ttk.LabelFrame(parent, text=title, width=width)
+        outer.pack(side=side, fill=tk.BOTH, padx=padx)
+        outer.pack_propagate(False)
+
+        scroll_host = ttk.Frame(outer)
+        scroll_host.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+        canvas = tk.Canvas(scroll_host, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(
+            scroll_host, orient=tk.VERTICAL, command=canvas.yview
+        )
+        inner = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_inner_configure(_event: tk.Event | None = None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            canvas.itemconfigure(window_id, width=event.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._bind_panel_mousewheel(canvas)
+        return inner
+
+    def _bind_panel_mousewheel(self, canvas: tk.Canvas) -> None:
+        """패널 위에서 마우스 휠로 세로 스크롤."""
+
+        def _on_wheel(event: tk.Event) -> None:
+            if event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(3, "units")
+
+        def _bind(_event: tk.Event | None = None) -> None:
+            canvas.bind_all("<MouseWheel>", _on_wheel)
+            canvas.bind_all("<Button-4>", _on_wheel)
+            canvas.bind_all("<Button-5>", _on_wheel)
+
+        def _unbind(_event: tk.Event | None = None) -> None:
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        canvas.bind("<Enter>", _bind)
+        canvas.bind("<Leave>", _unbind)
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=8)
@@ -258,7 +329,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             text=(
                 f"좌표·크기는 FHD {SHORTS_WIDTH}×{SHORTS_HEIGHT} 기준 · "
                 f"미리보기 {PREVIEW_WIDTH}×{PREVIEW_HEIGHT} (9:16) · "
-                "박스끼리 겹침 불가 · 우측 띠=상·하 여백 드래그"
+                "박스끼리 겹침 불가 · 좌·우 패널 스크롤 · 여백 띠=상·하 드래그"
             ),
             foreground="#555",
         )
@@ -288,11 +359,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         body = ttk.Frame(root)
         body.pack(fill=tk.BOTH, expand=True)
 
-        sidebar = ttk.LabelFrame(body, text="Word box", width=SIDEBAR_WIDTH)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        sidebar.pack_propagate(False)
+        left_inner = self._create_scroll_panel(
+            body, "설정", LEFT_PANEL_WIDTH, side=tk.LEFT, padx=(0, 8)
+        )
 
-        btn_col = ttk.Frame(sidebar)
+        btn_col = ttk.Frame(left_inner)
         btn_col.pack(fill=tk.X, padx=10, pady=10)
         ttk.Button(btn_col, text="추가 (검색)", command=self._add_box).pack(
             fill=tk.X, pady=3
@@ -314,7 +385,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             fill=tk.X, pady=3
         )
 
-        title_frame = ttk.LabelFrame(sidebar, text="제목")
+        title_frame = ttk.LabelFrame(left_inner, text="제목")
         title_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         title_in = ttk.Frame(title_frame)
         title_in.pack(fill=tk.X, padx=6, pady=6)
@@ -345,7 +416,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             title_in,
             text="텍스트·색·폰트·크기는 [제목 적용] 후 미리보기·저장에 반영됩니다.",
             foreground="#666",
-            wraplength=280,
+            wraplength=LEFT_PANEL_WIDTH - 28,
         ).pack(anchor="w", pady=(4, 0))
         title_pos_row = ttk.Frame(title_in)
         title_pos_row.pack(fill=tk.X, pady=(6, 0))
@@ -370,7 +441,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             "<<Decrement>>", self._on_title_y_offset_changed, add="+"
         )
 
-        bg_music_frame = ttk.LabelFrame(sidebar, text="쇼츠 배경음")
+        bg_music_frame = ttk.LabelFrame(left_inner, text="쇼츠 배경음")
         bg_music_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         bg_music_in = ttk.Frame(bg_music_frame)
         bg_music_in.pack(fill=tk.X, padx=6, pady=6)
@@ -398,7 +469,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         attach_bg_path_preview(bg_preview_row, self._bg_music_combo).pack(side=tk.LEFT)
         self._sync_bg_music_combo()
 
-        highlight_frame = ttk.LabelFrame(sidebar, text="선택 효과")
+        highlight_frame = ttk.LabelFrame(left_inner, text="선택 효과")
         highlight_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         highlight_in = ttk.Frame(highlight_frame)
         highlight_in.pack(fill=tk.X, padx=6, pady=6)
@@ -442,7 +513,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             highlight_frame,
             text="카드=재생 중인 단어만 · 가로줄=같은 줄 전체(별도)",
             foreground="#666",
-            wraplength=280,
+            wraplength=LEFT_PANEL_WIDTH - 28,
         ).pack(anchor="w", padx=6, pady=(4, 6))
         self._use_base_slot_var = tk.BooleanVar(
             value=bool(getattr(self._layout, "use_base_slot", False))
@@ -500,7 +571,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             command=self._on_show_images_changed,
         ).pack(anchor="w", padx=6, pady=(0, 4))
 
-        game_frame = ttk.LabelFrame(sidebar, text="게임 배경")
+        game_frame = ttk.LabelFrame(left_inner, text="게임 배경")
         game_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
         game_in = ttk.Frame(game_frame)
         game_in.pack(fill=tk.X, padx=6, pady=6)
@@ -564,124 +635,13 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             game_in,
             text="tiles+곡괭이: 카드 위 타일 → 360° 회전 채굴로 단어 공개",
             foreground="#666",
-            wraplength=280,
+            wraplength=LEFT_PANEL_WIDTH - 28,
             font=("Segoe UI", 8),
         ).pack(anchor="w", pady=(2, 0))
         self._sync_game_asset_combos()
 
-        grid_frame = ttk.LabelFrame(sidebar, text="격자 정렬")
-        grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
-        grid_in = ttk.Frame(grid_frame)
-        grid_in.pack(fill=tk.X, padx=6, pady=6)
-        ttk.Label(grid_in, text="행").grid(row=0, column=0, sticky="w", padx=(0, 4))
-        self._grid_rows_var = tk.StringVar(value="3")
-        ttk.Spinbox(
-            grid_in,
-            from_=1,
-            to=20,
-            width=4,
-            textvariable=self._grid_rows_var,
-        ).grid(row=0, column=1, padx=(0, 12))
-        ttk.Label(grid_in, text="열").grid(row=0, column=2, sticky="w", padx=(0, 4))
-        self._grid_cols_var = tk.StringVar(value="3")
-        ttk.Spinbox(
-            grid_in,
-            from_=1,
-            to=20,
-            width=4,
-            textvariable=self._grid_cols_var,
-        ).grid(row=0, column=3)
-        ttk.Button(
-            grid_frame,
-            text="격자 정렬",
-            command=lambda: self._apply_grid_align(uniform=False),
-        ).pack(fill=tk.X, padx=6, pady=(0, 3))
-        ttk.Button(
-            grid_frame,
-            text="균일하게 정렬",
-            command=lambda: self._apply_grid_align(uniform=True),
-        ).pack(fill=tk.X, padx=6, pady=(0, 6))
-
-        holding_frame = ttk.LabelFrame(sidebar, text="보관함 (미표시)")
-        holding_frame.pack(fill=tk.X, expand=False, padx=8, pady=(0, 4))
-        hold_wrap = ttk.Frame(holding_frame)
-        hold_wrap.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._holding_list = tk.Listbox(
-            hold_wrap,
-            height=LISTBOX_HEIGHT_HOLDING,
-            exportselection=False,
-            selectmode=tk.EXTENDED,
-            font=("Segoe UI", 10),
-        )
-        hold_scroll = ttk.Scrollbar(
-            hold_wrap, orient=tk.VERTICAL, command=self._holding_list.yview
-        )
-        self._holding_list.configure(yscrollcommand=hold_scroll.set)
-        self._holding_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        hold_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._holding_list.bind(
-            "<Double-Button-1>", lambda _e: self._move_holding_to_display()
-        )
-
-        transfer_row = ttk.Frame(sidebar)
-        transfer_row.pack(fill=tk.X, padx=8, pady=4)
-        ttk.Button(
-            transfer_row,
-            text="▼ 표시에 넣기",
-            command=self._move_holding_to_display,
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            transfer_row,
-            text="▲ 보관함으로",
-            command=self._move_display_to_holding,
-        ).pack(fill=tk.X, pady=2)
-
-        order_frame = ttk.LabelFrame(sidebar, text="표시 — 캔버스 (order)")
-        order_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-
-        list_wrap = ttk.Frame(order_frame)
-        list_wrap.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._order_list = tk.Listbox(
-            list_wrap,
-            height=LISTBOX_HEIGHT_DISPLAY,
-            exportselection=False,
-            selectmode=tk.EXTENDED,
-            font=("Segoe UI", 10),
-        )
-        scroll = ttk.Scrollbar(list_wrap, orient=tk.VERTICAL, command=self._order_list.yview)
-        self._order_list.configure(yscrollcommand=scroll.set)
-        self._order_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self._order_list.bind("<<ListboxSelect>>", self._on_order_list_select)
-        self._order_list.bind(
-            "<Double-Button-1>", lambda _e: self._move_display_to_holding()
-        )
-        self._order_list.bind("<Button-3>", self._on_order_list_right_click)
-
-        order_btns = ttk.Frame(order_frame)
-        order_btns.pack(fill=tk.X, padx=4, pady=(0, 6))
-        ttk.Button(order_btns, text="▲", width=4, command=self._move_order_up).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(order_btns, text="▼", width=4, command=self._move_order_down).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(
-            order_btns,
-            text="단어 id 변경…",
-            command=self._change_selected_word_id,
-        ).pack(side=tk.LEFT, padx=(6, 2), fill=tk.X, expand=True)
-
-        self._path_var = tk.StringVar(value="(새 배치 — 저장 전)")
-        ttk.Label(
-            sidebar,
-            textvariable=self._path_var,
-            wraplength=SIDEBAR_WIDTH - 24,
-            foreground="#444",
-        ).pack(fill=tk.X, padx=8, pady=(0, 8))
-
         preview_host = ttk.LabelFrame(body, text="9:16 미리보기")
-        preview_host.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        preview_host.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
 
         preview_tools = ttk.Frame(preview_host)
         preview_tools.pack(fill=tk.X, padx=8, pady=(8, 0))
@@ -741,6 +701,152 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         ).pack(anchor="n", pady=(4, 0))
         self._update_margin_label()
         self._draw_margin_rail()
+
+        right_inner = self._create_scroll_panel(
+            body,
+            "목록 · 순서",
+            RIGHT_PANEL_WIDTH,
+            side=tk.RIGHT,
+            padx=(8, 0),
+        )
+
+        grid_frame = ttk.LabelFrame(right_inner, text="격자 정렬")
+        grid_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
+        grid_in = ttk.Frame(grid_frame)
+        grid_in.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Label(grid_in, text="행").grid(row=0, column=0, sticky="w", padx=(0, 4))
+        self._grid_rows_var = tk.StringVar(value="3")
+        ttk.Spinbox(
+            grid_in,
+            from_=1,
+            to=20,
+            width=4,
+            textvariable=self._grid_rows_var,
+        ).grid(row=0, column=1, padx=(0, 12))
+        ttk.Label(grid_in, text="열").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self._grid_cols_var = tk.StringVar(value="3")
+        ttk.Spinbox(
+            grid_in,
+            from_=1,
+            to=20,
+            width=4,
+            textvariable=self._grid_cols_var,
+        ).grid(row=0, column=3)
+        ttk.Button(
+            grid_frame,
+            text="격자 정렬",
+            command=lambda: self._apply_grid_align(uniform=False),
+        ).pack(fill=tk.X, padx=6, pady=(0, 3))
+        ttk.Button(
+            grid_frame,
+            text="균일하게 정렬",
+            command=lambda: self._apply_grid_align(uniform=True),
+        ).pack(fill=tk.X, padx=6, pady=(0, 6))
+
+        holding_frame = ttk.LabelFrame(right_inner, text="보관함 (미표시)")
+        holding_frame.pack(fill=tk.X, expand=False, padx=8, pady=(0, 4))
+        hold_wrap = ttk.Frame(holding_frame)
+        hold_wrap.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._holding_list = tk.Listbox(
+            hold_wrap,
+            height=LISTBOX_HEIGHT_HOLDING,
+            exportselection=False,
+            selectmode=tk.EXTENDED,
+            font=("Segoe UI", 10),
+        )
+        hold_scroll = ttk.Scrollbar(
+            hold_wrap, orient=tk.VERTICAL, command=self._holding_list.yview
+        )
+        self._holding_list.configure(yscrollcommand=hold_scroll.set)
+        self._holding_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hold_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._holding_list.bind(
+            "<Double-Button-1>", lambda _e: self._move_holding_to_display()
+        )
+
+        transfer_row = ttk.Frame(right_inner)
+        transfer_row.pack(fill=tk.X, padx=8, pady=4)
+        ttk.Button(
+            transfer_row,
+            text="▼ 표시에 넣기",
+            command=self._move_holding_to_display,
+        ).pack(fill=tk.X, pady=2)
+        ttk.Button(
+            transfer_row,
+            text="▲ 보관함으로",
+            command=self._move_display_to_holding,
+        ).pack(fill=tk.X, pady=2)
+
+        order_frame = ttk.LabelFrame(right_inner, text="표시 — 캔버스 (order)")
+        order_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        list_wrap = ttk.Frame(order_frame)
+        list_wrap.pack(fill=tk.X, padx=4, pady=4)
+        self._order_list = tk.Listbox(
+            list_wrap,
+            height=LISTBOX_HEIGHT_DISPLAY + 4,
+            exportselection=False,
+            selectmode=tk.EXTENDED,
+            font=("Segoe UI", 10),
+        )
+        scroll = ttk.Scrollbar(list_wrap, orient=tk.VERTICAL, command=self._order_list.yview)
+        self._order_list.configure(yscrollcommand=scroll.set)
+        self._order_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._order_list.bind("<<ListboxSelect>>", self._on_order_list_select)
+        self._order_list.bind(
+            "<Double-Button-1>", lambda _e: self._move_display_to_holding()
+        )
+        self._order_list.bind("<Button-3>", self._on_order_list_right_click)
+
+        order_btns = ttk.Frame(order_frame)
+        order_btns.pack(fill=tk.X, padx=4, pady=(0, 6))
+        ttk.Button(order_btns, text="▲", width=4, command=self._move_order_up).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(order_btns, text="▼", width=4, command=self._move_order_down).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(
+            order_btns,
+            text="단어 id 변경…",
+            command=self._change_selected_word_id,
+        ).pack(side=tk.LEFT, padx=(6, 2), fill=tk.X, expand=True)
+
+        trap_row = ttk.Frame(order_frame)
+        trap_row.pack(fill=tk.X, padx=4, pady=(0, 6))
+        ttk.Label(trap_row, text="trap").pack(side=tk.LEFT)
+        self._box_trap_var = tk.StringVar(value=GAME_ASSET_NONE_LABEL)
+        trap_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_traps()
+        self._box_trap_combo = ttk.Combobox(
+            trap_row,
+            textvariable=self._box_trap_var,
+            values=trap_choices,
+            state="readonly",
+            width=14,
+        )
+        self._box_trap_combo.pack(side=tk.LEFT, padx=(8, 4), fill=tk.X, expand=True)
+        self._box_trap_combo.bind(
+            "<<ComboboxSelected>>", self._on_box_trap_changed, add="+"
+        )
+        self._box_trap_preview_label = ttk.Label(trap_row, text="(미리보기)")
+        self._box_trap_preview_label.pack(side=tk.RIGHT)
+        ttk.Label(
+            order_frame,
+            text="선택 카드 trap: trap 이미지만 표시 · 채굴 완료 size-up → 조각모음식 타일 채우기 후 종료",
+            foreground="#666",
+            wraplength=RIGHT_PANEL_WIDTH - 28,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=4, pady=(0, 4))
+        self._sync_box_trap_combo()
+
+        self._path_var = tk.StringVar(value="(새 배치 — 저장 전)")
+        ttk.Label(
+            right_inner,
+            textvariable=self._path_var,
+            wraplength=RIGHT_PANEL_WIDTH - 24,
+            foreground="#444",
+        ).pack(fill=tk.X, padx=8, pady=(0, 8))
 
     def _fhd_to_screen(self, x: int, y: int) -> tuple[int, int]:
         return int(round(x * SCALE)), int(round(y * SCALE))
@@ -1400,6 +1506,44 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         elif choices:
             self._bg_music_var.set(choices[0])
 
+    def _on_box_trap_changed(self, _event: tk.Event | None = None) -> None:
+        box = self._selected_box()
+        if box is None:
+            return
+        raw = self._box_trap_var.get()
+        val = normalize_word_memorize_game_trap(
+            "" if raw == GAME_ASSET_NONE_LABEL else raw
+        )
+        if val != box_game_trap(box):
+            box.game_trap = val
+            self._mark_dirty()
+            self._redraw_canvas()
+        self._sync_box_trap_combo()
+
+    def _sync_box_trap_combo(self) -> None:
+        trap_choices = [GAME_ASSET_NONE_LABEL] + list_word_memorize_game_traps()
+        self._box_trap_combo.configure(values=trap_choices)
+        box = self._selected_box()
+        if box is None:
+            self._box_trap_var.set(GAME_ASSET_NONE_LABEL)
+            self._box_trap_preview_label.configure(image="", text="(없음)")
+            self._box_trap_preview_photo = None
+            self._box_trap_combo.configure(state=tk.DISABLED)
+            return
+        self._box_trap_combo.configure(state="readonly")
+        current = box_game_trap(box)
+        label = current if current else GAME_ASSET_NONE_LABEL
+        self._box_trap_var.set(
+            label if label in trap_choices else GAME_ASSET_NONE_LABEL
+        )
+        self._update_game_asset_preview_label(
+            stem=current,
+            path_fn=word_memorize_game_trap_path,
+            label=self._box_trap_preview_label,
+            attr="_box_trap_preview_photo",
+            size=40,
+        )
+
     def _on_selection_highlight_changed(self, _event: tk.Event | None = None) -> None:
         label = (self._selection_highlight_var.get() or "").strip()
         key = normalize_selection_highlight(label)
@@ -1619,6 +1763,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_card_background_color_controls()
         self._show_images_var.set(bool(getattr(self._layout, "show_images", True)))
         self._sync_game_asset_combos()
+        self._sync_box_trap_combo()
 
     def _on_bg_music_combo_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.bg_music_path = normalize_vocab_bg_path(
@@ -1915,6 +2060,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
     def _select_box(self, key: str | None) -> None:
         self._selected_key = key
         self._sync_order_list_selection()
+        self._sync_box_trap_combo()
         self._redraw_canvas()
 
     def _screen_rect(self, box: WordMemorizeBox) -> tuple[int, int, int, int]:
@@ -2135,7 +2281,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
 
     def _draw_game_tile_layer(self) -> None:
-        """미리보기 캔버스 — 선택 타일로 화면 전체 타일링."""
+        """미리보기 캔버스 — 상·하 여백 제외 구간만 타일링."""
         tile_stem = normalize_word_memorize_game_tile(
             getattr(self._layout, "game_tile", "")
         )
@@ -2143,7 +2289,16 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             return
         c = self._canvas
         c.delete("game_tile")
-        layer_key = tile_stem
+        band_y0, band_y1 = layout_tile_band_y(
+            PREVIEW_HEIGHT,
+            margin_top_ratio=self._layout.margin_top_ratio,
+            margin_bottom_ratio=self._layout.margin_bottom_ratio,
+            tile_px=game_tile_display_px(frame_width=PREVIEW_WIDTH),
+        )
+        layer_key = (
+            f"{tile_stem}:{self._layout.margin_top_ratio:.6f}:"
+            f"{self._layout.margin_bottom_ratio:.6f}:{band_y0}:{band_y1}"
+        )
         if (
             self._game_tile_layer_photo is not None
             and self._game_tile_layer_key == layer_key
@@ -2166,8 +2321,12 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             if tw <= 0 or th <= 0:
                 return
             layer = Image.new("RGBA", (PREVIEW_WIDTH, PREVIEW_HEIGHT), (0, 0, 0, 0))
-            for y in range(0, PREVIEW_HEIGHT, th):
+            for y in range(band_y0, band_y1, th):
+                if y + th > band_y1:
+                    break
                 for x in range(0, PREVIEW_WIDTH, tw):
+                    if x + tw > PREVIEW_WIDTH:
+                        break
                     layer.paste(tile, (x, y), tile)
             self._game_tile_layer_photo = ImageTk.PhotoImage(layer)
             self._game_tile_layer_key = layer_key
@@ -2318,6 +2477,53 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             return max(1, f.metrics("linespace"))
         return max(1, bbox[3] - bbox[1])
 
+    def _load_trap_box_photo(
+        self,
+        box_key: str,
+        trap_stem: str,
+        inner_w: int,
+        inner_h: int,
+    ) -> object | None:
+        """trap 카드 미리보기 — 박스 내부에 꽉 차게."""
+        if inner_w < 8 or inner_h < 8 or not trap_stem:
+            return None
+        path = word_memorize_game_trap_path(trap_stem)
+        cache_key = f"trap:{box_key}:{path}:{inner_w}x{inner_h}"
+        if cache_key in self._box_photos:
+            return self._box_photos[cache_key]
+        if not path.is_file():
+            return None
+        try:
+            from PIL import Image, ImageTk
+
+            img = Image.open(path).convert("RGBA")
+            img = img.resize((inner_w, inner_h), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            self._box_photos[cache_key] = photo
+            return photo
+        except Exception:
+            return None
+
+    def _draw_trap_box_content(
+        self,
+        c: tk.Canvas,
+        box: WordMemorizeBox,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        trap_stem: str,
+    ) -> None:
+        """trap 카드 — trap PNG만 (한자·병음·뜻 없음)."""
+        inner_w = max(24, x2 - x1)
+        inner_h = max(24, y2 - y1)
+        photo = self._load_trap_box_photo(box.box_key, trap_stem, inner_w, inner_h)
+        if photo is None:
+            return
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        c.create_image(cx, cy, anchor="center", image=photo, tags=("box", box.box_key))
+
     def _draw_box_content(
         self,
         c: tk.Canvas,
@@ -2328,7 +2534,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         y2: int,
         details: dict[str, str],
     ) -> None:
-        """박스 안: 병음(빨강) → 한자 → 영어 → 이미지(하단)."""
+        """박스 안: trap이면 trap PNG만, 아니면 병음·한자·영어·이미지."""
+        trap_stem = box_game_trap(box)
+        if trap_stem:
+            self._draw_trap_box_content(c, box, x1, y1, x2, y2, trap_stem)
+            return
         cx = (x1 + x2) // 2
         inner_w = max(24, x2 - x1 - BOX_CONTENT_PAD * 2)
         pad_top = BOX_CONTENT_PAD + 14
@@ -2679,6 +2889,17 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             font=BOX_BADGE_FONT,
             tags=("box", box.box_key),
         )
+        trap_stem = box_game_trap(box)
+        if trap_stem:
+            c.create_text(
+                x2 - 6,
+                y1 + 6,
+                text="trap",
+                anchor="ne",
+                fill="#e65100",
+                font=("Segoe UI", 9, "bold"),
+                tags=("box", box.box_key),
+            )
 
     def _redraw_drag_overlay(self, box_key: str) -> None:
         """드래그 중 이동·리사이즈 박스와 핸들만 갱신."""
@@ -2730,11 +2951,14 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._draw_margin_rail()
 
     def _refresh_margin_views(self) -> None:
-        """여백만 변경 시 가이드·레일만 갱신."""
+        """여백만 변경 시 가이드·레일·타일 미리보기 갱신."""
         self._update_margin_label()
         self._draw_margin_rail()
         self._canvas.delete("guide")
         self._draw_shorts_zone_guides()
+        self._invalidate_game_tile_layer_cache()
+        if self._show_tile_canvas_preview:
+            self._draw_game_tile_layer()
 
     def _draw_handles(self, box: WordMemorizeBox) -> None:
         c = self._canvas
@@ -2804,6 +3028,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
         self._sync_game_asset_combos()
+        self._sync_box_trap_combo()
         self._sync_title_var()
 
     def _open(self) -> None:
@@ -2851,6 +3076,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._sync_bg_music_combo()
         self._sync_selection_highlight_combo()
         self._sync_game_asset_combos()
+        self._sync_box_trap_combo()
         self._sync_title_var()
 
     def _on_close(self) -> None:

@@ -20,11 +20,29 @@ WORD_MEMORIZE_GAME_DIR = get_repo_root() / "resource" / "image" / "game"
 WORD_MEMORIZE_GAME_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "tiles"
 WORD_MEMORIZE_GAME_PARTICLES_DIR = WORD_MEMORIZE_GAME_DIR / "particles"
 WORD_MEMORIZE_GAME_PICKS_DIR = WORD_MEMORIZE_GAME_DIR / "picks"
+# trap 카드 이미지 — resource/image/game/trap (또는 Trap)
+_TRAP_DIR_CANDIDATES = ("trap", "Trap", "trab", "Trab")
 GAME_ASSET_NONE_LABEL = "(없음)"
+# trap 카드 채굴 완료 후 화면 전체 타일 낙하 연출 기준(초)
+TRAP_REGROW_SEC = 1.2
+TRAP_REGROW_SEC_PER_ROW = 0.035
+TRAP_REGROW_SEC_MAX = 5.0
+# trap 타일 채우기 완료 후 잠시 유지(초) — 연기 대기는 별도
+TRAP_REGROW_HOLD_SEC = 0.45
+# trap 타일 채우기 완료 후 연기가 모두 사라질 때까지 재확인 간격(초)
+TRAP_REGROW_SMOKE_POLL_SEC = 0.05
+# trap 카드 — 채굴 완료 후 카드 size-up (초)
+TRAP_CARD_SIZE_UP_SEC = 0.55
+TRAP_CARD_SCALE_START = 0.82
+TRAP_CARD_SCALE_END = 1.03
 # 재생·미리보기 타일링 시 한 칸 픽셀 크기 (FHD 기준, 프레임 너비에 비례)
 GAME_TILE_DISPLAY_PX = 16
-# 곡괭이 360° 회전으로 카드 타일 제거 애니메이션 길이(초)
+# 곡괭이 한 바퀴(360°)로 카드 타일 제거 — 카드당 총 채굴 시간(초). 타일 깨는 속도 기준.
 PICK_REVEAL_SEC = 1.2
+# 한 번 회전에 제거할 타일 행 수
+MINING_ROWS_PER_SWING = 4
+# 곡괭이 회전만 느리게(1.0=스윙과 동기, 2.6=같은 스윙에서 약 138°)
+PICK_ROTATION_STRETCH = 2.6
 # 곡괭이 표시 크기 — 카드 min(w,h) 대비 (기존 0.9의 1/2)
 PICK_DISPLAY_CARD_RATIO = 0.45
 
@@ -33,6 +51,57 @@ def game_tile_display_px(*, frame_width: int = SHORTS_WIDTH) -> int:
     """타일 한 칸 표시 크기 — frame_width 기준으로 GAME_TILE_DISPLAY_PX 비례."""
     fw = max(1, int(frame_width))
     return max(1, int(round(GAME_TILE_DISPLAY_PX * fw / float(SHORTS_WIDTH))))
+
+
+def layout_tile_band_y(
+    frame_height: int,
+    *,
+    margin_top_ratio: float,
+    margin_bottom_ratio: float,
+    tile_px: int,
+) -> tuple[int, int]:
+    """타일이 깔리는 [y0, y1) 구간 — 상·하 여백과 타일 격자에 맞춘다."""
+    fh = max(1, int(frame_height))
+    px = max(1, int(tile_px))
+    margin_top = int(round(max(0.0, float(margin_top_ratio)) * fh))
+    content_bottom = int(
+        round((1.0 - max(0.0, float(margin_bottom_ratio))) * fh)
+    )
+    content_bottom = max(0, min(fh, content_bottom))
+    y0 = ((margin_top + px - 1) // px) * px
+    y1 = (content_bottom // px) * px
+    y0 = max(0, min(fh, y0))
+    y1 = max(y0, min(fh, y1))
+    return y0, y1
+
+
+def snap_tile_coord(value: int, tile_px: int) -> int:
+    """좌표를 타일 격자(내림)에 맞춘다."""
+    px = max(1, int(tile_px))
+    return (int(value) // px) * px
+
+
+def tile_fits_in_band(
+    row_top: int,
+    tile_px: int,
+    *,
+    band_y0: int,
+    band_y1: int,
+    frame_width: int = 0,
+) -> bool:
+    """정사각형 타일 한 칸이 밴드·프레임 안에 온전히 들어가는지."""
+    px = max(1, int(tile_px))
+    rt = snap_tile_coord(row_top, px)
+    if rt != int(row_top):
+        return False
+    if rt < int(band_y0) or rt + px > int(band_y1):
+        return False
+    fw = int(frame_width)
+    if fw > 0 and px > fw:
+        return False
+    return rt >= 0
+
+
 DEFAULT_LASER_VARIANT = "laser_b"
 LASER_SELECTION_KEYS = frozenset({"laser_b", "laser_g", "laser_p", "laser_y"})
 LASER_BORDER_COLORS: dict[str, tuple[int, int, int]] = {
@@ -762,6 +831,24 @@ def list_word_memorize_game_picks() -> list[str]:
     return _list_game_asset_stems(WORD_MEMORIZE_GAME_PICKS_DIR)
 
 
+def word_memorize_game_trap_dir() -> Path:
+    """trap 카드 이미지 폴더 — trap/Trap/trab 등 후보 중 존재하는 경로."""
+    for name in _TRAP_DIR_CANDIDATES:
+        path = WORD_MEMORIZE_GAME_DIR / name
+        if path.is_dir():
+            return path
+    return WORD_MEMORIZE_GAME_DIR / "trap"
+
+
+_TRAP_CARD_EXCLUDE_STEMS = frozenset({"smoke"})
+
+
+def list_word_memorize_game_traps() -> list[str]:
+    """resource/image/game/trap 내 trap 카드 PNG stem 목록 (연기 등 이펙트 제외)."""
+    stems = _list_game_asset_stems(word_memorize_game_trap_dir())
+    return [stem for stem in stems if stem not in _TRAP_CARD_EXCLUDE_STEMS]
+
+
 def normalize_word_memorize_game_tile(raw: str) -> str:
     """타일 stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
     text = (raw or "").strip().replace("\\", "/")
@@ -791,6 +878,17 @@ def normalize_word_memorize_game_pick(raw: str) -> str:
         return ""
     stem = Path(text).stem
     if stem in list_word_memorize_game_picks():
+        return stem
+    return ""
+
+
+def normalize_word_memorize_game_trap(raw: str) -> str:
+    """trap 카드 stem 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    stem = Path(text).stem
+    if stem in list_word_memorize_game_traps():
         return stem
     return ""
 
@@ -831,6 +929,31 @@ def word_memorize_game_pick_path(stem: str) -> Path:
     return WORD_MEMORIZE_GAME_PICKS_DIR / f"{name}.png"
 
 
+def word_memorize_game_trap_path(stem: str) -> Path:
+    """trap 카드 PNG 절대 경로."""
+    trap_dir = word_memorize_game_trap_dir()
+    name = normalize_word_memorize_game_trap(stem)
+    if not name:
+        return trap_dir / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = trap_dir / f"{name}{ext}"
+        if path.is_file():
+            return path
+    return trap_dir / f"{name}.png"
+
+
+def box_game_trap(box: WordMemorizeBox) -> str:
+    """박스에 설정된 trap stem (없으면 '')."""
+    return normalize_word_memorize_game_trap(
+        str(getattr(box, "game_trap", "") or "")
+    )
+
+
+def box_uses_trap(box: WordMemorizeBox) -> bool:
+    """박스가 trap 카드인지."""
+    return bool(box_game_trap(box))
+
+
 def layout_game_tile(layout: WordMemorizeLayout) -> str:
     """레이아웃에 설정된 게임 타일 stem (없으면 '')."""
     return normalize_word_memorize_game_tile(
@@ -866,6 +989,8 @@ class WordMemorizeBox:
     w: int
     h: int
     box_key: str = ""
+    # resource/image/game/trap/{stem}.png — 곡괭이 채굴 후 타일 재생성 카드
+    game_trap: str = ""
 
     def clamp_to_frame(
         self,
@@ -1047,6 +1172,7 @@ class WordMemorizeLayout:
                     "w": b.w,
                     "h": b.h,
                     "box_key": b.box_key,
+                    "game_trap": box_game_trap(b),
                 }
                 for b in self.sorted_boxes()
             ],
@@ -1127,6 +1253,9 @@ class WordMemorizeLayout:
                 w=int(raw.get("w", 280)),
                 h=int(raw.get("h", 160)),
                 box_key=str(raw.get("box_key", "")).strip(),
+                game_trap=normalize_word_memorize_game_trap(
+                    str(raw.get("game_trap", "") or "")
+                ),
             )
             box.clamp_to_frame(layout.frame_width, layout.frame_height)
             boxes.append(box)
