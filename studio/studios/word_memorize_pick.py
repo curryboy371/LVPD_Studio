@@ -9,6 +9,7 @@ from typing import Any
 
 import pygame
 
+from core.paths import get_repo_root
 from extra.table_editor.services.word_memorize_layout import (
     MINING_ROWS_PER_SWING,
     PICK_REVEAL_SEC,
@@ -25,6 +26,14 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_pick_path,
 )
 
+# 곡괭이 타격 효과음 — resource/sound/effect/pick.mp3
+WORD_MEMORIZE_PICK_SOUND_REL = "resource/sound/effect/pick.mp3"
+# 타일 파괴 — resource/sound/effect/fall/*.mp3 랜덤
+WORD_MEMORIZE_FALL_SOUND_DIR_REL = "resource/sound/effect/fall"
+# 타일 재생성(hamer) — resource/sound/effect/hamer/*.mp3 랜덤
+WORD_MEMORIZE_HAMER_SOUND_DIR_REL = "resource/sound/effect/hamer"
+_EFFECT_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
+_effect_sound_dir_cache: dict[str, list[Path]] = {}
 # 카드 밖 빈 영역으로 퍼지는 타일 칸 수
 MINING_FRINGE_TILES = 5
 # 카드 가장자리 타일 — 남길 확률(불규칙 윤곽)
@@ -68,11 +77,80 @@ class CardMiningState:
     is_complete: bool
 
 
+def word_memorize_pick_sound_path() -> Path:
+    """곡괭이 타격 효과음 절대 경로."""
+    return get_repo_root() / WORD_MEMORIZE_PICK_SOUND_REL.replace("\\", "/")
+
+
+def _list_effect_sound_paths(dir_rel: str, *, refresh: bool = False) -> list[Path]:
+    """effect 하위 폴더 오디오 목록 (dir_rel 키 캐시)."""
+    key = dir_rel.replace("\\", "/")
+    if not refresh and key in _effect_sound_dir_cache:
+        return list(_effect_sound_dir_cache[key])
+    sound_dir = get_repo_root() / key
+    paths: list[Path] = []
+    if sound_dir.is_dir():
+        for path in sorted(sound_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in _EFFECT_SOUND_EXTS:
+                paths.append(path.resolve())
+    _effect_sound_dir_cache[key] = paths
+    return list(paths)
+
+
+def list_word_memorize_fall_sound_paths(*, refresh: bool = False) -> list[Path]:
+    """타일 파괴 효과음 목록 — resource/sound/effect/fall."""
+    return _list_effect_sound_paths(WORD_MEMORIZE_FALL_SOUND_DIR_REL, refresh=refresh)
+
+
+def pick_random_word_memorize_fall_sound_path() -> Path | None:
+    """타일 파괴 — fall 폴더에서 무작위 1개."""
+    paths = list_word_memorize_fall_sound_paths()
+    if not paths:
+        return None
+    return random.choice(paths)
+
+
+def list_word_memorize_hamer_sound_paths(*, refresh: bool = False) -> list[Path]:
+    """타일 재생성용 hammer 효과음 목록 — resource/sound/effect/hamer."""
+    return _list_effect_sound_paths(WORD_MEMORIZE_HAMER_SOUND_DIR_REL, refresh=refresh)
+
+
+def pick_random_word_memorize_hamer_sound_path() -> Path | None:
+    """타일 재생성(hamer) — hamer 폴더에서 무작위 1개."""
+    paths = list_word_memorize_hamer_sound_paths()
+    if not paths:
+        return None
+    return random.choice(paths)
+
+
 def pick_reveal_progress(elapsed_sec: float, *, reveal_sec: float = PICK_REVEAL_SEC) -> float:
     """0~1 채굴 진행률 (카드 전체)."""
     if reveal_sec <= 0:
         return 1.0
     return max(0.0, min(1.0, float(elapsed_sec) / float(reveal_sec)))
+
+
+def card_mining_swing_index(
+    box: WordMemorizeBox,
+    elapsed_sec: float,
+    *,
+    tile_px: int,
+    reveal_sec: float = PICK_REVEAL_SEC,
+    rows_per_swing: int = MINING_ROWS_PER_SWING,
+) -> int:
+    """현재 곡괭이 스윙 인덱스 (0부터, 채굴 완료 시 마지막 스윙)."""
+    row_count = card_mining_row_count(box, tile_px)
+    if row_count <= 0:
+        return 0
+    per_swing = max(1, int(rows_per_swing))
+    swing_count = card_mining_swing_count(row_count, rows_per_swing=per_swing)
+    if swing_count <= 0:
+        return 0
+    swing_duration = reveal_sec / float(swing_count)
+    swing_units = (
+        max(0.0, float(elapsed_sec)) / swing_duration if swing_duration > 0 else 0.0
+    )
+    return max(0, min(swing_count - 1, int(swing_units)))
 
 
 def card_mining_row_count(box: WordMemorizeBox, tile_px: int) -> int:

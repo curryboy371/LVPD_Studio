@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -32,7 +33,11 @@ from studio.studios.word_memorize_trap import (
 from studio.studios.word_memorize_pick import (
     card_mining_row_count,
     card_mining_state,
+    card_mining_swing_index,
     pick_reveal_progress,
+    pick_random_word_memorize_fall_sound_path,
+    pick_random_word_memorize_hamer_sound_path,
+    word_memorize_pick_sound_path,
 )
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
@@ -55,6 +60,15 @@ TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
 TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
+# 단어 외우기 효과음 채널·볼륨 (runner: set_num_channels(8) → 0~7)
+_PICK_EFFECT_CHANNEL = 4
+_TILE_FALL_EFFECT_CHANNEL = 3
+_HAMER_EFFECT_CHANNEL = 2
+_EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
+    _PICK_EFFECT_CHANNEL: 1.0,
+    _TILE_FALL_EFFECT_CHANNEL: 0.6,
+    _HAMER_EFFECT_CHANNEL: 0.4,
+}
 
 WordSubstep = Literal["", "mining", "trap_regrow", "first", "second"]
 
@@ -110,6 +124,7 @@ class WordMemorizeStudio(IStudio):
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
+        self._pick_mining_last_swing_index = -1
         self._trap_regrow_elapsed_sec = 0.0
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
@@ -117,6 +132,7 @@ class WordMemorizeStudio(IStudio):
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
+        self._active_effect_sound_until: dict[str, float] = {}
 
     def init(self, config: Any = None) -> None:
         self._last_config = config
@@ -230,11 +246,13 @@ class WordMemorizeStudio(IStudio):
         self._active_word_elapsed_sec = 0.0
         self._active_word_duration_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
+        self._pick_mining_last_swing_index = -1
         self._trap_regrow_elapsed_sec = 0.0
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
         self._done = False
+        self._active_effect_sound_until.clear()
 
     def get_title(self) -> str:
         return f"LVPD Studio - 단어 외우기 ({self._layout_path.stem})"
@@ -270,6 +288,7 @@ class WordMemorizeStudio(IStudio):
         if self._phase == "word":
             if self._word_substep == "mining":
                 self._pick_mining_elapsed_sec += dt
+                self._sync_pick_swing_sound()
             elif self._word_substep == "trap_regrow":
                 prev_trap = self._trap_regrow_elapsed_sec
                 self._trap_regrow_elapsed_sec += dt
@@ -313,6 +332,7 @@ class WordMemorizeStudio(IStudio):
         new_rows = max(prev, state.completed_rows)
         self._revealed_rows_by_key[key] = new_rows
         if new_rows > prev:
+            self._play_tile_fall_sound()
             self._renderer.spawn_mining_row_particles(
                 self._layout,
                 box,
@@ -323,6 +343,120 @@ class WordMemorizeStudio(IStudio):
             )
         if state.is_complete:
             self._revealed_keys.add(key)
+
+    def _sync_pick_swing_sound(self) -> None:
+        """곡괭이 스윙 시작마다 pick.mp3 재생."""
+        if not layout_uses_pick_mining(self._layout):
+            return
+        if self._phase != "word" or self._word_substep != "mining" or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None:
+            return
+        tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
+        swing_index = card_mining_swing_index(
+            box,
+            self._pick_mining_elapsed_sec,
+            tile_px=tile_px,
+        )
+        if swing_index <= self._pick_mining_last_swing_index:
+            return
+        self._play_pick_sound()
+        self._pick_mining_last_swing_index = swing_index
+
+    def _prune_active_effect_sounds(self) -> None:
+        """재생이 끝난 효과음 키를 제거한다."""
+        now = time.monotonic()
+        expired = [key for key, until in self._active_effect_sound_until.items() if until <= now]
+        for key in expired:
+            del self._active_effect_sound_until[key]
+
+    def _effect_sound_path_key(self, path: Path) -> str:
+        return str(path.resolve())
+
+    def _is_same_effect_sound_playing(self, path: Path) -> bool:
+        """동일 파일이 아직 재생 중이면 True — pick·fall 동시 재생은 경로가 달라 허용."""
+        self._prune_active_effect_sounds()
+        return self._effect_sound_path_key(path) in self._active_effect_sound_until
+
+    def _mark_effect_sound_playing(self, path: Path, duration_sec: float) -> None:
+        key = self._effect_sound_path_key(path)
+        self._active_effect_sound_until[key] = time.monotonic() + max(
+            0.02, float(duration_sec)
+        )
+
+    def _effect_volume_for_channel(self, channel: int) -> float:
+        """채널별 효과음 선형 볼륨 (0~1)."""
+        return max(0.0, min(1.0, float(_EFFECT_CHANNEL_VOLUMES.get(channel, 1.0))))
+
+    def _play_effect_sound(
+        self,
+        path: Path,
+        *,
+        channel: int,
+        label: str,
+    ) -> None:
+        """효과음 — 미리보기 재생·녹화 InsertSound."""
+        if not path.is_file():
+            logger.debug("%s 없음: %s", label, path)
+            return
+        if self._is_same_effect_sound_playing(path):
+            return
+        try:
+            if pygame.mixer.get_init() is None:
+                from core.paths import STUDIO_AUDIO_SAMPLE_RATE
+
+                pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
+            snd = pygame.mixer.Sound(str(path))
+            dur = float(snd.get_length())
+            self._mark_effect_sound_playing(path, dur)
+            vol = self._effect_volume_for_channel(channel)
+            if vol < 1.0:
+                snd.set_volume(vol)
+            if self._is_recording_mode():
+                self._log_insert_sound(
+                    path,
+                    dur,
+                    linear_gain=vol if vol < 1.0 else None,
+                )
+                return
+            pygame.mixer.Channel(channel).play(snd)
+        except Exception as e:
+            key = self._effect_sound_path_key(path)
+            self._active_effect_sound_until.pop(key, None)
+            logger.debug("%s 재생 실패: %s", label, e)
+
+    def _play_pick_sound(self) -> None:
+        """곡괭이 타격 효과음."""
+        self._play_effect_sound(
+            word_memorize_pick_sound_path(),
+            channel=_PICK_EFFECT_CHANNEL,
+            label="곡괭이 효과음",
+        )
+
+    def _play_tile_fall_sound(self) -> None:
+        """타일 파괴 효과음 — fall 폴더에서 랜덤."""
+        path = pick_random_word_memorize_fall_sound_path()
+        if path is None:
+            logger.debug("타일 파괴 효과음 없음: resource/sound/effect/fall")
+            return
+        self._play_effect_sound(
+            path,
+            channel=_TILE_FALL_EFFECT_CHANNEL,
+            label="타일 파괴 효과음",
+        )
+
+    def _play_random_hamer_sound(self) -> None:
+        """타일 재생성(hamer) — hamer 폴더에서 랜덤 재생."""
+        path = pick_random_word_memorize_hamer_sound_path()
+        if path is None:
+            logger.debug("타일 재생성 효과음 없음: resource/sound/effect/hamer")
+            return
+        self._play_effect_sound(
+            path,
+            channel=_HAMER_EFFECT_CHANNEL,
+            label="타일 재생성 효과음",
+        )
 
     def _sync_trap_fall_impacts(self, prev_sec: float, curr_sec: float) -> None:
         """trap 타일 낙하 착지 프레임마다 임팩트 파티클."""
@@ -339,6 +473,8 @@ class WordMemorizeStudio(IStudio):
         )
         if not impacts:
             return
+        for _ in impacts:
+            self._play_random_hamer_sound()
         from extra.table_editor.services.word_memorize_layout import game_tile_display_px
 
         tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
@@ -376,6 +512,7 @@ class WordMemorizeStudio(IStudio):
         row_count = card_mining_row_count(box, tile_px)
         prev = int(self._revealed_rows_by_key.get(self._active_key, 0))
         if row_count > prev:
+            self._play_tile_fall_sound()
             self._renderer.spawn_mining_row_particles(
                 self._layout,
                 box,
@@ -458,6 +595,7 @@ class WordMemorizeStudio(IStudio):
         self._active_key = self._box_active_key(box)
         self._active_word_elapsed_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
+        self._pick_mining_last_swing_index = -1
         self._active_word_duration_sec = self._word_play_duration_sec(box)
         self._queued_second_path = None
         self._queued_second_len = 0.0
@@ -535,7 +673,13 @@ class WordMemorizeStudio(IStudio):
         except ValueError:
             return str(path.resolve()).replace("\\", "/")
 
-    def _log_insert_sound(self, path: Path, duration_sec: float) -> None:
+    def _log_insert_sound(
+        self,
+        path: Path,
+        duration_sec: float,
+        *,
+        linear_gain: float | None = None,
+    ) -> None:
         if duration_sec <= 0:
             return
         log = getattr(self._last_config, "recording_log_event", None)
@@ -553,6 +697,7 @@ class WordMemorizeStudio(IStudio):
                     timeline_sec=timeline_sec,
                     path=self._path_for_recording(path),
                     duration_sec=float(duration_sec),
+                    linear_gain=linear_gain,
                 ),
             )
         except Exception:
