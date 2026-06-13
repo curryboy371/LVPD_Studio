@@ -26,6 +26,7 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_trap_path,
 )
 from studio.studios.word_memorize_pick import (
+    MiningDirection,
     box_runtime_key,
     card_mining_row_count,
     card_mining_state,
@@ -94,10 +95,12 @@ class TrapDefragCellState:
 def _mining_snapshot_key(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> tuple[Any, ...]:
     return (
         frozenset(revealed_box_keys),
         tuple(sorted((k, int(v)) for k, v in revealed_rows_by_key.items())),
+        tuple(sorted((mining_direction_by_key or {}).items())),
     )
 
 
@@ -112,6 +115,7 @@ def _punched_band_cells(
     frame_height: int,
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> set[tuple[int, int]]:
     """밴드 격자 (col, row_index) 중 채굴로 비어 있는 칸."""
     px = max(1, int(tile_px))
@@ -123,6 +127,7 @@ def _punched_band_cells(
         tile_px=px,
         frame_width=frame_width,
         frame_height=frame_height,
+        mining_direction_by_key=mining_direction_by_key,
     ):
         col = int(rect.x) // px
         row_index = (int(rect.y) - int(band_y0)) // px
@@ -148,6 +153,7 @@ def build_trap_defrag_schedule(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
     tile_px: int | None = None,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> tuple[list[TrapDefragFill], int, int, int]:
     """비어 있는 밴드 칸 — 랜덤 순서·랜덤 출발 위치에서 채움."""
     px = max(1, int(tile_px or game_tile_display_px(frame_width=int(frame_width))))
@@ -171,7 +177,11 @@ def build_trap_defrag_schedule(
         float(layout.margin_bottom_ratio),
         row_count,
         col_end,
-        _mining_snapshot_key(revealed_box_keys, revealed_rows_by_key),
+        _mining_snapshot_key(
+            revealed_box_keys,
+            revealed_rows_by_key,
+            mining_direction_by_key,
+        ),
     )
     cached = _defrag_schedule_cache.get(cache_key)
     if cached is not None:
@@ -186,6 +196,7 @@ def build_trap_defrag_schedule(
         frame_height=fh,
         revealed_box_keys=revealed_box_keys,
         revealed_rows_by_key=revealed_rows_by_key,
+        mining_direction_by_key=mining_direction_by_key,
     )
     cells = list(punched)
     rng = _defrag_schedule_seed(cache_key, punched)
@@ -277,6 +288,7 @@ def layout_trap_regrow_duration_sec(
     *,
     revealed_box_keys: set[str] | None = None,
     revealed_rows_by_key: dict[str, int] | None = None,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> float:
     """타일 채우기 구간 길이(초) — 연기 소멸 대기는 재생 로직에서 별도 처리."""
     keys = revealed_box_keys if revealed_box_keys is not None else set()
@@ -287,6 +299,7 @@ def layout_trap_regrow_duration_sec(
         frame_height=int(layout.frame_height),
         revealed_box_keys=keys,
         revealed_rows_by_key=rows,
+        mining_direction_by_key=mining_direction_by_key,
     )
     if not schedule:
         return float(TRAP_REGROW_SEC)
@@ -352,6 +365,7 @@ def collect_trap_fall_land_impacts(
     frame_height: int,
     revealed_box_keys: set[str] | None = None,
     revealed_rows_by_key: dict[str, int] | None = None,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> list[tuple[float, float]]:
     """이번 프레임에 착지한 타일 중심 — 연기 이펙트용."""
     if curr_elapsed_sec <= prev_elapsed_sec:
@@ -366,6 +380,7 @@ def collect_trap_fall_land_impacts(
         tile_px=px,
         revealed_box_keys=keys,
         revealed_rows_by_key=rows,
+        mining_direction_by_key=mining_direction_by_key,
     )
     prev_t = max(0.0, float(prev_elapsed_sec))
     curr_t = max(0.0, float(curr_elapsed_sec))
@@ -408,6 +423,7 @@ def apply_full_frame_trap_regrow(
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
     regrow_sec: float = 0.0,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> None:
     """조각모음식 랜덤 채우기 후 최초 타일 밴드와 동일 화면."""
     _ = regrow_sec
@@ -421,6 +437,7 @@ def apply_full_frame_trap_regrow(
         tile_px=px,
         revealed_box_keys=revealed_box_keys,
         revealed_rows_by_key=revealed_rows_by_key,
+        mining_direction_by_key=mining_direction_by_key,
     )
     last_land = trap_defrag_last_land_time(schedule)
     if not schedule or elapsed_sec >= last_land:

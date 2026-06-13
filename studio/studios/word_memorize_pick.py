@@ -5,7 +5,7 @@ import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pygame
 
@@ -61,6 +61,47 @@ def _box_punch_cache_key(box: WordMemorizeBox) -> tuple[int, int, int, int, str]
         int(box.h),
         str(getattr(box, "box_key", "") or ""),
     )
+
+
+MiningDirection = Literal["top_down", "bottom_up"]
+
+
+def normalize_mining_direction(
+    value: str | MiningDirection | None,
+) -> MiningDirection:
+    """채굴 방향 정규화 — 기본은 위→아래."""
+    if value == "bottom_up":
+        return "bottom_up"
+    return "top_down"
+
+
+def random_mining_direction() -> MiningDirection:
+    """채굴 방향 랜덤 선택 — 위→아래 / 아래→위 반반."""
+    return "bottom_up" if random.random() < 0.5 else "top_down"
+
+
+def mining_direction_for_key(
+    box_key: str,
+    mining_direction_by_key: dict[str, MiningDirection] | None,
+) -> MiningDirection:
+    """카드별 채굴 방향 — 미설정 시 위→아래."""
+    if mining_direction_by_key and box_key in mining_direction_by_key:
+        return normalize_mining_direction(mining_direction_by_key[box_key])
+    return "top_down"
+
+
+def mining_physical_row(
+    logical_row: int,
+    row_count: int,
+    direction: MiningDirection,
+) -> int:
+    """논리 행(채굴 진행 순서) → 격자 물리 행."""
+    if row_count <= 0:
+        return 0
+    logical = max(0, min(int(logical_row), row_count - 1))
+    if direction == "bottom_up":
+        return row_count - 1 - logical
+    return logical
 
 
 @dataclass(frozen=True)
@@ -197,11 +238,36 @@ def card_mining_band_center_y(
     row_count: int,
     rows_per_swing: int = MINING_ROWS_PER_SWING,
 ) -> int:
-    """현재 스윙 밴드(최대 rows_per_swing 행)의 y 중앙."""
+    """현재 스윙 밴드(최대 rows_per_swing 행)의 y 중앙 — 물리 행 기준."""
     top = max(0, min(int(top_row), row_count - 1))
     bottom = min(row_count - 1, top + max(1, int(rows_per_swing)) - 1)
     y_top, _ = card_mining_row_band_y(box, top, tile_px)
     _, y_bottom = card_mining_row_band_y(box, bottom, tile_px)
+    return (y_top + y_bottom) // 2
+
+
+def card_mining_band_center_y_for_logical(
+    box: WordMemorizeBox,
+    logical_row: int,
+    *,
+    tile_px: int,
+    row_count: int,
+    rows_per_swing: int = MINING_ROWS_PER_SWING,
+    direction: MiningDirection = "top_down",
+) -> int:
+    """논리 채굴 행 기준 스윙 밴드 y 중앙."""
+    per = max(1, int(rows_per_swing))
+    mining_dir = normalize_mining_direction(direction)
+    logical = max(0, min(int(logical_row), row_count - 1))
+    logical_bottom = min(row_count - 1, logical + per - 1)
+    if mining_dir == "bottom_up":
+        physical_top = mining_physical_row(logical_bottom, row_count, mining_dir)
+        physical_bottom = mining_physical_row(logical, row_count, mining_dir)
+    else:
+        physical_top = mining_physical_row(logical, row_count, mining_dir)
+        physical_bottom = mining_physical_row(logical_bottom, row_count, mining_dir)
+    y_top, _ = card_mining_row_band_y(box, physical_top, tile_px)
+    _, y_bottom = card_mining_row_band_y(box, physical_bottom, tile_px)
     return (y_top + y_bottom) // 2
 
 
@@ -213,25 +279,36 @@ def card_mining_state(
     reveal_sec: float = PICK_REVEAL_SEC,
     stored_completed_rows: int = 0,
     rows_per_swing: int = MINING_ROWS_PER_SWING,
+    direction: MiningDirection = "top_down",
 ) -> CardMiningState:
-    """맨 위부터 rows_per_swing 행씩 — 타일은 reveal_sec 유지, 곡괭이는 더 천천히 회전."""
+    """rows_per_swing 행씩 채굴 — 방향은 위→아래 또는 아래→위."""
     row_count = card_mining_row_count(box, tile_px)
     per_swing = max(1, int(rows_per_swing))
     pick_x = int(box.x) + int(box.w) // 2
     stored = max(0, min(int(stored_completed_rows), row_count))
+    mining_dir = normalize_mining_direction(direction)
+    terminal_logical = max(0, row_count - 1)
+
+    def _pick_y_for_logical(logical_row: int) -> int:
+        return card_mining_band_center_y_for_logical(
+            box,
+            logical_row,
+            tile_px=tile_px,
+            row_count=row_count,
+            rows_per_swing=per_swing,
+            direction=mining_dir,
+        )
 
     if stored >= row_count or elapsed_sec <= 0.0:
         if stored >= row_count:
             return CardMiningState(
                 row_count=row_count,
                 completed_rows=row_count,
-                active_row=max(0, row_count - 1),
+                active_row=terminal_logical,
                 row_progress=1.0,
                 pick_rotation_deg=360.0,
                 pick_x=pick_x,
-                pick_y=card_mining_band_center_y(
-                    box, max(0, row_count - 1), tile_px=tile_px, row_count=row_count
-                ),
+                pick_y=_pick_y_for_logical(terminal_logical),
                 is_complete=True,
             )
         return CardMiningState(
@@ -241,9 +318,7 @@ def card_mining_state(
             row_progress=0.0,
             pick_rotation_deg=0.0,
             pick_x=pick_x,
-            pick_y=card_mining_band_center_y(
-                box, 0, tile_px=tile_px, row_count=row_count, rows_per_swing=per_swing
-            ),
+            pick_y=_pick_y_for_logical(0),
             is_complete=False,
         )
 
@@ -266,13 +341,11 @@ def card_mining_state(
         return CardMiningState(
             row_count=row_count,
             completed_rows=row_count,
-            active_row=max(0, row_count - 1),
+            active_row=terminal_logical,
             row_progress=1.0,
             pick_rotation_deg=360.0,
             pick_x=pick_x,
-            pick_y=card_mining_band_center_y(
-                box, max(0, row_count - 1), tile_px=tile_px, row_count=row_count
-            ),
+            pick_y=_pick_y_for_logical(terminal_logical),
             is_complete=True,
         )
 
@@ -288,13 +361,7 @@ def card_mining_state(
         row_progress=row_progress,
         pick_rotation_deg=pick_rotation_deg,
         pick_x=pick_x,
-        pick_y=card_mining_band_center_y(
-            box,
-            active_row,
-            tile_px=tile_px,
-            row_count=row_count,
-            rows_per_swing=per_swing,
-        ),
+        pick_y=_pick_y_for_logical(active_row),
         is_complete=False,
     )
 
@@ -367,7 +434,8 @@ def _cell_punch_chance(
     row_top: int,
     tile_px: int,
     box: WordMemorizeBox,
-    card_row_index: int,
+    logical_row_index: int,
+    physical_row_index: int,
     completed_rows: int,
     row_count: int,
     is_overdig_row: bool,
@@ -389,9 +457,13 @@ def _cell_punch_chance(
     # 카드 y가 격자와 어긋나면 맨 윗줄이 inside_card·fringe 모두 아님 → 0% 버그 방지
     if (
         not is_overdig_row
-        and card_row_index < completed_rows
+        and logical_row_index < completed_rows
         and _cell_on_active_mining_row(
-            col, row_top, tile_px=px, box=box, card_row_index=card_row_index
+            col,
+            row_top,
+            tile_px=px,
+            box=box,
+            card_row_index=physical_row_index,
         )
     ):
         return 1.0
@@ -507,7 +579,8 @@ def _should_punch_cell(
     row_top: int,
     tile_px: int,
     box: WordMemorizeBox,
-    card_row_index: int,
+    logical_row_index: int,
+    physical_row_index: int,
     completed_rows: int,
     row_count: int,
     is_overdig_row: bool,
@@ -517,7 +590,8 @@ def _should_punch_cell(
         row_top=row_top,
         tile_px=tile_px,
         box=box,
-        card_row_index=card_row_index,
+        logical_row_index=logical_row_index,
+        physical_row_index=physical_row_index,
         completed_rows=completed_rows,
         row_count=row_count,
         is_overdig_row=is_overdig_row,
@@ -615,6 +689,7 @@ def collect_mining_punch_rects(
     tile_band_y1: int | None = None,
     layout: WordMemorizeLayout | None = None,
     revealed_box_keys: set[str] | None = None,
+    direction: MiningDirection = "top_down",
 ) -> list[pygame.Rect]:
     """불규칙 채굴로 제거할 타일 칸 목록 — 정사각형 격자 칸만."""
     px = max(1, int(tile_px))
@@ -622,6 +697,7 @@ def collect_mining_punch_rects(
     if rows <= 0:
         return []
     key = box_key or box_runtime_key(box)
+    mining_dir = normalize_mining_direction(direction)
     fw = max(1, int(frame_width))
     fh = max(1, int(frame_height))
     band_y0 = 0 if tile_band_y0 is None else int(tile_band_y0)
@@ -656,6 +732,7 @@ def collect_mining_punch_rects(
         band_y1,
         frozenset(revealed_box_keys or ()),
         peer_sig,
+        mining_dir,
     )
     cached = _punch_rect_cache.get(cache_key)
     if cached is not None:
@@ -694,7 +771,8 @@ def collect_mining_punch_rects(
         col: int,
         row_top: int,
         *,
-        card_row_index: int,
+        logical_row_index: int,
+        physical_row_index: int,
         is_overdig_row: bool = False,
     ) -> None:
         """fringe — 카드 쪽 연쇄 + 확률 통과 시에만 제거."""
@@ -715,7 +793,8 @@ def collect_mining_punch_rects(
             row_top=row_top,
             tile_px=px,
             box=box,
-            card_row_index=card_row_index,
+            logical_row_index=logical_row_index,
+            physical_row_index=physical_row_index,
             completed_rows=rows,
             row_count=row_count,
             is_overdig_row=is_overdig_row,
@@ -726,7 +805,8 @@ def collect_mining_punch_rects(
     def add_horizontal_fringe_for_row(
         row_top: int,
         *,
-        card_row_index: int,
+        logical_row_index: int,
+        physical_row_index: int,
         is_overdig_row: bool = False,
     ) -> None:
         """같은 행 좌·우 fringe — 거리 순 연쇄."""
@@ -745,7 +825,8 @@ def collect_mining_punch_rects(
             try_punch_fringe_cell(
                 col,
                 row_top,
-                card_row_index=card_row_index,
+                logical_row_index=logical_row_index,
+                physical_row_index=physical_row_index,
                 is_overdig_row=is_overdig_row,
             )
 
@@ -753,7 +834,8 @@ def collect_mining_punch_rects(
         row_top: int,
         row_bottom: int,
         *,
-        card_row_index: int,
+        logical_row_index: int,
+        physical_row_index: int,
     ) -> None:
         """현재 채굴 행 기준 위·아래 fringe — 카드 밖 타일만."""
         if not include_vertical_fringe:
@@ -783,11 +865,13 @@ def collect_mining_punch_rects(
                     try_punch_fringe_cell(
                         col,
                         fringe_row_top,
-                        card_row_index=card_row_index,
+                        logical_row_index=logical_row_index,
+                        physical_row_index=physical_row_index,
                     )
 
-    for card_row in range(min(rows, row_count)):
-        row_top, row_bottom = card_mining_row_band_y(box, card_row, px)
+    for logical_row in range(min(rows, row_count)):
+        physical_row = mining_physical_row(logical_row, row_count, mining_dir)
+        row_top, row_bottom = card_mining_row_band_y(box, physical_row, px)
         if row_bottom <= row_top:
             continue
         for col in range(col_start, col_end):
@@ -799,21 +883,34 @@ def collect_mining_punch_rects(
                 row_top=row_top,
                 tile_px=px,
                 box=box,
-                card_row_index=card_row,
+                logical_row_index=logical_row,
+                physical_row_index=physical_row,
                 completed_rows=rows,
                 row_count=row_count,
                 is_overdig_row=False,
             ):
                 add_cell(col, row_top)
 
-        add_horizontal_fringe_for_row(row_top, card_row_index=card_row)
+        add_horizontal_fringe_for_row(
+            row_top,
+            logical_row_index=logical_row,
+            physical_row_index=physical_row,
+        )
         add_vertical_fringe_for_row(
-            row_top, row_bottom, card_row_index=card_row
+            row_top,
+            row_bottom,
+            logical_row_index=logical_row,
+            physical_row_index=physical_row,
         )
 
-        if card_row == rows - 1 and rows < row_count:
-            overdig_top = row_bottom
-            if overdig_top + px <= fh:
+        if logical_row == rows - 1 and rows < row_count:
+            if mining_dir == "bottom_up":
+                overdig_top = row_top - px
+                overdig_valid = overdig_top >= 0
+            else:
+                overdig_top = row_bottom
+                overdig_valid = overdig_top + px <= fh
+            if overdig_valid:
                 for col in range(col_start, col_end):
                     if _cell_outside_card_x(col, px, card_x0, card_x1):
                         continue
@@ -823,7 +920,8 @@ def collect_mining_punch_rects(
                         row_top=overdig_top,
                         tile_px=px,
                         box=box,
-                        card_row_index=card_row,
+                        logical_row_index=logical_row,
+                        physical_row_index=physical_row,
                         completed_rows=rows,
                         row_count=row_count,
                         is_overdig_row=True,
@@ -831,7 +929,8 @@ def collect_mining_punch_rects(
                         add_cell(col, overdig_top)
                 add_horizontal_fringe_for_row(
                     overdig_top,
-                    card_row_index=card_row,
+                    logical_row_index=logical_row,
+                    physical_row_index=physical_row,
                     is_overdig_row=True,
                 )
 
@@ -860,6 +959,7 @@ def punch_card_irregular_holes(
     tile_band_y1: int | None = None,
     layout: WordMemorizeLayout | None = None,
     revealed_box_keys: set[str] | None = None,
+    direction: MiningDirection = "top_down",
 ) -> None:
     """불규칙 윤곽·인접 빈 영역까지 타일 제거."""
     rects = collect_mining_punch_rects(
@@ -873,6 +973,7 @@ def punch_card_irregular_holes(
         tile_band_y1=tile_band_y1,
         layout=layout,
         revealed_box_keys=revealed_box_keys,
+        direction=direction,
     )
     punch_mining_rects(layer, rects)
 
@@ -929,8 +1030,9 @@ def punch_card_row_holes(
     tile_band_y1: int | None = None,
     layout: WordMemorizeLayout | None = None,
     revealed_box_keys: set[str] | None = None,
+    direction: MiningDirection = "top_down",
 ) -> None:
-    """맨 위부터 completed_rows 만큼 격자 타일 제거."""
+    """채굴 방향에 따라 completed_rows 만큼 격자 타일 제거."""
     if frame_width > 0 and frame_height > 0:
         punch_card_irregular_holes(
             layer,
@@ -944,6 +1046,7 @@ def punch_card_row_holes(
             tile_band_y1=tile_band_y1,
             layout=layout,
             revealed_box_keys=revealed_box_keys,
+            direction=direction,
         )
         return
     if tile_px <= 0 or completed_rows <= 0:
@@ -959,6 +1062,7 @@ def punch_card_row_holes(
         tile_band_y1=tile_band_y1,
         layout=layout,
         revealed_box_keys=revealed_box_keys,
+        direction=direction,
     )
     punch_mining_rects(layer, rects)
 
@@ -1008,6 +1112,7 @@ def collect_layout_mining_punch_rects(
     tile_px: int,
     frame_width: int,
     frame_height: int,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> list[pygame.Rect]:
     """레이아웃 전체 채굴 구멍 — trap 시작 시 타일 상태 계산용."""
     fh = max(1, int(frame_height))
@@ -1039,6 +1144,7 @@ def collect_layout_mining_punch_rects(
                 tile_band_y1=band_y1,
                 layout=layout,
                 revealed_box_keys=revealed_box_keys,
+                direction=mining_direction_for_key(key, mining_direction_by_key),
             )
         )
     return rects
@@ -1053,6 +1159,7 @@ def apply_mining_overlay_holes(
     revealed_rows_by_key: dict[str, int] | None,
     active_box: WordMemorizeBox | None,
     active_elapsed_sec: float,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> None:
     """채굴 진행 상태를 타일 오버레이에 반영."""
     tile_px = game_tile_display_px(frame_width=frame_width)
@@ -1078,6 +1185,7 @@ def apply_mining_overlay_holes(
 
     for box in layout.sorted_boxes():
         key = box_runtime_key(box)
+        box_direction = mining_direction_for_key(key, mining_direction_by_key)
         if key in revealed_box_keys:
             punch_card_full_hole(
                 layer,
@@ -1093,6 +1201,7 @@ def apply_mining_overlay_holes(
                 active_elapsed_sec,
                 tile_px=tile_px,
                 stored_completed_rows=completed,
+                direction=box_direction,
             )
             completed = max(completed, state.completed_rows)
         row_count = card_mining_row_count(box, tile_px)
@@ -1109,6 +1218,7 @@ def apply_mining_overlay_holes(
                 box,
                 completed_rows=completed,
                 box_key=key,
+                direction=box_direction,
                 **_punch_kw(),
             )
 
@@ -1128,12 +1238,14 @@ def _regrow_holed_layer_cache_key(
     frame_width: int,
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> tuple[Any, ...]:
     return (
         id(base_layer),
         int(frame_width),
         frozenset(revealed_box_keys),
         tuple(sorted((k, int(v)) for k, v in revealed_rows_by_key.items())),
+        tuple(sorted((mining_direction_by_key or {}).items())),
     )
 
 
@@ -1144,6 +1256,7 @@ def _copy_regrow_holed_layer(
     frame_width: int,
     revealed_box_keys: set[str],
     revealed_rows_by_key: dict[str, int],
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> pygame.Surface:
     """채굴 구멍이 뚫린 타일 레이어 — 스냅샷별 캐시 후 복사."""
     cache_key = _regrow_holed_layer_cache_key(
@@ -1151,6 +1264,7 @@ def _copy_regrow_holed_layer(
         frame_width=frame_width,
         revealed_box_keys=revealed_box_keys,
         revealed_rows_by_key=revealed_rows_by_key,
+        mining_direction_by_key=mining_direction_by_key,
     )
     holed = _regrow_holed_layer_cache.get(cache_key)
     if holed is None:
@@ -1163,6 +1277,7 @@ def _copy_regrow_holed_layer(
             revealed_rows_by_key=revealed_rows_by_key,
             active_box=None,
             active_elapsed_sec=0.0,
+            mining_direction_by_key=mining_direction_by_key,
         )
         _regrow_holed_layer_cache[cache_key] = holed
     return holed.copy()
@@ -1177,12 +1292,14 @@ def build_mining_tile_overlay(
     revealed_rows_by_key: dict[str, int] | None = None,
     active_box: WordMemorizeBox | None,
     active_elapsed_sec: float,
+    mining_direction_by_key: dict[str, MiningDirection] | None = None,
     trap_regrow_active: bool = False,
     trap_regrow_elapsed_sec: float = 0.0,
     trap_regrow_duration_sec: float = 0.0,
     trap_regrow_box_key: str | None = None,
     trap_regrow_revealed_keys: set[str] | None = None,
     trap_regrow_revealed_rows: dict[str, int] | None = None,
+    trap_regrow_mining_direction_by_key: dict[str, MiningDirection] | None = None,
 ) -> pygame.Surface | None:
     """타일 오버레이 — 행 단위 구멍 유지."""
     from extra.table_editor.services.word_memorize_layout import WordMemorizeLayout
@@ -1201,12 +1318,18 @@ def build_mining_tile_overlay(
             if trap_regrow_revealed_rows is not None
             else dict(revealed_rows_by_key or {})
         )
+        regrow_directions = (
+            trap_regrow_mining_direction_by_key
+            if trap_regrow_mining_direction_by_key is not None
+            else mining_direction_by_key
+        )
         layer = _copy_regrow_holed_layer(
             base_layer,
             layout,
             frame_width=frame_width,
             revealed_box_keys=regrow_keys,
             revealed_rows_by_key=regrow_rows,
+            mining_direction_by_key=regrow_directions,
         )
         regrow_sec = trap_regrow_duration_sec if trap_regrow_duration_sec > 0 else TRAP_REGROW_SEC
         apply_full_frame_trap_regrow(
@@ -1219,6 +1342,7 @@ def build_mining_tile_overlay(
             revealed_box_keys=regrow_keys,
             revealed_rows_by_key=regrow_rows,
             regrow_sec=regrow_sec,
+            mining_direction_by_key=regrow_directions,
         )
         return layer
     layer = base_layer.copy()
@@ -1230,5 +1354,6 @@ def build_mining_tile_overlay(
         revealed_rows_by_key=revealed_rows_by_key,
         active_box=active_box,
         active_elapsed_sec=active_elapsed_sec,
+        mining_direction_by_key=mining_direction_by_key,
     )
     return layer

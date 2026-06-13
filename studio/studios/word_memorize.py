@@ -31,12 +31,15 @@ from studio.studios.word_memorize_trap import (
     layout_trap_regrow_duration_sec,
 )
 from studio.studios.word_memorize_pick import (
+    MiningDirection,
     card_mining_row_count,
     card_mining_state,
     card_mining_swing_index,
+    mining_direction_for_key,
     pick_reveal_progress,
     pick_random_word_memorize_fall_sound_path,
     pick_random_word_memorize_hamer_sound_path,
+    random_mining_direction,
     word_memorize_pick_sound_path,
 )
 from studio.studios.word_memorize_renderer import (
@@ -119,6 +122,7 @@ class WordMemorizeStudio(IStudio):
         self._active_key: str | None = None
         self._revealed_keys: set[str] = set()
         self._revealed_rows_by_key: dict[str, int] = {}
+        self._mining_direction_by_key: dict[str, MiningDirection] = {}
         self._queued_second_path: Path | None = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
@@ -129,6 +133,7 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
+        self._trap_regrow_mining_direction_by_key: dict[str, MiningDirection] = {}
         self._done = False
         self._last_config: Any = None
         self._bg_player: Any = None
@@ -241,6 +246,7 @@ class WordMemorizeStudio(IStudio):
         self._active_key = None
         self._revealed_keys = set()
         self._revealed_rows_by_key = {}
+        self._mining_direction_by_key = {}
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._active_word_elapsed_sec = 0.0
@@ -251,6 +257,7 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_duration_sec = float(TRAP_REGROW_SEC)
         self._trap_regrow_revealed_keys: set[str] = set()
         self._trap_regrow_revealed_rows: dict[str, int] = {}
+        self._trap_regrow_mining_direction_by_key: dict[str, MiningDirection] = {}
         self._done = False
         self._active_effect_sound_until.clear()
 
@@ -322,12 +329,14 @@ class WordMemorizeStudio(IStudio):
 
         tile_px = game_tile_display_px(frame_width=int(self._layout.frame_width))
         key = self._active_key
+        direction = mining_direction_for_key(key, self._mining_direction_by_key)
         prev = int(self._revealed_rows_by_key.get(key, 0))
         state = card_mining_state(
             box,
             self._pick_mining_elapsed_sec,
             tile_px=tile_px,
             stored_completed_rows=prev,
+            direction=direction,
         )
         new_rows = max(prev, state.completed_rows)
         self._revealed_rows_by_key[key] = new_rows
@@ -340,6 +349,7 @@ class WordMemorizeStudio(IStudio):
                 to_row=new_rows,
                 tile_px=tile_px,
                 revealed_box_keys=self._revealed_keys,
+                direction=direction,
             )
         if state.is_complete:
             self._revealed_keys.add(key)
@@ -470,6 +480,7 @@ class WordMemorizeStudio(IStudio):
             frame_height=int(self._layout.frame_height),
             revealed_box_keys=self._trap_regrow_revealed_keys,
             revealed_rows_by_key=self._trap_regrow_revealed_rows,
+            mining_direction_by_key=self._trap_regrow_mining_direction_by_key,
         )
         if not impacts:
             return
@@ -520,6 +531,9 @@ class WordMemorizeStudio(IStudio):
                 to_row=row_count,
                 tile_px=tile_px,
                 revealed_box_keys=self._revealed_keys,
+                direction=mining_direction_for_key(
+                    self._active_key, self._mining_direction_by_key
+                ),
             )
         self._revealed_rows_by_key[self._active_key] = row_count
         self._revealed_keys.add(self._active_key)
@@ -533,6 +547,7 @@ class WordMemorizeStudio(IStudio):
         self._trap_regrow_elapsed_sec = 0.0
         self._trap_regrow_revealed_keys = set(self._revealed_keys)
         self._trap_regrow_revealed_rows = dict(self._revealed_rows_by_key)
+        self._trap_regrow_mining_direction_by_key = dict(self._mining_direction_by_key)
         if self._active_key:
             self._trap_regrow_revealed_keys.add(self._active_key)
             box = self._active_mining_box()
@@ -545,6 +560,7 @@ class WordMemorizeStudio(IStudio):
             self._layout,
             revealed_box_keys=self._trap_regrow_revealed_keys,
             revealed_rows_by_key=self._trap_regrow_revealed_rows,
+            mining_direction_by_key=self._trap_regrow_mining_direction_by_key,
         )
         self._hold_sec = self._trap_regrow_duration_sec
         self._renderer.reset_scorch_layer()
@@ -600,6 +616,7 @@ class WordMemorizeStudio(IStudio):
         self._queued_second_path = None
         self._queued_second_len = 0.0
         if layout_uses_pick_mining(self._layout):
+            self._mining_direction_by_key[self._active_key] = random_mining_direction()
             self._word_substep = "mining"
             self._hold_sec = self._mining_hold_sec(box)
             return
@@ -910,6 +927,12 @@ class WordMemorizeStudio(IStudio):
             ),
             trap_regrow_revealed_rows=(
                 self._trap_regrow_revealed_rows
+                if self._word_substep == "trap_regrow"
+                else None
+            ),
+            mining_direction_by_key=dict(self._mining_direction_by_key),
+            trap_regrow_mining_direction_by_key=(
+                self._trap_regrow_mining_direction_by_key
                 if self._word_substep == "trap_regrow"
                 else None
             ),

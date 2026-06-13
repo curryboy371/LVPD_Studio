@@ -89,10 +89,12 @@ from studio.studios.word_memorize_particles import (
     spawn_mining_rows_particles,
 )
 from studio.studios.word_memorize_pick import (
+    MiningDirection,
     build_mining_tile_overlay,
     card_mining_state,
     draw_rotating_pick_at,
     load_pick_surface,
+    mining_direction_for_key,
     pick_reveal_progress,
 )
 from studio.studios.word_memorize_laser import (
@@ -798,6 +800,7 @@ class WordMemorizeRenderer:
         to_row: int,
         tile_px: int,
         revealed_box_keys: set[str] | None = None,
+        direction: MiningDirection = "top_down",
     ) -> None:
         """타일 행 제거 시 파티클 생성."""
         sprites = self._get_particle_sprites(layout)
@@ -815,6 +818,7 @@ class WordMemorizeRenderer:
             sprites=sprites,
             box_key=box_runtime_key(box),
             revealed_box_keys=revealed_box_keys,
+            direction=direction,
         )
 
     def spawn_trap_fall_land_particles(
@@ -955,6 +959,8 @@ class WordMemorizeRenderer:
         trap_regrow_box_key: str | None = None,
         trap_regrow_revealed_keys: set[str] | None = None,
         trap_regrow_revealed_rows: dict[str, int] | None = None,
+        mining_direction_by_key: dict[str, MiningDirection] | None = None,
+        trap_regrow_mining_direction_by_key: dict[str, MiningDirection] | None = None,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -966,6 +972,7 @@ class WordMemorizeRenderer:
         pick_mining = layout_uses_pick_mining(layout)
         revealed = set(revealed_box_keys or ())
         rows_by_key = dict(revealed_rows_by_key or {})
+        directions_by_key = dict(mining_direction_by_key or {})
 
         self._draw_background(
             surface, layout, fw, fh, use_video=use_video_background
@@ -1154,6 +1161,8 @@ class WordMemorizeRenderer:
             trap_regrow_box_key=trap_regrow_box_key,
             trap_regrow_revealed_keys=trap_regrow_revealed_keys,
             trap_regrow_revealed_rows=trap_regrow_revealed_rows,
+            mining_direction_by_key=directions_by_key,
+            trap_regrow_mining_direction_by_key=trap_regrow_mining_direction_by_key,
         )
         if pick_mining:
             self._draw_mining_particles(surface)
@@ -1165,6 +1174,7 @@ class WordMemorizeRenderer:
                     active_box=active_anchor,
                     active_elapsed_sec=mining_elapsed if active_cards else 0.0,
                     revealed_rows_by_key=rows_by_key,
+                    mining_direction_by_key=directions_by_key,
                 )
 
         if (
@@ -1473,6 +1483,8 @@ class WordMemorizeRenderer:
         trap_regrow_box_key: str | None = None,
         trap_regrow_revealed_keys: set[str] | None = None,
         trap_regrow_revealed_rows: dict[str, int] | None = None,
+        mining_direction_by_key: dict[str, MiningDirection] | None = None,
+        trap_regrow_mining_direction_by_key: dict[str, MiningDirection] | None = None,
     ) -> None:
         """타일+곡괭이 모드: 카드 위 타일 오버레이."""
         if not layout_uses_pick_mining(layout):
@@ -1495,6 +1507,8 @@ class WordMemorizeRenderer:
             tile_px=tile_px,
             trap_regrow_active=trap_regrow_active,
             trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
+            mining_direction_by_key=mining_direction_by_key,
+            trap_regrow_mining_direction_by_key=trap_regrow_mining_direction_by_key,
         )
         if (
             self._mining_overlay_cache is not None
@@ -1511,12 +1525,14 @@ class WordMemorizeRenderer:
             revealed_rows_by_key=revealed_rows_by_key,
             active_box=active_box,
             active_elapsed_sec=active_elapsed_sec,
+            mining_direction_by_key=mining_direction_by_key,
             trap_regrow_active=trap_regrow_active,
             trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
             trap_regrow_duration_sec=trap_regrow_duration_sec,
             trap_regrow_box_key=trap_regrow_box_key,
             trap_regrow_revealed_keys=trap_regrow_revealed_keys,
             trap_regrow_revealed_rows=trap_regrow_revealed_rows,
+            trap_regrow_mining_direction_by_key=trap_regrow_mining_direction_by_key,
         )
         if overlay is not None:
             self._mining_overlay_cache_key = cache_key
@@ -1536,9 +1552,14 @@ class WordMemorizeRenderer:
         tile_px: int,
         trap_regrow_active: bool = False,
         trap_regrow_elapsed_sec: float = 0.0,
+        mining_direction_by_key: dict[str, MiningDirection] | None = None,
+        trap_regrow_mining_direction_by_key: dict[str, MiningDirection] | None = None,
     ) -> tuple[Any, ...]:
         """채굴 오버레이 캐시 키 — 행 완료 수만 반영(행 내 회전은 무시)."""
         rows_map = dict(revealed_rows_by_key or {})
+        directions_map = dict(mining_direction_by_key or {})
+        if trap_regrow_active and trap_regrow_mining_direction_by_key is not None:
+            directions_map = dict(trap_regrow_mining_direction_by_key)
         active_key: str | None = None
         active_completed = 0
         if active_box is not None:
@@ -1549,6 +1570,7 @@ class WordMemorizeRenderer:
                 active_elapsed_sec,
                 tile_px=tile_px,
                 stored_completed_rows=stored,
+                direction=mining_direction_for_key(active_key, directions_map),
             )
             active_completed = int(state.completed_rows)
         trap_regrow_quantized = 0
@@ -1565,6 +1587,7 @@ class WordMemorizeRenderer:
             float(layout.margin_bottom_ratio),
             frozenset(revealed_box_keys),
             tuple(sorted(rows_map.items())),
+            tuple(sorted(directions_map.items())),
             active_key,
             active_completed,
             bool(trap_regrow_active),
@@ -1601,6 +1624,7 @@ class WordMemorizeRenderer:
         active_box: WordMemorizeBox | None,
         active_elapsed_sec: float,
         revealed_rows_by_key: dict[str, int] | None = None,
+        mining_direction_by_key: dict[str, MiningDirection] | None = None,
     ) -> None:
         """활성 카드 중앙 회전 곡괭이 (타일 오버레이 위)."""
         if not layout_uses_pick_mining(layout) or active_box is None:
@@ -1609,12 +1633,14 @@ class WordMemorizeRenderer:
         if not pick_stem:
             return
         tile_px = game_tile_display_px(frame_width=int(layout.frame_width))
-        stored = int((revealed_rows_by_key or {}).get(box_runtime_key(active_box), 0))
+        active_key = box_runtime_key(active_box)
+        stored = int((revealed_rows_by_key or {}).get(active_key, 0))
         state = card_mining_state(
             active_box,
             active_elapsed_sec,
             tile_px=tile_px,
             stored_completed_rows=stored,
+            direction=mining_direction_for_key(active_key, mining_direction_by_key),
         )
         if state.is_complete:
             return
