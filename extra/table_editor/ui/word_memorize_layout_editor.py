@@ -61,7 +61,9 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_game_tiles,
     layout_game_tile_seed,
     layout_game_particles,
+    layout_dissolve_effects,
     list_word_memorize_bg_stems,
+    list_word_memorize_dissolve_effects,
     list_word_memorize_game_particles,
     list_word_memorize_game_picks,
     list_word_memorize_game_tiles,
@@ -89,12 +91,14 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_tile_band_y,
     normalize_word_memorize_bg_stem,
     normalize_word_memorize_game_particle,
+    normalize_word_memorize_dissolve_effect,
     normalize_word_memorize_game_pick,
     normalize_word_memorize_game_tile,
     normalize_word_memorize_game_text_tile,
     save_layout,
     sync_layout_game_tile_fields,
     sync_layout_game_particle_fields,
+    sync_layout_dissolve_effect_fields,
     sync_layout_title_fields,
     sync_layout_title_fields_zh,
     sync_layout_subtitle_fields,
@@ -115,6 +119,7 @@ from extra.table_editor.services.word_memorize_layout import (
     TITLE_FONT_PT_MAX,
     word_memorize_bg_image_path,
     word_memorize_game_particle_path,
+    word_memorize_dissolve_effect_path,
     word_memorize_game_pick_path,
     word_memorize_game_tile_path,
     word_memorize_game_text_tile_path,
@@ -667,6 +672,34 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             text="Base 슬롯 사용 (#1 — 병음·한자·뜻, 크게)",
             variable=self._use_base_slot_var,
             command=self._on_use_base_slot_changed,
+        ).pack(anchor="w", padx=6, pady=(0, 4))
+        dissolve_hdr = ttk.Frame(highlight_frame)
+        dissolve_hdr.pack(fill=tk.X, padx=6, pady=(0, 2))
+        ttk.Label(dissolve_hdr, text="디졸브 파티클").pack(side=tk.LEFT)
+        ttk.Button(
+            dissolve_hdr, text="+", width=3, command=self._add_dissolve_effect_line
+        ).pack(side=tk.RIGHT, padx=(2, 0))
+        ttk.Button(
+            dissolve_hdr, text="-", width=3, command=self._remove_dissolve_effect_line
+        ).pack(side=tk.RIGHT)
+        self._dissolve_effect_lines_host = ttk.Frame(highlight_frame)
+        self._dissolve_effect_lines_host.pack(fill=tk.X, padx=6, pady=(0, 4))
+        self._dissolve_effect_line_rows: list[tk.StringVar] = []
+        self._dissolve_effect_combo_values = [GAME_ASSET_NONE_LABEL]
+        self._rebuild_dissolve_effect_line_entries()
+        dissolve_preview_frame = ttk.LabelFrame(
+            highlight_frame, text="디졸브 파티클 미리보기"
+        )
+        dissolve_preview_frame.pack(fill=tk.X, padx=6, pady=(0, 4))
+        self._dissolve_effect_preview_host = ttk.Frame(dissolve_preview_frame)
+        self._dissolve_effect_preview_host.pack(fill=tk.X, padx=4, pady=4)
+        self._dissolve_effect_preview_photos: list[object] = []
+        ttk.Label(
+            highlight_frame,
+            text="(없음)=전체 effect · 레이저+Base 디졸브 연출",
+            foreground="#666",
+            wraplength=LEFT_PANEL_WIDTH - 28,
+            font=("Segoe UI", 8),
         ).pack(anchor="w", padx=6, pady=(0, 4))
         card_bg_row = ttk.Frame(highlight_frame)
         card_bg_row.pack(fill=tk.X, padx=6, pady=(0, 4))
@@ -2034,6 +2067,142 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
                 foreground="#666",
             ).pack(anchor="w")
 
+    def _dissolve_effect_combo_display(self, key: str) -> str:
+        val = normalize_word_memorize_dissolve_effect(key)
+        return val if val else GAME_ASSET_NONE_LABEL
+
+    def _dissolve_effect_from_combo(self, raw: str) -> str:
+        text = (raw or "").strip()
+        if not text or text == GAME_ASSET_NONE_LABEL:
+            return ""
+        return normalize_word_memorize_dissolve_effect(text)
+
+    def _refresh_dissolve_effect_combo_values(self) -> None:
+        self._dissolve_effect_combo_values = (
+            [GAME_ASSET_NONE_LABEL] + list_word_memorize_dissolve_effects()
+        )
+
+    def _collect_dissolve_effects_from_ui(self) -> list[str]:
+        stems: list[str] = []
+        seen: set[str] = set()
+        for var in self._dissolve_effect_line_rows:
+            stem = self._dissolve_effect_from_combo(var.get())
+            if stem and stem not in seen:
+                seen.add(stem)
+                stems.append(stem)
+        return stems
+
+    def _flush_dissolve_effects_from_ui(self) -> None:
+        self._layout.dissolve_effects = self._collect_dissolve_effects_from_ui()
+        sync_layout_dissolve_effect_fields(self._layout)
+
+    def _rebuild_dissolve_effect_line_entries(
+        self, keys: list[str] | None = None
+    ) -> None:
+        self._refresh_dissolve_effect_combo_values()
+        for child in self._dissolve_effect_lines_host.winfo_children():
+            child.destroy()
+        self._dissolve_effect_line_rows = []
+        if keys is None:
+            keys = list(layout_dissolve_effects(self._layout, fallback_all=False))
+        if not keys:
+            keys = [""]
+        for key in keys:
+            row = ttk.Frame(self._dissolve_effect_lines_host)
+            row.pack(fill=tk.X, pady=2)
+            var = tk.StringVar(value=self._dissolve_effect_combo_display(key))
+            combo = ttk.Combobox(
+                row,
+                textvariable=var,
+                values=self._dissolve_effect_combo_values,
+                state="readonly",
+                width=22,
+            )
+            combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            combo.bind(
+                "<<ComboboxSelected>>",
+                self._on_dissolve_effect_line_changed,
+                add="+",
+            )
+            self._dissolve_effect_line_rows.append(var)
+        self._apply_combobox_guards(self._dissolve_effect_lines_host)
+
+    def _add_dissolve_effect_line(self) -> None:
+        self._flush_dissolve_effects_from_ui()
+        keys = self._collect_dissolve_effects_from_ui()
+        if keys:
+            keys.append(keys[-1])
+        else:
+            keys.append("")
+        self._rebuild_dissolve_effect_line_entries(keys)
+        self._flush_dissolve_effects_from_ui()
+        self._mark_dirty()
+        self._refresh_dissolve_effect_preview()
+
+    def _remove_dissolve_effect_line(self) -> None:
+        if len(self._dissolve_effect_line_rows) <= 1:
+            keys = self._collect_dissolve_effects_from_ui()
+            if not keys:
+                return
+            self._rebuild_dissolve_effect_line_entries([""])
+            self._flush_dissolve_effects_from_ui()
+            self._mark_dirty()
+            self._refresh_dissolve_effect_preview()
+            return
+        keys = self._collect_dissolve_effects_from_ui()
+        if len(keys) <= 1:
+            self._rebuild_dissolve_effect_line_entries([""])
+        else:
+            self._rebuild_dissolve_effect_line_entries(keys[:-1])
+        self._flush_dissolve_effects_from_ui()
+        self._mark_dirty()
+        self._refresh_dissolve_effect_preview()
+
+    def _on_dissolve_effect_line_changed(self, _event: tk.Event | None = None) -> None:
+        self._flush_dissolve_effects_from_ui()
+        self._mark_dirty()
+        self._refresh_dissolve_effect_preview()
+
+    def _refresh_dissolve_effect_preview(self) -> None:
+        """선택된 디졸브 effect PNG 썸네일."""
+        for child in self._dissolve_effect_preview_host.winfo_children():
+            child.destroy()
+        self._dissolve_effect_preview_photos = []
+        keys = layout_dissolve_effects(self._layout, fallback_all=False)
+        if not keys:
+            ttk.Label(
+                self._dissolve_effect_preview_host,
+                text="(전체 effect — 목록 비어 있음)",
+                foreground="#888",
+            ).pack(anchor="w")
+            return
+        try:
+            from PIL import Image, ImageTk
+
+            thumb = 48
+            for key in keys:
+                cell = ttk.Frame(self._dissolve_effect_preview_host)
+                cell.pack(side=tk.LEFT, padx=(0, 8))
+                path = word_memorize_dissolve_effect_path(key, variant="transparent")
+                img_lbl = ttk.Label(cell)
+                img_lbl.pack()
+                label = key.split("/")[-1] if "/" in key else key
+                ttk.Label(cell, text=label, font=("Segoe UI", 7)).pack()
+                if not path.is_file():
+                    img_lbl.configure(text="?")
+                    continue
+                img = Image.open(path).convert("RGBA")
+                img.thumbnail((thumb, thumb), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                self._dissolve_effect_preview_photos.append(photo)
+                img_lbl.configure(image=photo)
+        except Exception:
+            ttk.Label(
+                self._dissolve_effect_preview_host,
+                text=", ".join(keys),
+                foreground="#666",
+            ).pack(anchor="w")
+
     def _sync_game_asset_combos(self) -> None:
         pick_current = normalize_word_memorize_game_pick(
             getattr(self._layout, "game_pick", "")
@@ -2046,8 +2215,10 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._rebuild_tile_line_entries()
         self._rebuild_particle_line_entries()
+        self._rebuild_dissolve_effect_line_entries()
         self._refresh_tile_preview()
         self._refresh_particle_preview()
+        self._refresh_dissolve_effect_preview()
         self._refresh_game_asset_previews()
 
     def _refresh_game_asset_previews(self) -> None:
@@ -2549,7 +2720,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
         ttk.Label(
             frame,
-            text=f"resource/BG 폴더의 이미지 (재생·녹화 시 동일 이름 .mp4 반복)",
+            text=f"resource/BG 폴더 stem (재생·녹화: .mp4 반복, zh 모드: BG/ch/ 우선)",
             wraplength=360,
         ).pack(anchor="w", pady=(0, 8))
 
@@ -2578,7 +2749,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
         def _apply() -> None:
             stem = normalize_word_memorize_bg_stem(stem_var.get())
-            self._layout.background_type = "image"
+            self._layout.background_type = "video"
             self._layout.background_value = stem
             self._mark_dirty()
             self._invalidate_bg_cache()
@@ -3714,6 +3885,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         self._flush_game_tiles_from_ui()
         self._flush_game_particles_from_ui()
+        self._flush_dissolve_effects_from_ui()
         self._layout.renumber_orders()
         try:
             save_layout(path, self._layout)

@@ -3,7 +3,7 @@
   "frame_width": 1080,
   "frame_height": 1920,
   "background": {
-    "type": "image",
+    "type": "video",
     "value": "mandara"
   },
   "title": "",

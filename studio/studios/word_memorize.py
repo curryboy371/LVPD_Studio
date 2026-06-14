@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -24,6 +25,7 @@ from extra.table_editor.services.word_memorize_layout import (
     box_uses_mining_regrow,
     box_uses_trap,
     game_tile_display_px,
+    is_base_slot_box,
     layout_uses_pick_mining,
     load_layout,
 )
@@ -44,8 +46,19 @@ from studio.studios.word_memorize_pick import (
     pick_reveal_progress,
     pick_random_word_memorize_fall_sound_path,
     pick_random_word_memorize_hamer_sound_path,
+    pick_random_word_memorize_spark_sound_path,
+    word_memorize_laser_sound_path,
     word_memorize_pick_sound_path,
 )
+from studio.studios.word_memorize_glass import (
+    GLASS_SPARK_SOUND_INTERVAL_MAX_SEC,
+    GLASS_SPARK_SOUND_INTERVAL_MIN_SEC,
+    glass_dissolve_complete,
+    glass_dissolve_t_reverse,
+    glass_finale_close_duration_sec,
+    layout_uses_laser_glass,
+)
+from studio.studios.word_memorize_laser import laser_impact_elapsed_sec
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
     load_en_meaning_by_id,
@@ -67,16 +80,22 @@ TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
 # zh: 둘째=한국어 뜻 — 다음 한자로 전환 (ko/en과 동일 0.5s)
 TTS_ZH_MODE_KO_LEAD_BEFORE_NEXT_WORD_SEC = 0.5
 CTA_PRE_REGROW_HOLD_SEC = 1.0
+# 레이저 유리 — 전 카드 오픈 후 동시 레이저·역디졸브 피날레
+GLASS_FINALE_HOLD_SEC = 1.0
 # 영어 TTS 재생 볼륨 (1.0=원본)
 TTS_EN_PLAYBACK_VOLUME = 0.78
 # 단어 외우기 효과음 채널·볼륨 (runner: set_num_channels(8) → 0~7)
 _PICK_EFFECT_CHANNEL = 4
 _TILE_FALL_EFFECT_CHANNEL = 3
 _HAMER_EFFECT_CHANNEL = 2
+_LASER_EFFECT_CHANNEL = 5
+_SPARK_EFFECT_CHANNEL = 6
 _EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
     _PICK_EFFECT_CHANNEL: 0.2,
     _TILE_FALL_EFFECT_CHANNEL: 0.2,
     _HAMER_EFFECT_CHANNEL: 0.15,
+    _LASER_EFFECT_CHANNEL: 0.60,
+    _SPARK_EFFECT_CHANNEL: 0.58,
 }
 
 WordSubstep = Literal[
@@ -86,6 +105,8 @@ WordSubstep = Literal[
     "cta_pre_regrow",
     "first",
     "second",
+    "glass_finale_hold",
+    "glass_finale_close",
 ]
 
 
@@ -150,6 +171,10 @@ class WordMemorizeStudio(IStudio):
         self._last_config: Any = None
         self._bg_player: Any = None
         self._active_effect_sound_until: dict[str, float] = {}
+        self._glass_finale_elapsed_sec = 0.0
+        self._laser_effect_played = False
+        self._glass_spark_timer = 0.0
+        self._glass_spark_interval = GLASS_SPARK_SOUND_INTERVAL_MIN_SEC
 
     def init(self, config: Any = None) -> None:
         self._last_config = config
@@ -271,6 +296,8 @@ class WordMemorizeStudio(IStudio):
         self._tiles_fully_restored = False
         self._done = False
         self._active_effect_sound_until.clear()
+        self._glass_finale_elapsed_sec = 0.0
+        self._reset_laser_glass_sound_state()
 
     def get_title(self) -> str:
         return f"LVPD Studio - 단어 외우기 ({self._layout_path.stem})"
@@ -306,8 +333,13 @@ class WordMemorizeStudio(IStudio):
                 prev_trap = self._trap_regrow_elapsed_sec
                 self._trap_regrow_elapsed_sec += dt
                 self._sync_trap_fall_impacts(prev_trap, self._trap_regrow_elapsed_sec)
-            else:
+            elif self._word_substep == "glass_finale_close":
+                self._glass_finale_elapsed_sec += dt
+            elif self._word_substep not in ("glass_finale_hold",):
                 self._active_word_elapsed_sec += dt
+                self._sync_laser_glass_revealed()
+            if layout_uses_laser_glass(self._layout):
+                self._sync_laser_glass_sounds(dt)
             if self._word_substep == "mining":
                 self._sync_pick_revealed_keys()
         self._timer += dt
@@ -321,6 +353,125 @@ class WordMemorizeStudio(IStudio):
         elif self._phase == "outro":
             self._done = True
             self.stop_background_audio()
+
+    def _uses_revealed_keys(self) -> bool:
+        """채굴·레이저 유리 모드 — 카드 노출 상태 추적."""
+        return layout_uses_pick_mining(self._layout) or layout_uses_laser_glass(
+            self._layout
+        )
+
+    def _reveal_all_laser_glass_cards(self) -> None:
+        """피날레 — base 제외 전 카드를 디졸브 완료(노출) 상태로."""
+        for box in self._layout.sorted_boxes():
+            if resolve_box_word(box) is None:
+                continue
+            if is_base_slot_box(box, self._layout):
+                continue
+            self._revealed_keys.add(box_runtime_key(box))
+
+    def _begin_glass_finale(self) -> None:
+        """전 카드 오픈 후 1초 대기 → 동시 레이저·역디졸브."""
+        self._reveal_all_laser_glass_cards()
+        self._phase = "word"
+        self._word_substep = "glass_finale_hold"
+        self._active_key = None
+        self._glass_finale_elapsed_sec = 0.0
+        self._hold_sec = float(GLASS_FINALE_HOLD_SEC)
+
+    def _reset_laser_glass_sound_state(self) -> None:
+        """레이저·디졸브 spark 효과음 상태 초기화."""
+        self._laser_effect_played = False
+        self._glass_spark_timer = 0.0
+        self._glass_spark_interval = random.uniform(
+            GLASS_SPARK_SOUND_INTERVAL_MIN_SEC,
+            GLASS_SPARK_SOUND_INTERVAL_MAX_SEC,
+        )
+
+    def _play_laser_sound(self) -> None:
+        """레이저 발사 효과음 — 1회."""
+        self._play_effect_sound(
+            word_memorize_laser_sound_path(),
+            channel=_LASER_EFFECT_CHANNEL,
+            label="레이저 효과음",
+        )
+
+    def _play_random_spark_sound(self) -> None:
+        """유리 디졸브 — spark 폴더에서 랜덤 재생."""
+        path = pick_random_word_memorize_spark_sound_path()
+        if path is None:
+            logger.debug("디졸브 spark 효과음 없음: resource/sound/effect/spark")
+            return
+        self._play_effect_sound(
+            path,
+            channel=_SPARK_EFFECT_CHANNEL,
+            label="디졸브 spark 효과음",
+        )
+
+    def _sync_glass_dissolve_spark_sounds(self, dt: float, *, impact_t: float) -> None:
+        """레이저 적중 후 디졸브 구간에서 spark를 랜덤 간격으로 반복."""
+        if impact_t <= 0.0:
+            self._glass_spark_timer = 0.0
+            return
+        self._glass_spark_timer += dt
+        if self._glass_spark_timer < self._glass_spark_interval:
+            return
+        self._glass_spark_timer = 0.0
+        self._glass_spark_interval = random.uniform(
+            GLASS_SPARK_SOUND_INTERVAL_MIN_SEC,
+            GLASS_SPARK_SOUND_INTERVAL_MAX_SEC,
+        )
+        self._play_random_spark_sound()
+
+    def _sync_laser_glass_sounds(self, dt: float) -> None:
+        """레이저 유리 — 발사 1회·디졸브 spark 반복."""
+        if self._word_substep == "glass_finale_hold":
+            return
+        if self._word_substep == "glass_finale_close":
+            elapsed = self._glass_finale_elapsed_sec
+            if not self._laser_effect_played:
+                self._play_laser_sound()
+                self._laser_effect_played = True
+            impact_t = laser_impact_elapsed_sec(elapsed)
+            if impact_t > 0.0 and glass_dissolve_t_reverse(impact_t) > 1e-4:
+                self._sync_glass_dissolve_spark_sounds(dt, impact_t=impact_t)
+            else:
+                self._glass_spark_timer = 0.0
+            return
+        if self._phase != "word" or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None or is_base_slot_box(box, self._layout):
+            return
+        elapsed = self._active_word_elapsed_sec
+        if not self._laser_effect_played:
+            self._play_laser_sound()
+            self._laser_effect_played = True
+        impact_t = laser_impact_elapsed_sec(elapsed)
+        if impact_t > 0.0 and not glass_dissolve_complete(elapsed):
+            self._sync_glass_dissolve_spark_sounds(dt, impact_t=impact_t)
+        else:
+            self._glass_spark_timer = 0.0
+
+    def _sync_laser_glass_revealed(self) -> None:
+        """레이저 적중 후 디졸브 완료 시 카드를 영구 노출로 표시."""
+        if not layout_uses_laser_glass(self._layout):
+            return
+        if self._phase != "word" or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None or is_base_slot_box(box, self._layout):
+            return
+        if glass_dissolve_complete(self._active_word_elapsed_sec):
+            self._revealed_keys.add(self._active_key)
+
+    def _mark_laser_glass_revealed_on_advance(self) -> None:
+        """단어 전환 시 현재 카드 유리 가림 해제 상태 확정."""
+        if not layout_uses_laser_glass(self._layout) or not self._active_key:
+            return
+        box = self._active_mining_box()
+        if box is None or is_base_slot_box(box, self._layout):
+            return
+        self._revealed_keys.add(self._active_key)
 
     def _sync_pick_revealed_keys(self) -> None:
         """곡괭이로 제거된 타일 행을 누적 저장."""
@@ -654,6 +805,10 @@ class WordMemorizeStudio(IStudio):
         self._active_word_elapsed_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
         self._pick_mining_last_swing_index = -1
+        if layout_uses_laser_glass(self._layout) and not is_base_slot_box(
+            box, self._layout
+        ):
+            self._reset_laser_glass_sound_state()
         self._active_word_duration_sec = self._word_play_duration_sec(box)
         self._queued_second_path = None
         self._queued_second_len = 0.0
@@ -682,6 +837,20 @@ class WordMemorizeStudio(IStudio):
             return
         if self._word_substep == "cta_pre_regrow":
             self._begin_trap_regrow()
+            return
+        if self._word_substep == "glass_finale_hold":
+            self._word_substep = "glass_finale_close"
+            self._glass_finale_elapsed_sec = 0.0
+            self._reset_laser_glass_sound_state()
+            self._hold_sec = glass_finale_close_duration_sec()
+            return
+        if self._word_substep == "glass_finale_close":
+            self._revealed_keys.clear()
+            self._word_substep = ""
+            self._glass_finale_elapsed_sec = 0.0
+            self._active_key = None
+            self._done = True
+            self.stop_background_audio()
             return
         if self._word_substep == "trap_regrow":
             if self._renderer.trap_land_smoke_visible():
@@ -714,6 +883,7 @@ class WordMemorizeStudio(IStudio):
         self._queued_second_path = None
         self._queued_second_len = 0.0
         self._sync_pick_revealed_keys()
+        self._mark_laser_glass_revealed_on_advance()
         self._advance_after_trap()
 
     def _advance_after_trap(self) -> None:
@@ -721,6 +891,8 @@ class WordMemorizeStudio(IStudio):
         nxt = self._seq_index + 1
         if nxt < len(self._sequence):
             self._begin_word(nxt)
+        elif layout_uses_laser_glass(self._layout):
+            self._begin_glass_finale()
         else:
             self._phase = "outro"
             self._active_key = None
@@ -950,9 +1122,10 @@ class WordMemorizeStudio(IStudio):
         words_by_id: dict[int, Any] = self._words_by_id_for_draw()
 
         highlight = self._phase == "word" and self._active_key is not None
+        glass_finale = self._word_substep in ("glass_finale_hold", "glass_finale_close")
         active_box_key: str | None = self._active_key if highlight else None
         pick_mining = layout_uses_pick_mining(self._layout)
-        revealed = frozenset(self._revealed_keys) if pick_mining else frozenset()
+        revealed = frozenset(self._revealed_keys) if self._uses_revealed_keys() else frozenset()
         cta_caption = ""
         if highlight and self._word_substep == "first":
             cta_caption = active_cta_caption_for_box(
@@ -971,7 +1144,7 @@ class WordMemorizeStudio(IStudio):
             dim_inactive=False,
             config=config,
             use_video_background=(
-                str(getattr(self._layout, "background_type", "image")) == "video"
+                str(getattr(self._layout, "background_type", "video")) == "video"
             ),
             active_word_elapsed_sec=(
                 self._active_word_elapsed_sec if highlight else 0.0
@@ -1015,6 +1188,10 @@ class WordMemorizeStudio(IStudio):
             cta_caption_text=cta_caption,
             meaning_lang=self._meaning_lang,
             tiles_fully_restored=self._tiles_fully_restored,
+            glass_finale_substep=(
+                self._word_substep if glass_finale else None
+            ),
+            glass_finale_elapsed_sec=self._glass_finale_elapsed_sec,
         )
 
     def get_recording_prefix(self) -> Optional[str]:

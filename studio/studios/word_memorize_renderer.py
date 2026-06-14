@@ -42,6 +42,7 @@ from extra.table_editor.services.word_memorize_layout import (
     layout_card_background_rgb,
     layout_use_card_background,
     layout_game_particles,
+    layout_dissolve_effects,
     layout_game_tiles,
     layout_game_tile_seed,
     layout_game_pick,
@@ -98,8 +99,17 @@ from studio.studios.word_memorize_box_resolve import (
     resolve_box_card_meaning,
     resolve_box_word,
 )
+from studio.studios.word_memorize_glass import (
+    apply_laser_glass_to_surface,
+    blit_dissolve_particles,
+    glass_dissolve_t,
+    glass_dissolve_t_reverse,
+    glass_finale_close_duration_sec,
+    glass_finale_laser_fade_mult,
+    layout_uses_laser_glass,
+    PARTICLE_RENDER_MAX_SEC,
+)
 from studio.studios.word_memorize_laser import (
-    SCORCH_ORIGIN_OFFSET_PX,
     draw_laser_center_to_card,
     draw_laser_impact_border,
     laser_impact_elapsed_sec,
@@ -117,6 +127,8 @@ EN_COLOR = (76, 175, 80)
 BOX_FILL = (255, 255, 255)
 BOX_OUTLINE = (144, 164, 174)
 ACTIVE_BORDER_RADIUS = 8
+
+
 # 애니메이션 그라데이션 보더 (파스텔 스톱 — 시간에 따라 순환)
 GRAD_BORDER_STOPS: tuple[tuple[int, int, int], ...] = (
     (120, 200, 255),
@@ -757,17 +769,10 @@ class WordMemorizeRenderer:
         self._bg_layout_stem = ""
         self._bg_meaning_lang = "ko"
         self._bg_static_image_cache: dict[tuple[str, str, int, int], pygame.Surface | None] = {}
-        self._scorch_layer: pygame.Surface | None = None
-        self._scorch_layer_size: tuple[int, int] = (0, 0)
-        self._scorch_prev_length_px: float = float(SCORCH_ORIGIN_OFFSET_PX)
-        self._scorch_active_key: str | None = None
 
     def reset_scorch_layer(self) -> None:
-        """재생 세션 시작 시 그을림 누적 레이어 초기화."""
-        self._scorch_layer = None
-        self._scorch_layer_size = (0, 0)
-        self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
-        self._scorch_active_key = None
+        """(deprecated) 레이저 그을림 레이어 — 비활성."""
+        return
 
     def reset_mining_particles(self) -> None:
         """재생 세션 시작 시 채굴 파티클·trap 연기 초기화."""
@@ -842,31 +847,6 @@ class WordMemorizeRenderer:
     def trap_land_smoke_visible(self) -> bool:
         """trap 착지 연기가 아직 화면에 보이는지."""
         return self._trap_land_smoke.has_visible_puffs()
-
-    def _ensure_scorch_layer(self, fw: int, fh: int) -> pygame.Surface:
-        if (
-            self._scorch_layer is not None
-            and self._scorch_layer_size == (fw, fh)
-        ):
-            return self._scorch_layer
-        self._scorch_layer = pygame.Surface((fw, fh), pygame.SRCALPHA)
-        self._scorch_layer.fill((0, 0, 0, 0))
-        self._scorch_layer_size = (fw, fh)
-        self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
-        self._scorch_active_key = None
-        return self._scorch_layer
-
-    def _blit_scorch_layer(self, surface: pygame.Surface, fw: int, fh: int) -> None:
-        if self._scorch_layer is None:
-            return
-        if self._scorch_layer_size != (fw, fh):
-            return
-        surface.blit(self._scorch_layer, (0, 0))
-
-    def _sync_scorch_active_key(self, active_box_key: str | None) -> None:
-        if active_box_key != self._scorch_active_key:
-            self._scorch_active_key = active_box_key
-            self._scorch_prev_length_px = float(SCORCH_ORIGIN_OFFSET_PX)
 
     def set_background(self, layout_stem: str, meaning_lang: str = "ko") -> None:
         self._bg_layout_stem = (layout_stem or "").strip()
@@ -967,6 +947,8 @@ class WordMemorizeRenderer:
         meaning_lang: str = "ko",
         cta_caption_text: str = "",
         tiles_fully_restored: bool = False,
+        glass_finale_substep: str | None = None,
+        glass_finale_elapsed_sec: float = 0.0,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -976,6 +958,11 @@ class WordMemorizeRenderer:
         )
         fw, fh = layout.frame_width, layout.frame_height
         pick_mining = layout_uses_pick_mining(layout)
+        laser_glass = layout_uses_laser_glass(layout)
+        glass_finale_close = glass_finale_substep == "glass_finale_close"
+        close_dur = (
+            glass_finale_close_duration_sec() if glass_finale_close else 0.0
+        )
         revealed = set(revealed_box_keys or ())
         rows_by_key = dict(revealed_rows_by_key or {})
 
@@ -1043,6 +1030,11 @@ class WordMemorizeRenderer:
                 word_elapsed_sec=0.0,
                 word_duration_sec=0.0,
                 draw_effects=False,
+                laser_glass_mode=laser_glass,
+                glass_revealed_keys=revealed,
+                glass_finale_substep=glass_finale_substep,
+                glass_finale_elapsed_sec=glass_finale_elapsed_sec,
+                glass_finale_close_duration_sec=close_dur,
             )
 
         active_card_visible = (
@@ -1079,6 +1071,11 @@ class WordMemorizeRenderer:
                 word_elapsed_sec=word_timing[0],
                 word_duration_sec=word_timing[1],
                 draw_effects=False,
+                laser_glass_mode=laser_glass,
+                glass_revealed_keys=revealed,
+                glass_finale_substep=glass_finale_substep,
+                glass_finale_elapsed_sec=glass_finale_elapsed_sec,
+                glass_finale_close_duration_sec=close_dur,
             )
 
         self._draw_pick_mining_overlay(
@@ -1132,7 +1129,27 @@ class WordMemorizeRenderer:
                 anim_time_sec=t_anim,
             )
 
-        self._blit_scorch_layer(surface, fw, fh)
+        if (
+            is_laser_selection_highlight(card_highlight)
+            and glass_finale_close
+            and laser_glass
+        ):
+            laser_fade = glass_finale_laser_fade_mult(glass_finale_elapsed_sec)
+            if laser_fade > 0.0:
+                for box, word, card_meaning, _runtime_key in entries:
+                    if is_base_slot_box(box, layout):
+                        continue
+                    draw_laser_center_to_card(
+                        surface,
+                        frame_width=fw,
+                        frame_height=fh,
+                        card_rect=pygame.Rect(box.x, box.y, box.w, box.h),
+                        elapsed_sec=glass_finale_elapsed_sec,
+                        duration_sec=close_dur,
+                        loop_preview=False,
+                        laser_variant=card_highlight,
+                        beam_alpha_mult=laser_fade,
+                    )
 
         if (
             is_laser_selection_highlight(card_highlight)
@@ -1140,15 +1157,14 @@ class WordMemorizeRenderer:
             and active_cards
             and not active_is_base
             and active_card_visible
+            and not glass_finale_close
             and not (
                 trap_regrow_active
                 and trap_regrow_box_key
                 and active_box_key == trap_regrow_box_key
             )
         ):
-            self._sync_scorch_active_key(active_box_key)
-            scorch = self._ensure_scorch_layer(fw, fh)
-            self._scorch_prev_length_px = draw_laser_center_to_card(
+            draw_laser_center_to_card(
                 surface,
                 frame_width=fw,
                 frame_height=fh,
@@ -1161,8 +1177,6 @@ class WordMemorizeRenderer:
                 elapsed_sec=word_timing[0],
                 duration_sec=word_timing[1],
                 loop_preview=word_timing[1] <= 0,
-                scorch_surface=scorch,
-                scorch_prev_length_px=self._scorch_prev_length_px,
                 laser_variant=card_highlight,
             )
 
@@ -1957,6 +1971,83 @@ class WordMemorizeRenderer:
             anim_time_sec=anim_time_sec,
         )
 
+    def _draw_box_frosted_glass(
+        self,
+        surface: pygame.Surface,
+        box: WordMemorizeBox,
+        word: Word,
+        card_meaning: str,
+        *,
+        layout: WordMemorizeLayout,
+        active: bool,
+        anim_time_sec: float,
+        highlight_type: str,
+        dissolve_t: float,
+        draw_effects: bool = True,
+        word_elapsed_sec: float = 0.0,
+        word_duration_sec: float = 0.0,
+    ) -> None:
+        base = pygame.Rect(box.x, box.y, box.w, box.h)
+        use_card_bg = layout_use_card_background(layout)
+        card_fill_rgb = layout_card_background_rgb(layout) if use_card_bg else BOX_FILL
+        layer = pygame.Surface((base.width, base.height), pygame.SRCALPHA)
+        layer.fill((0, 0, 0, 0))
+        local = pygame.Rect(0, 0, base.width, base.height)
+        self._paint_box(
+            layer,
+            local,
+            word,
+            card_meaning,
+            highlight_type=highlight_type,
+            active=active,
+            draw_border=False,
+            anim_time_sec=anim_time_sec,
+            use_card_background=use_card_bg,
+            card_fill_rgb=card_fill_rgb,
+        )
+        apply_laser_glass_to_surface(
+            surface,
+            base,
+            layer,
+            seed=box_runtime_key(box),
+            dissolve_t=dissolve_t,
+            dissolve_elapsed_sec=(
+                laser_impact_elapsed_sec(
+                    word_elapsed_sec,
+                    loop_preview=word_duration_sec <= 0,
+                )
+                if active
+                else 0.0
+            ),
+            laser_variant=highlight_type,
+            use_card_background=use_card_bg,
+            card_fill_rgb=card_fill_rgb,
+        )
+        if not active or not draw_effects:
+            return
+        if is_laser_selection_highlight(highlight_type):
+            loop_preview = word_duration_sec <= 0
+            impact_t = laser_impact_elapsed_sec(
+                word_elapsed_sec, loop_preview=loop_preview
+            )
+            draw_laser_impact_border(
+                surface,
+                base,
+                impact_elapsed_sec=impact_t,
+                border_radius=ACTIVE_BORDER_RADIUS,
+                laser_variant=highlight_type,
+            )
+            if impact_t > 0.0 and impact_t < PARTICLE_RENDER_MAX_SEC:
+                blit_dissolve_particles(
+                    surface,
+                    base,
+                    seed=box_runtime_key(box),
+                    dissolve_t=dissolve_t,
+                    dissolve_elapsed_sec=impact_t,
+                    laser_variant=highlight_type,
+                    effect_keys=layout_dissolve_effects(layout),
+                )
+
     def _draw_box(
         self,
         surface: pygame.Surface,
@@ -1971,11 +2062,82 @@ class WordMemorizeRenderer:
         word_duration_sec: float = 0.0,
         draw_effects: bool = True,
         card_scale: float | None = None,
+        laser_glass_mode: bool = False,
+        glass_revealed_keys: set[str] | frozenset[str] | None = None,
+        glass_finale_substep: str | None = None,
+        glass_finale_elapsed_sec: float = 0.0,
+        glass_finale_close_duration_sec: float = 0.0,
     ) -> None:
         highlight_type = normalize_selection_highlight(
             getattr(layout, "selection_highlight", "gradient")
         )
         is_laser = is_laser_selection_highlight(highlight_type)
+        if (
+            glass_finale_substep == "glass_finale_close"
+            and laser_glass_mode
+            and not is_base_slot_box(box, layout)
+        ):
+            impact_t = laser_impact_elapsed_sec(glass_finale_elapsed_sec)
+            if impact_t > 0.0:
+                dissolve_t = glass_dissolve_t_reverse(impact_t)
+                if dissolve_t > 1e-4:
+                    self._draw_box_frosted_glass(
+                        surface,
+                        box,
+                        word,
+                        card_meaning,
+                        layout=layout,
+                        active=True,
+                        anim_time_sec=anim_time_sec,
+                        highlight_type=highlight_type,
+                        dissolve_t=dissolve_t,
+                        draw_effects=True,
+                        word_elapsed_sec=glass_finale_elapsed_sec,
+                        word_duration_sec=glass_finale_close_duration_sec,
+                    )
+                    return
+                self._draw_box_frosted_glass(
+                    surface,
+                    box,
+                    word,
+                    card_meaning,
+                    layout=layout,
+                    active=False,
+                    anim_time_sec=anim_time_sec,
+                    highlight_type=highlight_type,
+                    dissolve_t=0.0,
+                    draw_effects=False,
+                    word_elapsed_sec=0.0,
+                    word_duration_sec=0.0,
+                )
+                return
+        if (
+            laser_glass_mode
+            and not is_base_slot_box(box, layout)
+            and box_runtime_key(box) not in (glass_revealed_keys or ())
+        ):
+            loop_preview = word_duration_sec <= 0
+            dissolve_t = (
+                0.0
+                if not active
+                else glass_dissolve_t(word_elapsed_sec, loop_preview=loop_preview)
+            )
+            if dissolve_t < 1.0 - 1e-4:
+                self._draw_box_frosted_glass(
+                    surface,
+                    box,
+                    word,
+                    card_meaning,
+                    layout=layout,
+                    active=active,
+                    anim_time_sec=anim_time_sec,
+                    highlight_type=highlight_type,
+                    dissolve_t=dissolve_t,
+                    draw_effects=draw_effects,
+                    word_elapsed_sec=word_elapsed_sec,
+                    word_duration_sec=word_duration_sec,
+                )
+                return
         base = pygame.Rect(box.x, box.y, box.w, box.h)
         if is_base_slot_box(box, layout):
             hanzi_scale = 1.0
@@ -2150,6 +2312,23 @@ class WordMemorizeRenderer:
                 border_radius=ACTIVE_BORDER_RADIUS,
                 laser_variant=highlight_type,
             )
+            if (
+                layout_uses_laser_glass(layout)
+                and not is_base_slot_box(box, layout)
+            ):
+                dissolve_t = glass_dissolve_t(
+                    word_elapsed_sec, loop_preview=loop_preview
+                )
+                if impact_t < PARTICLE_RENDER_MAX_SEC:
+                    blit_dissolve_particles(
+                        surface,
+                        base,
+                        seed=box_runtime_key(box),
+                        dissolve_t=dissolve_t,
+                        dissolve_elapsed_sec=impact_t,
+                        laser_variant=highlight_type,
+                        effect_keys=layout_dissolve_effects(layout),
+                    )
             return
         sw = max(1, int(base.width * ACTIVE_CARD_SCALE))
         sh = max(1, int(base.height * ACTIVE_CARD_SCALE))

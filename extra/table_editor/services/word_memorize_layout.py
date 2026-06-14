@@ -21,6 +21,11 @@ WORD_MEMORIZE_GAME_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "tiles"
 WORD_MEMORIZE_GAME_TEXT_TILES_DIR = WORD_MEMORIZE_GAME_DIR / "text_tile"
 WORD_MEMORIZE_GAME_PARTICLES_DIR = WORD_MEMORIZE_GAME_DIR / "particles"
 WORD_MEMORIZE_GAME_PICKS_DIR = WORD_MEMORIZE_GAME_DIR / "picks"
+WORD_MEMORIZE_GAME_EFFECT_DIR = WORD_MEMORIZE_GAME_DIR / "effect"
+WORD_MEMORIZE_GAME_EFFECT_BLACK_DIR = WORD_MEMORIZE_GAME_EFFECT_DIR / "Black_background"
+WORD_MEMORIZE_GAME_EFFECT_TRANSPARENT_DIR = (
+    WORD_MEMORIZE_GAME_EFFECT_DIR / "Transparent"
+)
 # trap 카드 이미지 — resource/image/game/trap (또는 Trap)
 _TRAP_DIR_CANDIDATES = ("trap", "Trap", "trab", "Trab")
 GAME_ASSET_NONE_LABEL = "(없음)"
@@ -162,9 +167,117 @@ def word_memorize_laser_ready_path(variant: str | None = None) -> Path:
     return word_memorize_laser_beam_path(variant)
 
 
-_BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+def word_memorize_dissolve_mask_path() -> Path:
+    """레이저+base 유리 디졸브 마스크 — 흑백 노이즈(타일 가능). black=먼저 제거."""
+    return WORD_MEMORIZE_GAME_DIR / "dissolve.png"
 
-BackgroundType = Literal["image"]
+
+DissolveEffectVariant = Literal["black", "transparent"]
+
+
+def _list_effect_asset_keys(directory: Path) -> set[str]:
+    """effect PNG relative key (하위 폴더 포함, 확장자 제외)."""
+    if not directory.is_dir():
+        return set()
+    keys: set[str] = set()
+    for path in directory.rglob("*"):
+        if path.is_file() and path.suffix.lower() in _BG_IMAGE_EXTS:
+            key = path.relative_to(directory).with_suffix("").as_posix()
+            if key:
+                keys.add(key)
+    return keys
+
+
+def list_word_memorize_dissolve_effects() -> list[str]:
+    """Black_background·Transparent 양쪽에 동일 key로 존재하는 effect PNG 목록."""
+    black = _list_effect_asset_keys(WORD_MEMORIZE_GAME_EFFECT_BLACK_DIR)
+    transparent = _list_effect_asset_keys(WORD_MEMORIZE_GAME_EFFECT_TRANSPARENT_DIR)
+    return sorted(black & transparent)
+
+
+def word_memorize_dissolve_effect_path(
+    key: str,
+    *,
+    variant: DissolveEffectVariant = "transparent",
+) -> Path:
+    """디졸브 파티클 effect PNG — key 예: spark_01, Rotated/flame_05_rotated."""
+    text = (key or "").strip().replace("\\", "/")
+    base = (
+        WORD_MEMORIZE_GAME_EFFECT_TRANSPARENT_DIR
+        if variant == "transparent"
+        else WORD_MEMORIZE_GAME_EFFECT_BLACK_DIR
+    )
+    if not text:
+        return base / "_none.png"
+    for ext in _BG_IMAGE_EXTS:
+        path = base / f"{text}{ext}"
+        if path.is_file():
+            return path
+    return base / f"{text}.png"
+
+
+def normalize_word_memorize_dissolve_effect(raw: str) -> str:
+    """dissolve effect key 정규화 — 없거나 유효하지 않으면 빈 문자열."""
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or text == GAME_ASSET_NONE_LABEL:
+        return ""
+    if text in list_word_memorize_dissolve_effects():
+        return text
+    return ""
+
+
+def layout_dissolve_effect(layout: WordMemorizeLayout) -> str:
+    """레이아웃 첫 디졸브 effect key (레거시·없으면 '')."""
+    stems = layout_dissolve_effects(layout, fallback_all=False)
+    return stems[0] if stems else ""
+
+
+def layout_dissolve_effects(
+    layout: WordMemorizeLayout,
+    *,
+    fallback_all: bool = True,
+) -> list[str]:
+    """레이아웃 디졸브 파티클 effect key 목록 — 중복 제거, 순서 유지."""
+    raw = getattr(layout, "dissolve_effects", None)
+    if isinstance(raw, list):
+        stems: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            stem = normalize_word_memorize_dissolve_effect(str(item or ""))
+            if stem and stem not in seen:
+                seen.add(stem)
+                stems.append(stem)
+        if stems:
+            return stems
+    legacy = normalize_word_memorize_dissolve_effect(
+        str(getattr(layout, "dissolve_effect", "") or "")
+    )
+    if legacy:
+        return [legacy]
+    if fallback_all:
+        return list_word_memorize_dissolve_effects()
+    return []
+
+
+def sync_layout_dissolve_effect_fields(layout: WordMemorizeLayout) -> None:
+    """dissolve_effects → 레거시 dissolve_effect(첫 항목)."""
+    stems = layout_dissolve_effects(layout, fallback_all=False)
+    layout.dissolve_effects = list(stems)
+    layout.dissolve_effect = stems[0] if stems else ""
+
+
+_BG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_BG_VIDEO_EXTS = (".mp4",)
+
+BackgroundType = Literal["image", "video"]
+
+
+def normalize_background_type(raw: str) -> BackgroundType:
+    """배경 타입 정규화 — image·video, 기본 video."""
+    text = (raw or "").strip().lower()
+    if text == "image":
+        return "image"
+    return "video"
 SelectionHighlightType = Literal[
     "gradient",
     "red_border",
@@ -907,15 +1020,16 @@ def resolve_title_position(
 
 
 def list_word_memorize_bg_stems() -> list[str]:
-    """resource/BG 내 배경 이미지 stem 목록 (확장자 제외)."""
+    """resource/BG 내 배경 stem 목록 (png·mp4 공통, 확장자 제외)."""
     d = WORD_MEMORIZE_BG_DIR
     if not d.is_dir():
         return [DEFAULT_WORD_MEMORIZE_BG_STEM]
+    exts = _BG_IMAGE_EXTS + _BG_VIDEO_EXTS
     stems = sorted(
         {
             p.stem
             for p in d.iterdir()
-            if p.is_file() and p.suffix.lower() in _BG_IMAGE_EXTS
+            if p.is_file() and p.suffix.lower() in exts
         }
     )
     return stems if stems else [DEFAULT_WORD_MEMORIZE_BG_STEM]
@@ -1598,7 +1712,7 @@ def find_non_overlapping_position(
 class WordMemorizeLayout:
     frame_width: int = SHORTS_WIDTH
     frame_height: int = SHORTS_HEIGHT
-    background_type: BackgroundType = "image"
+    background_type: BackgroundType = "video"
     background_value: str = DEFAULT_WORD_MEMORIZE_BG_STEM
     title: str = ""
     title_x: int = 0
@@ -1637,6 +1751,9 @@ class WordMemorizeLayout:
     # resource/image/game/particles/{stem}.png — 채굴 파편 (복수 선택 가능)
     game_particle: str = ""
     game_particles: list[str] = field(default_factory=list)
+    # resource/image/game/effect — 레이저 디졸브 파티클 (복수·비우면 전체)
+    dissolve_effect: str = ""
+    dissolve_effects: list[str] = field(default_factory=list)
     # resource/image/game/picks/{stem}.png — 카드 중앙 스윙 채굴
     game_pick: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
@@ -1663,13 +1780,14 @@ class WordMemorizeLayout:
         sync_layout_subtitle_fields_zh(self)
         sync_layout_game_tile_fields(self)
         sync_layout_game_particle_fields(self)
+        sync_layout_dissolve_effect_fields(self)
         self.title_x = int(self.frame_width) // 2
         return {
             "version": LAYOUT_VERSION,
             "frame_width": self.frame_width,
             "frame_height": self.frame_height,
             "background": {
-                "type": "image",
+                "type": normalize_background_type(self.background_type),
                 "value": normalize_word_memorize_bg_stem(self.background_value),
             },
             "title": (self.title or "").strip(),
@@ -1703,6 +1821,10 @@ class WordMemorizeLayout:
             "game_tile_seed": int(layout_game_tile_seed(self)),
             "game_particle": layout_game_particle(self),
             "game_particles": list(layout_game_particles(self)),
+            "dissolve_effect": layout_dissolve_effect(self),
+            "dissolve_effects": list(
+                layout_dissolve_effects(self, fallback_all=False)
+            ),
             "game_pick": layout_game_pick(self),
             "boxes": [
                 {
@@ -1728,7 +1850,7 @@ class WordMemorizeLayout:
         layout = cls(
             frame_width=int(data.get("frame_width", SHORTS_WIDTH)),
             frame_height=int(data.get("frame_height", SHORTS_HEIGHT)),
-            background_type="image",
+            background_type=normalize_background_type(str(bg.get("type", "video"))),
             background_value=normalize_word_memorize_bg_stem(
                 str(bg.get("value", DEFAULT_WORD_MEMORIZE_BG_STEM))
             ),
@@ -1924,6 +2046,19 @@ class WordMemorizeLayout:
             )
             layout.game_particles = [single] if single else []
         sync_layout_game_particle_fields(layout)
+        raw_dissolve = data.get("dissolve_effects")
+        if isinstance(raw_dissolve, list):
+            layout.dissolve_effects = [
+                normalize_word_memorize_dissolve_effect(str(item or ""))
+                for item in raw_dissolve
+            ]
+            layout.dissolve_effects = [s for s in layout.dissolve_effects if s]
+        else:
+            single_dissolve = normalize_word_memorize_dissolve_effect(
+                str(data.get("dissolve_effect", "") or "")
+            )
+            layout.dissolve_effects = [single_dissolve] if single_dissolve else []
+        sync_layout_dissolve_effect_fields(layout)
         layout.game_pick = normalize_word_memorize_game_pick(
             str(data.get("game_pick", "") or "")
         )
@@ -1967,7 +2102,7 @@ def save_layout(path: Path, layout: WordMemorizeLayout) -> None:
 
 
 def load_layout(path: Path) -> WordMemorizeLayout:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError("layout JSON must be an object")
     return WordMemorizeLayout.from_dict(data)

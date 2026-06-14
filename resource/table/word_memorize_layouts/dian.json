@@ -3,7 +3,7 @@
   "frame_width": 1080,
   "frame_height": 1920,
   "background": {
-    "type": "image",
+    "type": "video",
     "value": "mandala_b"
   },
   "title": "",
@@ -21,11 +21,40 @@
       "font_pt": 68
     }
   ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "",
+  "subtitle_text_tile": "",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "",
+      "font": "kr_cn",
+      "text_tile": ""
+    }
+  ],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
   "selection_highlight": "laser_g",
   "row_highlight": "none",
   "use_base_slot": true,
   "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": true,
   "bg_music_path": "resource/sound/bg_short/쇼츠-밝음.mp3",
+  "game_tile": "",
+  "game_tiles": [],
+  "game_tile_seed": 0,
+  "game_particle": "",
+  "game_particles": [],
+  "dissolve_effect": "circle_05",
+  "dissolve_effects": [
+    "circle_05",
+    "fire_01",
+    "star_07"
+  ],
+  "game_pick": "",
   "boxes": [
     {
       "word_id": "20090",
@@ -34,7 +63,8 @@
       "y": 724,
       "w": 280,
       "h": 383,
-      "box_key": "box_1"
+      "box_key": "box_1",
+      "card_type": ""
     },
     {
       "word_id": "20097",
@@ -43,7 +73,8 @@
       "y": 156,
       "w": 280,
       "h": 404,
-      "box_key": "box_2"
+      "box_key": "box_2",
+      "card_type": ""
     },
     {
       "word_id": "20157",
@@ -52,7 +83,8 @@
       "y": 157,
       "w": 280,
       "h": 404,
-      "box_key": "box_3"
+      "box_key": "box_3",
+      "card_type": ""
     },
     {
       "word_id": "20158",
@@ -61,7 +93,8 @@
       "y": 158,
       "w": 280,
       "h": 404,
-      "box_key": "box_4"
+      "box_key": "box_4",
+      "card_type": ""
     },
     {
       "word_id": "20155",
@@ -70,7 +103,8 @@
       "y": 731,
       "w": 280,
       "h": 404,
-      "box_key": "box_6"
+      "box_key": "box_6",
+      "card_type": ""
     },
     {
       "word_id": "20094",
@@ -79,7 +113,8 @@
       "y": 1310,
       "w": 280,
       "h": 404,
-      "box_key": "box_9"
+      "box_key": "box_9",
+      "card_type": ""
     },
     {
       "word_id": "20153",
@@ -88,7 +123,8 @@
       "y": 1318,
       "w": 280,
       "h": 404,
-      "box_key": "box_8"
+      "box_key": "box_8",
+      "card_type": ""
     },
     {
       "word_id": "20148",
@@ -97,7 +133,8 @@
       "y": 1327,
       "w": 280,
       "h": 404,
-      "box_key": "box_7"
+      "box_key": "box_7",
+      "card_type": ""
     },
     {
       "word_id": "20098",
@@ -106,7 +143,8 @@
       "y": 726,
       "w": 280,
       "h": 404,
-      "box_key": "box_5"
+      "box_key": "box_5",
+      "card_type": ""
     }
   ],
   "holding_word_ids": [],

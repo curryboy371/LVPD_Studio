@@ -432,11 +432,14 @@ def draw_laser_center_to_card(
     scorch_surface: pygame.Surface | None = None,
     scorch_prev_length_px: float = 0.0,
     laser_variant: str = DEFAULT_LASER_VARIANT,
+    beam_alpha_mult: float = 1.0,
 ) -> float:
     """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사.
 
     scorch_surface가 주어지면 빔 경로에 그을림을 누적하고, 갱신된 prev_length를 반환한다.
     """
+    if beam_alpha_mult <= 0.0:
+        return scorch_prev_length_px
     beam_src = _load_beam(laser_variant)
     if beam_src is None:
         return scorch_prev_length_px
@@ -454,6 +457,7 @@ def draw_laser_center_to_card(
     t = _normalized_t(elapsed_sec, duration_sec, loop_preview=loop_preview)
     phase, phase_t = _phase_at(t)
     prev_len = scorch_prev_length_px
+    alpha_scale = max(0.0, min(1.0, float(beam_alpha_mult)))
 
     if phase == "charge":
         pulse = 0.88 + 0.12 * math.sin(elapsed_sec * 12.0)
@@ -468,17 +472,17 @@ def draw_laser_center_to_card(
             charge_s,
             tail_world=origin,
             angle_rad=angle,
-            alpha=_laser_alpha(255),
+            alpha=_laser_alpha(int(255 * alpha_scale)),
         )
         return prev_len
 
-    beam_alpha = _laser_alpha(255)
+    beam_alpha = _laser_alpha(int(255 * alpha_scale))
     if phase == "propagate":
         length = distance * _smoothstep(phase_t)
     else:
         length_scale, pulse_alpha = _hold_beam_pulse(elapsed_sec)
         length = distance * length_scale
-        beam_alpha = _laser_alpha(pulse_alpha)
+        beam_alpha = _laser_alpha(int(pulse_alpha * alpha_scale))
 
     beam = _scale_beam_to_length(beam_src, length)
 

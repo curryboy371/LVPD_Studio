@@ -3,7 +3,7 @@
   "frame_width": 1080,
   "frame_height": 1920,
   "background": {
-    "type": "image",
+    "type": "video",
     "value": "wood"
   },
   "title": "과일 이름을 외우자\n子(아들 자) : 식물의 자식에 해당하는 '씨앗'이나 '작고 둥근 열매",

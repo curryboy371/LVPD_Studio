@@ -34,6 +34,10 @@ WORD_MEMORIZE_PICK_SOUND_REL = "resource/sound/effect/pick.mp3"
 WORD_MEMORIZE_FALL_SOUND_DIR_REL = "resource/sound/effect/fall"
 # 타일 재생성(hamer) — resource/sound/effect/hamer/*.mp3 랜덤
 WORD_MEMORIZE_HAMER_SOUND_DIR_REL = "resource/sound/effect/hamer"
+# 유리 디졸브 — resource/sound/effect/spark/*.mp3 랜덤 반복
+WORD_MEMORIZE_SPARK_SOUND_DIR_REL = "resource/sound/effect/spark"
+# 레이저 발사 — resource/sound/effect/laser.mp3 (1회)
+WORD_MEMORIZE_LASER_SOUND_REL = "resource/sound/effect/laser.mp3"
 _EFFECT_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 _effect_sound_dir_cache: dict[str, list[Path]] = {}
 # 카드 가장자리 타일 — 남길 확률(불규칙 윤곽)
@@ -129,6 +133,24 @@ def pick_random_word_memorize_hamer_sound_path() -> Path | None:
     if not paths:
         return None
     return random.choice(paths)
+
+
+def list_word_memorize_spark_sound_paths(*, refresh: bool = False) -> list[Path]:
+    """유리 디졸브 spark 효과음 목록 — resource/sound/effect/spark."""
+    return _list_effect_sound_paths(WORD_MEMORIZE_SPARK_SOUND_DIR_REL, refresh=refresh)
+
+
+def pick_random_word_memorize_spark_sound_path() -> Path | None:
+    """유리 디졸브 — spark 폴더에서 무작위 1개."""
+    paths = list_word_memorize_spark_sound_paths()
+    if not paths:
+        return None
+    return random.choice(paths)
+
+
+def word_memorize_laser_sound_path() -> Path:
+    """레이저 발사 효과음 절대 경로."""
+    return get_repo_root() / WORD_MEMORIZE_LASER_SOUND_REL.replace("\\", "/")
 
 
 def pick_reveal_progress(elapsed_sec: float, *, reveal_sec: float = PICK_REVEAL_SEC) -> float:

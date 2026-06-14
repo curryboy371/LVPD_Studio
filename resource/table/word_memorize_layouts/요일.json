@@ -3,7 +3,7 @@
   "frame_width": 1080,
   "frame_height": 1920,
   "background": {
-    "type": "image",
+    "type": "video",
     "value": "black_wood"
   },
   "title": "중국어 요일을 알아보자",

@@ -3,7 +3,7 @@
   "frame_width": 1080,
   "frame_height": 1920,
   "background": {
-    "type": "image",
+    "type": "video",
     "value": "wood"
   },
   "title": "과일 이름을 외우자\n果 (열매 과)  莓 (딸기 매)  瓜(오이 과)",
