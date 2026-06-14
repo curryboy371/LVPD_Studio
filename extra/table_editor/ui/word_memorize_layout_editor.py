@@ -777,7 +777,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._game_pick_preview_label.pack(side=tk.RIGHT)
         ttk.Label(
             game_in,
-            text="tiles+곡괭이: 카드 위 타일 → 360° 회전 채굴로 단어 공개",
+            text="tiles+곡괭이: 카드 위 타일 → 스윙 채굴로 단어 공개",
             foreground="#666",
             wraplength=LEFT_PANEL_WIDTH - 28,
             font=("Segoe UI", 8),

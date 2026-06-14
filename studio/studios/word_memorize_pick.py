@@ -14,7 +14,8 @@ from data.models import Word
 from extra.table_editor.services.word_memorize_layout import (
     MINING_ROWS_PER_SWING,
     PICK_REVEAL_SEC,
-    PICK_ROTATION_STRETCH,
+    PICK_SWING_END_DEG,
+    PICK_SWING_START_DEG,
     TRAP_REGROW_SEC,
     WordMemorizeBox,
     WordMemorizeLayout,
@@ -35,18 +36,23 @@ WORD_MEMORIZE_FALL_SOUND_DIR_REL = "resource/sound/effect/fall"
 WORD_MEMORIZE_HAMER_SOUND_DIR_REL = "resource/sound/effect/hamer"
 _EFFECT_SOUND_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a"}
 _effect_sound_dir_cache: dict[str, list[Path]] = {}
-# 카드 밖 빈 영역으로 퍼지는 타일 칸 수
-MINING_FRINGE_TILES = 5
 # 카드 가장자리 타일 — 남길 확률(불규칙 윤곽)
 MINING_EDGE_KEEP_CHANCE = 0.24
 # 채굴 전선(맨 아래 완료 행) — 일부 남기기 / 한 칸 더 파기
 MINING_FRONTIER_KEEP_CHANCE = 0.30
 MINING_OVERDIG_CHANCE = 0.34
-# 카드 밖 인접 타일 — 거리별 제거 확률(멀수록 감소)
-MINING_VOID_FRINGE_CHANCE = (0.85, 0.70, 0.50, 0.26, 0.15)
-# 카드 위·아래 인접 타일 — 거리별 제거 확률
-MINING_VERTICAL_VOID_FRINGE_CHANCE = (0.50, 0.30, 0.15)
+# 카드 밖 인접 타일 — 거리별 제거 확률(멀수록 감소, 좌·우·위·아래 공통)
+MINING_VOID_FRINGE_CHANCE = (0.50, 0.30, 0.15)
+MINING_FRINGE_TILES = len(MINING_VOID_FRINGE_CHANCE)
+MINING_VERTICAL_VOID_FRINGE_CHANCE = MINING_VOID_FRINGE_CHANCE
 _punch_rect_cache: dict[tuple[Any, ...], list[pygame.Rect]] = {}
+
+
+def _void_fringe_chance(void_dist: int, chances: tuple[float, ...]) -> float:
+    """카드 밖 fringe 거리별 제거 확률 — 테이블 범위 밖은 0%."""
+    if void_dist <= 0 or void_dist > len(chances):
+        return 0.0
+    return float(chances[void_dist - 1])
 
 
 def clear_mining_punch_rect_cache() -> None:
@@ -130,6 +136,22 @@ def pick_reveal_progress(elapsed_sec: float, *, reveal_sec: float = PICK_REVEAL_
     if reveal_sec <= 0:
         return 1.0
     return max(0.0, min(1.0, float(elapsed_sec) / float(reveal_sec)))
+
+
+def pick_swing_rotation_deg(swing_progress: float) -> float:
+    """스윙 진행률(0~1)에 따른 곡괭이 각도 — 매 스윙 시작·목표각 사이.
+
+    Args:
+        swing_progress: 현재 스윙 내 진행률 (0=시작각, 1=목표각).
+
+    Returns:
+        곡괭이 회전 각도(도).
+    """
+    t = max(0.0, min(1.0, float(swing_progress)))
+    eased = t * t  # 타격 직전 가속
+    start = float(PICK_SWING_START_DEG)
+    end = float(PICK_SWING_END_DEG)
+    return start + (end - start) * eased
 
 
 def card_mining_swing_index(
@@ -256,7 +278,7 @@ def card_mining_state(
                 completed_rows=row_count,
                 active_row=terminal_row,
                 row_progress=1.0,
-                pick_rotation_deg=360.0,
+                pick_rotation_deg=float(PICK_SWING_END_DEG),
                 pick_x=pick_x,
                 pick_y=_pick_y_for_row(terminal_row),
                 is_complete=True,
@@ -266,7 +288,7 @@ def card_mining_state(
             completed_rows=stored,
             active_row=0,
             row_progress=0.0,
-            pick_rotation_deg=0.0,
+            pick_rotation_deg=float(PICK_SWING_START_DEG),
             pick_x=pick_x,
             pick_y=_pick_y_for_row(0),
             is_complete=False,
@@ -293,17 +315,14 @@ def card_mining_state(
             completed_rows=row_count,
             active_row=terminal_row,
             row_progress=1.0,
-            pick_rotation_deg=360.0,
+            pick_rotation_deg=float(PICK_SWING_END_DEG),
             pick_x=pick_x,
             pick_y=_pick_y_for_row(terminal_row),
             is_complete=True,
         )
 
     active_row = min(row_count - 1, completed_rows)
-    stretch = max(1.0, float(PICK_ROTATION_STRETCH))
-    pick_rotation_deg = max(
-        0.0, min(360.0, swing_progress * 360.0 / stretch)
-    )
+    pick_rotation_deg = pick_swing_rotation_deg(swing_progress)
     return CardMiningState(
         row_count=row_count,
         completed_rows=completed_rows,
@@ -382,6 +401,16 @@ def _cell_on_active_mining_row(
     return _overlap_len(cell_x0, cell_x1, card_x0, card_x1) > 0
 
 
+def _cell_touches_card_x_edge(
+    col: int, tile_px: int, card_x0: int, card_x1: int
+) -> bool:
+    """타일 칸이 카드 좌·우 x 경계에 맞닿는지."""
+    px = max(1, int(tile_px))
+    cell_x0 = col * px
+    cell_x1 = cell_x0 + px
+    return cell_x1 == card_x0 or cell_x0 == card_x1
+
+
 def _cell_punch_chance(
     *,
     col: int,
@@ -408,14 +437,13 @@ def _cell_punch_chance(
     overlap_y = _overlap_len(row_top, row_bottom, card_y0, card_y1)
     inside_card = overlap_x >= px // 2 and overlap_y >= px // 2
 
-    # 카드 좌·우 가장자리·바로 인접 칸 — 격자 스냅으로 overlap 없음/얇음
-    touches_card_x = cell_x1 == card_x0 or cell_x0 == card_x1
+    # 격자 스냅 dead-zone: 카드 x에 맞닿지만 inside/fringe 분류 밖 → 완료 행 100%
     if (
         not inside_card
         and not is_overdig_row
         and logical_row_index < completed_rows
         and overlap_y > 0
-        and (overlap_x > 0 or touches_card_x)
+        and _cell_touches_card_x_edge(col, px, card_x0, card_x1)
     ):
         return 1.0
 
@@ -441,31 +469,18 @@ def _cell_punch_chance(
 
     void_dist_x = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
     if void_dist_x > 0:
-        # 곡괭이가 지나간 행의 좌·우 fringe — 화면 가장자리까지 연쇄 보장
-        if (
-            not is_overdig_row
-            and logical_row_index < completed_rows
-            and overlap_y > 0
-        ):
-            return 1.0
-        chances = MINING_VOID_FRINGE_CHANCE
-        if void_dist_x > len(chances):
+        if void_dist_x > MINING_FRINGE_TILES:
             return 0.0
-        base = chances[void_dist_x - 1]
-        # 카드 y 밴드와 겹치지 않으면 확률만 소폭 감소
+        base = _void_fringe_chance(void_dist_x, MINING_VOID_FRINGE_CHANCE)
+        # 카드 y 밴드와 겹치지 않으면 시도하지 않음
         if overlap_y <= 0:
-            base *= 0.72
-        elif overlap_y < px // 2:
-            base *= 0.88
+            return 0.0
         return base
 
     void_dist_y = _vertical_void_distance(row_top, row_bottom, card_y0, card_y1)
     if void_dist_y <= 0:
         return 0.0
-    v_chances = MINING_VERTICAL_VOID_FRINGE_CHANCE
-    if void_dist_y > len(v_chances):
-        return 0.0
-    base = v_chances[void_dist_y - 1]
+    base = _void_fringe_chance(void_dist_y, MINING_VERTICAL_VOID_FRINGE_CHANCE)
     # 카드 x 밴드와 겹치지 않으면 확률만 소폭 감소
     if overlap_x <= 0:
         base *= 0.72
@@ -511,35 +526,17 @@ def _cell_overlaps_card(
     return overlap_x >= half and overlap_y >= half
 
 
-def _cell_is_interior_of_card(
-    col: int,
-    row_top: int,
-    tile_px: int,
-    card: pygame.Rect,
-) -> bool:
-    """카드 가장자리 링 바로 안쪽 — 미채굴 카드 보호 대상."""
-    if not _cell_overlaps_card(col, row_top, tile_px, card):
-        return False
-    px = max(1, int(tile_px))
-    for dcol, drow in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-        if not _cell_overlaps_card(
-            col + dcol, row_top + drow * px, tile_px, card
-        ):
-            return False
-    return True
-
-
 def _cell_blocked_by_unrevealed_card(
     col: int,
     row_top: int,
     tile_px: int,
     protected_cards: list[pygame.Rect],
 ) -> bool:
-    """아직 깨지지 않은 다른 카드 내부 타일만 차단 — 가장자리 링은 인접 채굴에 허용."""
+    """아직 깨지지 않은 다른 카드 영역(가장자리 포함) 타일 차단."""
     if not protected_cards:
         return False
     for card in protected_cards:
-        if _cell_is_interior_of_card(col, row_top, tile_px, card):
+        if _cell_overlaps_card(col, row_top, tile_px, card):
             return True
     return False
 
@@ -597,8 +594,18 @@ def _fringe_chain_satisfied(
 
     void_dist_x = _horizontal_void_distance(cell_x0, cell_x1, card_x0, card_x1)
     if void_dist_x > 0:
-        anchor_col = col + 1 if cell_x1 <= card_x0 else col - 1
-        return (anchor_col, rt) in seen
+        on_left = cell_x1 <= card_x0
+        anchor_col = col + 1 if on_left else col - 1
+        if (anchor_col, rt) in seen:
+            return True
+        # 격자 스냅: 앵커 칸이 카드 x에 맞닿으면 연쇄 시작
+        ax0 = anchor_col * px
+        ax1 = ax0 + px
+        if on_left and ax1 >= card_x0:
+            return True
+        if not on_left and ax0 <= card_x1:
+            return True
+        return False
 
     void_dist_y = _vertical_void_distance(rt, row_bottom, card_y0, card_y1)
     if void_dist_y > 0:
@@ -778,7 +785,7 @@ def collect_mining_punch_rects(
         physical_row_index: int,
         is_overdig_row: bool = False,
     ) -> None:
-        """같은 행 좌·우 fringe — 거리 순 연쇄."""
+        """같은 행 좌·우 fringe — 카드 ±3칸, 거리 순 연쇄."""
         fringe_cols: list[tuple[int, int]] = []
         for col in range(col_start, col_end):
             if not _cell_outside_card_x(col, px, card_x0, card_x1):
@@ -844,6 +851,30 @@ def collect_mining_punch_rects(
             continue
         for col in range(col_start, col_end):
             if _cell_outside_card_x(col, px, card_x0, card_x1):
+                continue
+            if _should_punch_cell(
+                box_key=key,
+                col=col,
+                row_top=row_top,
+                tile_px=px,
+                box=box,
+                logical_row_index=card_row,
+                physical_row_index=card_row,
+                completed_rows=rows,
+                row_count=row_count,
+                is_overdig_row=False,
+            ):
+                add_cell(col, row_top)
+
+        # dead-zone: 카드 x에 맞닿지만 inside/fringe 분류 밖
+        for col in range(col_start, col_end):
+            if _cell_outside_card_x(col, px, card_x0, card_x1):
+                continue
+            if not _cell_touches_card_x_edge(col, px, card_x0, card_x1):
+                continue
+            row_bottom = row_top + px
+            overlap_y = _overlap_len(row_top, row_bottom, card_y0, card_y1)
+            if overlap_y <= 0:
                 continue
             if _should_punch_cell(
                 box_key=key,

@@ -56,7 +56,8 @@ MeaningLang = Literal["ko", "en", "zh"]
 
 logger = logging.getLogger(__name__)
 
-INTRO_HOLD_SEC = 0.8
+# 시작 화면(타일·제목) 유지 — 미리보기·녹화 썸네일용
+INTRO_HOLD_SEC = 0.4
 END_HOLD_SEC = 0.6
 TTS_MISSING_HOLD_SEC = 1.2
 # 첫 TTS 종료 N초 전에 둘째 TTS 시작 (겹침)
@@ -73,9 +74,9 @@ _PICK_EFFECT_CHANNEL = 4
 _TILE_FALL_EFFECT_CHANNEL = 3
 _HAMER_EFFECT_CHANNEL = 2
 _EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
-    _PICK_EFFECT_CHANNEL: 1.0,
-    _TILE_FALL_EFFECT_CHANNEL: 0.6,
-    _HAMER_EFFECT_CHANNEL: 0.4,
+    _PICK_EFFECT_CHANNEL: 0.2,
+    _TILE_FALL_EFFECT_CHANNEL: 0.2,
+    _HAMER_EFFECT_CHANNEL: 0.15,
 }
 
 WordSubstep = Literal[
@@ -293,11 +294,6 @@ class WordMemorizeStudio(IStudio):
                 duration_hint_sec=self._bg_duration_hint_sec(config)
             )
         if self._done:
-            return
-        # 녹화에서는 시작 직후 첫 단어를 바로 노출/재생한다.
-        if self._phase == "intro" and self._is_recording_mode():
-            self._timer = 0.0
-            self._begin_word(0)
             return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
         self._renderer.tick_mining_particles(dt)

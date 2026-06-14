@@ -30,18 +30,23 @@
       "font_pt": 68
     }
   ],
-  "subtitle": "택시, 버스의\n중국어는 알지?",
+  "subtitle": "택시, 버스는\n중국어로\n뭐라고 할까?",
   "subtitle_text_tile": "white",
   "subtitle_font": "kr_cn",
   "subtitle_y_offset_px": 0,
   "subtitle_lines": [
     {
-      "text": "택시, 버스의",
+      "text": "택시, 버스는",
       "font": "kr_cn",
-      "text_tile": "white"
+      "text_tile": "red"
     },
     {
-      "text": "중국어는 알지?",
+      "text": "중국어로",
+      "font": "kr_cn",
+      "text_tile": "black"
+    },
+    {
+      "text": "뭐라고 할까?",
       "font": "kr_cn",
       "text_tile": "black"
     }
@@ -80,28 +85,8 @@
   "game_pick": "pick1",
   "boxes": [
     {
-      "word_id": "20178",
-      "order": 1,
-      "x": 32,
-      "y": 194,
-      "w": 319,
-      "h": 341,
-      "box_key": "box_12",
-      "card_type": ""
-    },
-    {
-      "word_id": "20168",
-      "order": 2,
-      "x": 380,
-      "y": 194,
-      "w": 319,
-      "h": 341,
-      "box_key": "box_2",
-      "card_type": ""
-    },
-    {
       "word_id": "20169",
-      "order": 3,
+      "order": 1,
       "x": 380,
       "y": 1265,
       "w": 319,
@@ -111,12 +96,32 @@
     },
     {
       "word_id": "20170",
-      "order": 4,
+      "order": 2,
       "x": 728,
       "y": 908,
       "w": 319,
       "h": 341,
       "box_key": "box_4",
+      "card_type": ""
+    },
+    {
+      "word_id": "20168",
+      "order": 3,
+      "x": 380,
+      "y": 194,
+      "w": 319,
+      "h": 341,
+      "box_key": "box_2",
+      "card_type": ""
+    },
+    {
+      "word_id": "20178",
+      "order": 4,
+      "x": 32,
+      "y": 194,
+      "w": 319,
+      "h": 341,
+      "box_key": "box_12",
       "card_type": ""
     },
     {

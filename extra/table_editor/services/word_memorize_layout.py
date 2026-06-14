@@ -36,12 +36,13 @@ TRAP_REGROW_SMOKE_POLL_SEC = 0.05
 TRAP_CARD_EDGE_MARGIN_TILES = 1
 # 재생·미리보기 타일링 시 한 칸 픽셀 크기 (FHD 기준, 프레임 너비에 비례)
 GAME_TILE_DISPLAY_PX = 16
-# 곡괭이 한 바퀴(360°)로 카드 타일 제거 — 카드당 총 채굴 시간(초). 타일 깨는 속도 기준.
-PICK_REVEAL_SEC = 1.2
+# 곡괭이 스윙으로 카드 타일 제거 — 카드당 총 채굴 시간(초). 타일 깨는 속도 기준.
+PICK_REVEAL_SEC = 0.7
 # 한 번 회전에 제거할 타일 행 수
-MINING_ROWS_PER_SWING = 4
-# 곡괭이 회전만 느리게(1.0=스윙과 동기, 2.6=같은 스윙에서 약 138°)
-PICK_ROTATION_STRETCH = 2.6
+MINING_ROWS_PER_SWING = 5
+# 곡괭이 스윙 각도 — 매 스윙마다 시작각→목표각 (360° 연속 회전 없음)
+PICK_SWING_START_DEG = -38.0
+PICK_SWING_END_DEG = 52.0
 # 곡괭이 표시 크기 — 카드 min(w,h) 대비 (기존 0.9의 1/2)
 PICK_DISPLAY_CARD_RATIO = 0.45
 
@@ -1636,7 +1637,7 @@ class WordMemorizeLayout:
     # resource/image/game/particles/{stem}.png — 채굴 파편 (복수 선택 가능)
     game_particle: str = ""
     game_particles: list[str] = field(default_factory=list)
-    # resource/image/game/picks/{stem}.png — 카드 중앙 360° 회전 채굴
+    # resource/image/game/picks/{stem}.png — 카드 중앙 스윙 채굴
     game_pick: str = ""
     boxes: list[WordMemorizeBox] = field(default_factory=list)
     holding_word_ids: list[str] = field(default_factory=list)
