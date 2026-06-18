@@ -22,6 +22,11 @@ _MEANING_LANG_LABELS: dict[str, str] = {
 }
 _MEANING_LANG_BY_LABEL = {v: k for k, v in _MEANING_LANG_LABELS.items()}
 
+_QUIZ_MODE_BY_LABEL = {
+    "퀴즈 모드 (타일·디졸브)": True,
+    "일반 모드 (타일 없음·레이저 선명)": False,
+}
+
 
 class WordMemorizeRunDialog(tk.Toplevel):
     def __init__(
@@ -35,7 +40,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
         self.title("단어 외우기")
         self.transient(parent)
         self.grab_set()
-        self.result: tuple[str, str, str] | None = None
+        self.result: tuple[str, str, str, bool] | None = None
 
         ttk.Label(
             self,
@@ -77,6 +82,17 @@ class WordMemorizeRunDialog(tk.Toplevel):
                 value=_MEANING_LANG_LABELS[key],
             ).pack(side=tk.LEFT, padx=12, pady=6)
 
+        quiz_frame = ttk.LabelFrame(self, text="퀴즈 모드")
+        quiz_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        self._quiz_var = tk.StringVar(value="퀴즈 모드 (타일·디졸브)")
+        for label in _QUIZ_MODE_BY_LABEL:
+            ttk.Radiobutton(
+                quiz_frame,
+                text=label,
+                variable=self._quiz_var,
+                value=label,
+            ).pack(anchor="w", padx=12, pady=2)
+
         mode_frame = ttk.LabelFrame(self, text="실행 방식")
         mode_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
         self._mode_var = tk.StringVar(value=_MODE_LABELS["debug"])
@@ -111,7 +127,8 @@ class WordMemorizeRunDialog(tk.Toplevel):
             return
         mode = _MODE_BY_LABEL.get(self._mode_var.get(), "debug")
         meaning_lang = _MEANING_LANG_BY_LABEL.get(self._lang_var.get(), "ko")
-        self.result = (mode, str(path), meaning_lang)
+        quiz_mode = _QUIZ_MODE_BY_LABEL.get(self._quiz_var.get(), True)
+        self.result = (mode, str(path), meaning_lang, quiz_mode)
         self.destroy()
 
     def _cancel(self) -> None:
@@ -125,7 +142,7 @@ class WordMemorizeRunDialog(tk.Toplevel):
         *,
         layouts: list[tuple[str, Path]],
         initial_layout: str = "",
-    ) -> tuple[str, str, str] | None:
+    ) -> tuple[str, str, str, bool] | None:
         dialog = cls(parent, layouts=layouts, initial_layout=initial_layout)
         parent.wait_window(dialog)
         return dialog.result

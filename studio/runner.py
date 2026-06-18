@@ -727,11 +727,13 @@ def _create_studio(
         meaning_lang = str(kw.pop("meaning_lang", "ko") or "ko").strip().lower()
         if meaning_lang not in ("ko", "en", "zh"):
             meaning_lang = "ko"
+        quiz_mode = bool(kw.pop("quiz_mode", True))
         kw.pop("show_images", None)
         kw.pop("word_images", None)
         return WordMemorizeStudio(
             layout_path=layout_path,
             meaning_lang=meaning_lang,  # type: ignore[arg-type]
+            quiz_mode=quiz_mode,
         )
     raise ValueError(f"알 수 없는 스튜디오: {name}")
 
@@ -769,6 +771,12 @@ def main() -> None:
         default="ko",
         choices=("ko", "en", "zh"),
         help="word_memorize: 카드 뜻·TTS 순서 (ko=한→중, en=영→중, zh=중→한·BG/ch MP4). 기본 ko.",
+    )
+    parser.add_argument(
+        "--quiz-mode",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="word_memorize: 퀴즈 모드(타일·타일 파괴·레이저 유리 디졸브). --no-quiz-mode 로 일반 모드.",
     )
     parser.add_argument(
         "--csv",
@@ -912,6 +920,7 @@ def main() -> None:
             sys.exit(1)
         studio_kw["layout_path"] = str(layout_file.resolve())
         studio_kw["meaning_lang"] = str(getattr(args, "meaning_lang", "ko") or "ko")
+        studio_kw["quiz_mode"] = bool(getattr(args, "quiz_mode", True))
 
     if args.studio == "shorts":
         from studio.shorts.clip_types import CLIP_TYPE_VOCABULARY, normalize_clip_type

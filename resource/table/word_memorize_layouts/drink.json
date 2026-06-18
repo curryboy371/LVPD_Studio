@@ -4,19 +4,19 @@
   "frame_height": 1920,
   "background": {
     "type": "video",
-    "value": "blue"
+    "value": "wood"
   },
-  "title": "감정 표현을 알아보자",
+  "title": "마실 것",
   "title_x": 540,
-  "title_y": 99,
+  "title_y": 0,
   "title_y_offset_px": 0,
-  "title_color": "#ffffff",
+  "title_color": "#ffeb3b",
   "title_font": "kr_cn",
   "title_font_pt": 68,
   "title_lines": [
     {
-      "text": "감정 표현을 알아보자",
-      "color": "#ffffff",
+      "text": "마실 것",
+      "color": "#ffeb3b",
       "font": "kr_cn",
       "font_pt": 68
     }
@@ -43,9 +43,9 @@
   "card_background_color": "#ffffff",
   "show_images": true,
   "bg_music_path": "resource/sound/bg_short/Coffee_on_the_Balcony.mp3",
-  "game_tile": "tile_000_000",
+  "game_tile": "tile_000_002",
   "game_tiles": [
-    "tile_000_000"
+    "tile_000_002"
   ],
   "game_tile_seed": 0,
   "game_particle": "particle_000",
@@ -57,167 +57,157 @@
   "game_pick": "pick1",
   "boxes": [
     {
-      "word_id": "100021",
+      "word_id": "20121",
       "order": 1,
       "x": 26,
       "y": 232,
       "w": 245,
-      "h": 335,
+      "h": 342,
       "box_key": "box_1",
       "card_type": ""
     },
     {
-      "word_id": "100022",
+      "word_id": "20122",
       "order": 2,
       "x": 287,
       "y": 232,
       "w": 245,
-      "h": 335,
+      "h": 342,
       "box_key": "box_2",
       "card_type": ""
     },
     {
-      "word_id": "100023",
+      "word_id": "20208",
       "order": 3,
       "x": 548,
       "y": 232,
       "w": 245,
-      "h": 335,
-      "box_key": "box_3",
-      "card_type": ""
-    },
-    {
-      "word_id": "100024",
-      "order": 4,
-      "x": 809,
-      "y": 232,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_4",
-      "card_type": ""
-    },
-    {
-      "word_id": "100025",
-      "order": 5,
-      "x": 26,
-      "y": 583,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_5",
-      "card_type": ""
-    },
-    {
-      "word_id": "100026",
-      "order": 6,
-      "x": 287,
-      "y": 583,
-      "w": 245,
-      "h": 335,
+      "h": 342,
       "box_key": "box_6",
       "card_type": ""
     },
     {
-      "word_id": "100027",
+      "word_id": "20150",
+      "order": 4,
+      "x": 809,
+      "y": 232,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_3",
+      "card_type": ""
+    },
+    {
+      "word_id": "20151",
+      "order": 5,
+      "x": 26,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_4",
+      "card_type": ""
+    },
+    {
+      "word_id": "20152",
+      "order": 6,
+      "x": 287,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_5",
+      "card_type": ""
+    },
+    {
+      "word_id": "20217",
       "order": 7,
       "x": 548,
-      "y": 583,
+      "y": 590,
       "w": 245,
-      "h": 335,
-      "box_key": "box_7",
-      "card_type": ""
-    },
-    {
-      "word_id": "100028",
-      "order": 8,
-      "x": 809,
-      "y": 583,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_8",
-      "card_type": ""
-    },
-    {
-      "word_id": "100029",
-      "order": 9,
-      "x": 26,
-      "y": 934,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_9",
-      "card_type": ""
-    },
-    {
-      "word_id": "100030",
-      "order": 10,
-      "x": 287,
-      "y": 934,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_10",
-      "card_type": ""
-    },
-    {
-      "word_id": "100031",
-      "order": 11,
-      "x": 548,
-      "y": 934,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_11",
-      "card_type": ""
-    },
-    {
-      "word_id": "100032",
-      "order": 12,
-      "x": 809,
-      "y": 934,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_12",
-      "card_type": ""
-    },
-    {
-      "word_id": "100033",
-      "order": 13,
-      "x": 26,
-      "y": 1285,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_13",
-      "card_type": ""
-    },
-    {
-      "word_id": "100034",
-      "order": 14,
-      "x": 287,
-      "y": 1285,
-      "w": 245,
-      "h": 335,
-      "box_key": "box_14",
-      "card_type": ""
-    },
-    {
-      "word_id": "100035",
-      "order": 15,
-      "x": 548,
-      "y": 1285,
-      "w": 245,
-      "h": 335,
+      "h": 342,
       "box_key": "box_15",
       "card_type": ""
     },
     {
-      "word_id": "100036",
-      "order": 16,
+      "word_id": "20212",
+      "order": 8,
       "x": 809,
-      "y": 1285,
+      "y": 590,
       "w": 245,
-      "h": 335,
-      "box_key": "box_16",
+      "h": 342,
+      "box_key": "box_10",
+      "card_type": ""
+    },
+    {
+      "word_id": "20213",
+      "order": 9,
+      "x": 26,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_11",
+      "card_type": ""
+    },
+    {
+      "word_id": "20214",
+      "order": 10,
+      "x": 287,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_12",
+      "card_type": ""
+    },
+    {
+      "word_id": "20215",
+      "order": 11,
+      "x": 548,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_13",
+      "card_type": ""
+    },
+    {
+      "word_id": "20216",
+      "order": 12,
+      "x": 809,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_14",
+      "card_type": ""
+    },
+    {
+      "word_id": "20209",
+      "order": 13,
+      "x": 26,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_7",
+      "card_type": ""
+    },
+    {
+      "word_id": "20211",
+      "order": 14,
+      "x": 287,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_9",
+      "card_type": ""
+    },
+    {
+      "word_id": "20210",
+      "order": 15,
+      "x": 548,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_8",
       "card_type": ""
     }
   ],
   "holding_word_ids": [],
   "margin_top_ratio": 0.1125,
-  "margin_bottom_ratio": 0.14635416666666667
+  "margin_bottom_ratio": 0.13177083333333334
 }

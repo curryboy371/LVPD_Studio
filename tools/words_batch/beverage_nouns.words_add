@@ -1,0 +1,20 @@
+@sheet 명사
+@pos 명사
+@type 음료
+
+# meaning	en_meaning	word	pinyin
+물	water	水	shuǐ
+뜨거운 물	hot water	热水	rèshuǐ
+찬물	ice water	冰水	bīngshuǐ
+커피	coffee	咖啡	kāfēi
+아메리카노	Americano	美式咖啡	měishì kāfēi
+라떼	Latte	拿铁	nátiě
+콜라	cola	可乐	kělè
+사이다	Sprite	雪碧	xuěbì
+차	tea	茶	chá
+녹차	green tea	绿茶	lǜchá
+홍차	black tea	红茶	hóngchá
+밀크티	milk tea	奶茶	nǎichá
+과일 주스	juice	果汁	guǒzhī
+우유	milk	牛奶	niúnǎi
+맥주	beer	啤酒	píjiǔ

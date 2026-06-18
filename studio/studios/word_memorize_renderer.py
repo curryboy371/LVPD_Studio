@@ -945,10 +945,15 @@ class WordMemorizeRenderer:
         trap_regrow_revealed_keys: set[str] | None = None,
         trap_regrow_revealed_rows: dict[str, int] | None = None,
         meaning_lang: str = "ko",
+        quiz_mode: bool = True,
         cta_caption_text: str = "",
         tiles_fully_restored: bool = False,
         glass_finale_substep: str | None = None,
         glass_finale_elapsed_sec: float = 0.0,
+        quiz_overlay_box: WordMemorizeBox | None = None,
+        quiz_overlay_alpha: int = 0,
+        quiz_overlay_lang: str = "ko",
+        quiz_time_remaining_ratio: float | None = None,
     ) -> None:
         self.ensure_fonts()
         t_anim = (
@@ -957,8 +962,8 @@ class WordMemorizeRenderer:
             else border_anim_time_sec(config)
         )
         fw, fh = layout.frame_width, layout.frame_height
-        pick_mining = layout_uses_pick_mining(layout)
-        laser_glass = layout_uses_laser_glass(layout)
+        pick_mining = quiz_mode and layout_uses_pick_mining(layout)
+        laser_glass = quiz_mode and layout_uses_laser_glass(layout)
         glass_finale_close = glass_finale_substep == "glass_finale_close"
         close_dur = (
             glass_finale_close_duration_sec() if glass_finale_close else 0.0
@@ -967,7 +972,13 @@ class WordMemorizeRenderer:
         rows_by_key = dict(revealed_rows_by_key or {})
 
         self._draw_background(
-            surface, layout, fw, fh, use_video=use_video_background, meaning_lang=meaning_lang
+            surface,
+            layout,
+            fw,
+            fh,
+            use_video=use_video_background,
+            meaning_lang=meaning_lang,
+            quiz_mode=quiz_mode,
         )
         if not pick_mining:
             self._draw_title(surface, layout, fw, fh, meaning_lang=meaning_lang)
@@ -1078,26 +1089,27 @@ class WordMemorizeRenderer:
                 glass_finale_close_duration_sec=close_dur,
             )
 
-        self._draw_pick_mining_overlay(
-            surface,
-            layout,
-            fw,
-            fh,
-            revealed_box_keys=revealed,
-            revealed_rows_by_key=rows_by_key,
-            active_box=active_anchor,
-            active_elapsed_sec=active_elapsed if active_cards else 0.0,
-            trap_regrow_active=trap_regrow_active,
-            trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
-            trap_regrow_duration_sec=trap_regrow_duration_sec,
-            trap_regrow_box_key=trap_regrow_box_key,
-            trap_regrow_revealed_keys=trap_regrow_revealed_keys,
-            trap_regrow_revealed_rows=trap_regrow_revealed_rows,
-            words_by_id=words_by_id,
-            card_meaning_by_id=card_meaning_by_id,
-            meaning_lang=meaning_lang,
-            tiles_fully_restored=tiles_fully_restored,
-        )
+        if pick_mining:
+            self._draw_pick_mining_overlay(
+                surface,
+                layout,
+                fw,
+                fh,
+                revealed_box_keys=revealed,
+                revealed_rows_by_key=rows_by_key,
+                active_box=active_anchor,
+                active_elapsed_sec=active_elapsed if active_cards else 0.0,
+                trap_regrow_active=trap_regrow_active,
+                trap_regrow_elapsed_sec=trap_regrow_elapsed_sec,
+                trap_regrow_duration_sec=trap_regrow_duration_sec,
+                trap_regrow_box_key=trap_regrow_box_key,
+                trap_regrow_revealed_keys=trap_regrow_revealed_keys,
+                trap_regrow_revealed_rows=trap_regrow_revealed_rows,
+                words_by_id=words_by_id,
+                card_meaning_by_id=card_meaning_by_id,
+                meaning_lang=meaning_lang,
+                tiles_fully_restored=tiles_fully_restored,
+            )
         if pick_mining:
             self._draw_mining_particles(surface)
             self._draw_title(surface, layout, fw, fh, meaning_lang=meaning_lang)
@@ -1203,6 +1215,7 @@ class WordMemorizeRenderer:
                 anim_time_sec=t_anim,
                 word_elapsed_sec=word_timing[0],
                 word_duration_sec=word_timing[1],
+                laser_glass_mode=laser_glass,
             )
 
         if (cta_caption_text or "").strip():
@@ -1214,6 +1227,50 @@ class WordMemorizeRenderer:
                 (cta_caption_text or "").strip(),
                 meaning_lang=meaning_lang,
             )
+
+        if quiz_overlay_box is not None and quiz_overlay_alpha > 0:
+            word = resolve_box_word(quiz_overlay_box)
+            if word is not None:
+                self._draw_quiz_overlay(
+                    surface,
+                    layout,
+                    word,
+                    meaning_lang=quiz_overlay_lang,
+                    alpha=quiz_overlay_alpha,
+                    time_remaining_ratio=quiz_time_remaining_ratio,
+                )
+
+    def _draw_quiz_overlay(
+        self,
+        surface: pygame.Surface,
+        layout: WordMemorizeLayout,
+        word: Word,
+        *,
+        meaning_lang: str,
+        alpha: int,
+        time_remaining_ratio: float | None = None,
+    ) -> None:
+        from studio.studios.word_memorize_quiz import draw_quiz_reveal_overlay
+
+        def load_word_image(w: Word, max_w: int, max_h: int) -> pygame.Surface | None:
+            path = self._resolve_word_image_path(w)
+            if path is None:
+                # 퀴즈 UI는 배치 show_images와 무관하게 이미지 시도
+                path = _resolve_image_path(self._repo, w)
+            if path is None or not path.is_file():
+                return None
+            return self._get_word_image(int(w.id), path, max_w, max_h)
+
+        draw_quiz_reveal_overlay(
+            surface,
+            frame_width=int(layout.frame_width),
+            frame_height=int(layout.frame_height),
+            word=word,
+            meaning_lang=meaning_lang,
+            alpha=alpha,
+            load_word_image=load_word_image,
+            time_remaining_ratio=time_remaining_ratio,
+        )
 
     def _draw_cta_caption(
         self,
@@ -1474,6 +1531,7 @@ class WordMemorizeRenderer:
         words_by_id: dict[int, Word] | None = None,
         card_meaning_by_id: dict[int, str] | None = None,
         meaning_lang: str = "ko",
+        quiz_mode: bool = True,
         tiles_fully_restored: bool = False,
     ) -> None:
         """타일+곡괭이 모드: 카드 위 타일 오버레이."""
@@ -1669,8 +1727,11 @@ class WordMemorizeRenderer:
         fh: int,
         *,
         meaning_lang: str = "ko",
+        quiz_mode: bool = True,
     ) -> None:
         """선택 타일로 프레임 배경 전체를 타일링 (채굴 모드는 오버레이만 사용)."""
+        if not quiz_mode:
+            return
         if layout_uses_pick_mining(layout):
             return
         stems = layout_game_tiles(layout)
@@ -1715,13 +1776,19 @@ class WordMemorizeRenderer:
         *,
         use_video: bool = False,
         meaning_lang: str = "ko",
+        quiz_mode: bool = True,
     ) -> None:
         if use_video:
             frame = self._bg_video.get_frame(fw, fh)
             if frame is not None:
                 _blit_contained_background(surface, frame, fw, fh)
                 self._draw_game_tile_fill(
-                    surface, layout, fw, fh, meaning_lang=meaning_lang
+                    surface,
+                    layout,
+                    fw,
+                    fh,
+                    meaning_lang=meaning_lang,
+                    quiz_mode=quiz_mode,
                 )
                 return
         img_path = resolve_word_memorize_bg_image_path(
@@ -1743,12 +1810,22 @@ class WordMemorizeRenderer:
         if bg is not None:
             _blit_contained_background(surface, bg, fw, fh)
             self._draw_game_tile_fill(
-                surface, layout, fw, fh, meaning_lang=meaning_lang
+                surface,
+                layout,
+                fw,
+                fh,
+                meaning_lang=meaning_lang,
+                quiz_mode=quiz_mode,
             )
             return
         surface.fill((0, 0, 0))
         self._draw_game_tile_fill(
-            surface, layout, fw, fh, meaning_lang=meaning_lang
+            surface,
+            layout,
+            fw,
+            fh,
+            meaning_lang=meaning_lang,
+            quiz_mode=quiz_mode,
         )
 
     def _draw_title(
@@ -2283,6 +2360,7 @@ class WordMemorizeRenderer:
         anim_time_sec: float,
         word_elapsed_sec: float = 0.0,
         word_duration_sec: float = 0.0,
+        laser_glass_mode: bool = False,
     ) -> None:
         """활성 카드 테두리·레이저 임팩트 (타일 오버레이 위에 그림)."""
         highlight_type = normalize_selection_highlight(
@@ -2313,7 +2391,7 @@ class WordMemorizeRenderer:
                 laser_variant=highlight_type,
             )
             if (
-                layout_uses_laser_glass(layout)
+                laser_glass_mode
                 and not is_base_slot_box(box, layout)
             ):
                 dissolve_t = glass_dissolve_t(

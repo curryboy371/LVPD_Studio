@@ -51,7 +51,7 @@
       "text_tile": "black"
     }
   ],
-  "subtitle_zh": "你知道韩语的\n出租车和公交车怎么说吗?",
+  "subtitle_zh": "你知道韩语的\n出租车和公交车\n怎么说吗?",
   "subtitle_lines_zh": [
     {
       "text": "你知道韩语的",
@@ -59,9 +59,14 @@
       "text_tile": "black"
     },
     {
-      "text": "出租车和公交车怎么说吗?",
+      "text": "出租车和公交车",
       "font": "kr_cn",
-      "text_tile": "white"
+      "text_tile": "red"
+    },
+    {
+      "text": "怎么说吗?",
+      "font": "kr_cn",
+      "text_tile": "black"
     }
   ],
   "selection_highlight": "gradient",
@@ -82,6 +87,8 @@
     "particle_000",
     "particle_001"
   ],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
   "game_pick": "pick1",
   "boxes": [
     {
@@ -193,16 +200,6 @@
       "h": 341,
       "box_key": "box_9",
       "card_type": ""
-    },
-    {
-      "word_id": "20177",
-      "order": 12,
-      "x": 380,
-      "y": 551,
-      "w": 319,
-      "h": 341,
-      "box_key": "box_11",
-      "card_type": "like"
     }
   ],
   "holding_word_ids": [],

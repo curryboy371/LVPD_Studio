@@ -172,6 +172,24 @@ def word_memorize_dissolve_mask_path() -> Path:
     return WORD_MEMORIZE_GAME_DIR / "dissolve.png"
 
 
+def word_memorize_quiz_box_path() -> Path:
+    """퀴즈 모드 단어 공개 전 두루마리 UI (매트 제거 RGBA)."""
+    rgba = WORD_MEMORIZE_GAME_DIR / "quiz_box_rgba.png"
+    if rgba.is_file():
+        return rgba
+    return WORD_MEMORIZE_GAME_DIR / "quiz_box.png"
+
+
+def word_memorize_quiz_gage_bg_path() -> Path:
+    """퀴즈 타이머 게이지 배경."""
+    return WORD_MEMORIZE_GAME_DIR / "gage_bg.png"
+
+
+def word_memorize_quiz_gage_path() -> Path:
+    """퀴즈 타이머 게이지 채움."""
+    return WORD_MEMORIZE_GAME_DIR / "gage.png"
+
+
 DissolveEffectVariant = Literal["black", "transparent"]
 
 
