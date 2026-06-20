@@ -32,3 +32,9 @@ def test_reduplication_uses_pinyin_tones_and_hanzi_spacing():
     assert word_pinyin_to_marks_spaced("爸爸", "bàba") == "bà ba"
     assert word_pinyin_to_marks_spaced("孩子", "háizi") == "hái zi"
     assert word_pinyin_to_marks_spaced("奶奶", "nǎinai") == "nǎi nai"
+
+
+def test_lv_syllable_g2pm_u_colon_splits_correctly():
+    """g2pM ``lu:4``(绿) + CSV ``lǜchá`` — ``lǜchà chá`` 중복·오분절 방지."""
+    assert word_pinyin_to_marks_spaced("绿茶", "lǜchá") == "lǜ chá"
+    assert word_pinyin_to_marks("绿茶", "lǜchá") == "lǜchá"

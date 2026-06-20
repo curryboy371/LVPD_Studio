@@ -27,7 +27,40 @@
       "font_pt": 38
     }
   ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "",
+  "subtitle_text_tile": "",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "",
+      "font": "kr_cn",
+      "text_tile": ""
+    }
+  ],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
+  "selection_highlight": "gradient",
+  "row_highlight": "none",
+  "use_base_slot": false,
+  "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": true,
   "bg_music_path": "resource/sound/bg_short/신디드럼.mp3",
+  "game_tile": "tile_000_000",
+  "game_tiles": [
+    "tile_000_000"
+  ],
+  "game_tile_seed": 0,
+  "game_particle": "particle_000",
+  "game_particles": [
+    "particle_000"
+  ],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
+  "game_pick": "pick1",
   "boxes": [
     {
       "word_id": "20501",
@@ -36,7 +69,8 @@
       "y": 183,
       "w": 322,
       "h": 353,
-      "box_key": "box_1"
+      "box_key": "box_1",
+      "card_type": ""
     },
     {
       "word_id": "20502",
@@ -45,7 +79,8 @@
       "y": 183,
       "w": 322,
       "h": 353,
-      "box_key": "box_2"
+      "box_key": "box_2",
+      "card_type": ""
     },
     {
       "word_id": "20067",
@@ -54,7 +89,8 @@
       "y": 183,
       "w": 322,
       "h": 353,
-      "box_key": "box_3"
+      "box_key": "box_3",
+      "card_type": ""
     },
     {
       "word_id": "20068",
@@ -63,7 +99,8 @@
       "y": 552,
       "w": 322,
       "h": 353,
-      "box_key": "box_4"
+      "box_key": "box_4",
+      "card_type": ""
     },
     {
       "word_id": "20505",
@@ -72,7 +109,8 @@
       "y": 552,
       "w": 322,
       "h": 353,
-      "box_key": "box_5"
+      "box_key": "box_5",
+      "card_type": ""
     },
     {
       "word_id": "20062",
@@ -81,7 +119,8 @@
       "y": 552,
       "w": 322,
       "h": 353,
-      "box_key": "box_6"
+      "box_key": "box_6",
+      "card_type": ""
     },
     {
       "word_id": "20069",
@@ -90,7 +129,8 @@
       "y": 921,
       "w": 322,
       "h": 353,
-      "box_key": "box_7"
+      "box_key": "box_7",
+      "card_type": ""
     },
     {
       "word_id": "20071",
@@ -99,7 +139,8 @@
       "y": 921,
       "w": 322,
       "h": 353,
-      "box_key": "box_8"
+      "box_key": "box_8",
+      "card_type": ""
     },
     {
       "word_id": "20503",
@@ -108,7 +149,8 @@
       "y": 921,
       "w": 322,
       "h": 353,
-      "box_key": "box_13"
+      "box_key": "box_13",
+      "card_type": ""
     },
     {
       "word_id": "20063",
@@ -117,7 +159,8 @@
       "y": 1290,
       "w": 322,
       "h": 353,
-      "box_key": "box_10"
+      "box_key": "box_10",
+      "card_type": ""
     },
     {
       "word_id": "20073",
@@ -126,7 +169,8 @@
       "y": 1290,
       "w": 322,
       "h": 353,
-      "box_key": "box_12"
+      "box_key": "box_12",
+      "card_type": ""
     }
   ],
   "holding_word_ids": [],

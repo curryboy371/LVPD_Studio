@@ -1375,6 +1375,8 @@ class WordMemorizeStudio(IStudio):
     def get_recording_prefix(self) -> Optional[str]:
         stem = self._layout_path.stem.replace(" ", "_")
         lang = _recording_lang_tag(self._meaning_lang)
+        if self._quiz_mode:
+            return f"여포판다_단어외우기_퀴즈_{stem}_{lang}"
         return f"여포판다_단어외우기_{stem}_{lang}"
 
     def should_stop_recording(self) -> bool:

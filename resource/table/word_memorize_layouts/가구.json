@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "video",
+    "value": "wood"
+  },
+  "title": "가구 단어를 알아보자",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#69f0ae",
+  "title_font": "korean",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "가구 단어를 알아보자",
+      "color": "#69f0ae",
+      "font": "korean",
+      "font_pt": 68
+    }
+  ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "",
+  "subtitle_text_tile": "",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "",
+      "font": "kr_cn",
+      "text_tile": ""
+    }
+  ],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
+  "selection_highlight": "gradient",
+  "row_highlight": "none",
+  "use_base_slot": false,
+  "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": true,
+  "bg_music_path": "resource/sound/bg_short/쇼츠-약간빠름.mp3",
+  "game_tile": "tile_000_006",
+  "game_tiles": [
+    "tile_000_006"
+  ],
+  "game_tile_seed": 0,
+  "game_particle": "particle_001",
+  "game_particles": [
+    "particle_001"
+  ],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
+  "game_pick": "pick1",
+  "boxes": [
+    {
+      "word_id": "20097",
+      "order": 1,
+      "x": 26,
+      "y": 232,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_1",
+      "card_type": ""
+    },
+    {
+      "word_id": "20157",
+      "order": 2,
+      "x": 287,
+      "y": 232,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_3",
+      "card_type": ""
+    },
+    {
+      "word_id": "20196",
+      "order": 3,
+      "x": 548,
+      "y": 232,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_5",
+      "card_type": ""
+    },
+    {
+      "word_id": "20102",
+      "order": 4,
+      "x": 809,
+      "y": 232,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_2",
+      "card_type": ""
+    },
+    {
+      "word_id": "20197",
+      "order": 5,
+      "x": 26,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_6",
+      "card_type": ""
+    },
+    {
+      "word_id": "20198",
+      "order": 6,
+      "x": 287,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_7",
+      "card_type": ""
+    },
+    {
+      "word_id": "20199",
+      "order": 7,
+      "x": 548,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_8",
+      "card_type": ""
+    },
+    {
+      "word_id": "20200",
+      "order": 8,
+      "x": 809,
+      "y": 590,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_9",
+      "card_type": ""
+    },
+    {
+      "word_id": "20201",
+      "order": 9,
+      "x": 26,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_10",
+      "card_type": ""
+    },
+    {
+      "word_id": "20218",
+      "order": 10,
+      "x": 287,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_12",
+      "card_type": ""
+    },
+    {
+      "word_id": "20202",
+      "order": 11,
+      "x": 548,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_11",
+      "card_type": ""
+    },
+    {
+      "word_id": "20204",
+      "order": 12,
+      "x": 809,
+      "y": 948,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_13",
+      "card_type": ""
+    },
+    {
+      "word_id": "20205",
+      "order": 13,
+      "x": 26,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_14",
+      "card_type": ""
+    },
+    {
+      "word_id": "20206",
+      "order": 14,
+      "x": 287,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_15",
+      "card_type": ""
+    },
+    {
+      "word_id": "20207",
+      "order": 15,
+      "x": 548,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_16",
+      "card_type": ""
+    },
+    {
+      "word_id": "20195",
+      "order": 16,
+      "x": 809,
+      "y": 1306,
+      "w": 245,
+      "h": 342,
+      "box_key": "box_4",
+      "card_type": ""
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.1125,
+  "margin_bottom_ratio": 0.13177083333333334
+}

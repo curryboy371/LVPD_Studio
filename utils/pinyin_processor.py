@@ -46,9 +46,18 @@ class PinyinProcessor:
         """g2pM 로드 여부."""
         return self.g2p is not None
 
+    @staticmethod
+    def _normalize_g2pm_syllable(p: str) -> str:
+        """g2pM 표기를 표준 숫자 병음으로 정규화 (예: ``lu:4`` → ``lv4``, ü는 ``v``)."""
+        s = (p or "").strip()
+        if not s:
+            return s
+        s = re.sub(r"u:", "v", s, flags=re.IGNORECASE)
+        return s.replace(":", "")
+
     def _split_tone(self, p: str) -> tuple[str, Optional[float]]:
         """병음에서 기본 발음과 성조 숫자 분리 (예: 'hao3' -> 'hao', 3). 반3성 'guo3.5' 지원."""
-        p = p.strip()
+        p = self._normalize_g2pm_syllable(p)
         m = re.match(r"^([a-züv]+)([0-5])(\.5)?$", p)
         if m:
             base, digit, half = m.group(1), m.group(2), m.group(3)
