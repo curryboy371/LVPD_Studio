@@ -115,6 +115,7 @@ from studio.studios.word_memorize_laser import (
     laser_impact_elapsed_sec,
     laser_impact_hanzi_scale,
 )
+from studio.studios.word_memorize_compose import ComposeSceneRenderer, ComposeTiming
 from utils.pinyin_masking import (
     get_masked_pinyin_marks,
     normalize_word_masking,
@@ -602,6 +603,26 @@ def load_ko_meaning_by_id(csv_path: Path) -> dict[int, str]:
     return out
 
 
+def load_word_components_by_id(csv_path: Path) -> dict[int, tuple[int, int]]:
+    """words.csv component1_id/component2_id — 조합형 결과 단어 → 부품 한자 word_id 2개."""
+    out: dict[int, tuple[int, int]] = {}
+    if not csv_path.is_file():
+        return out
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                wid = int(float(row.get("id", 0)))
+            except (TypeError, ValueError):
+                continue
+            try:
+                c1 = int(float(row.get("component1_id") or ""))
+                c2 = int(float(row.get("component2_id") or ""))
+            except (TypeError, ValueError):
+                continue
+            out[wid] = (c1, c2)
+    return out
+
+
 def display_pinyin(word: Word) -> str:
     hanzi = (word.word or "").strip()
     raw = (word.pinyin or "").strip()
@@ -769,6 +790,7 @@ class WordMemorizeRenderer:
         self._bg_layout_stem = ""
         self._bg_meaning_lang = "ko"
         self._bg_static_image_cache: dict[tuple[str, str, int, int], pygame.Surface | None] = {}
+        self._compose_scene = ComposeSceneRenderer()
 
     def reset_scorch_layer(self) -> None:
         """(deprecated) 레이저 그을림 레이어 — 비활성."""
@@ -955,7 +977,33 @@ class WordMemorizeRenderer:
         quiz_overlay_lang: str = "ko",
         quiz_overlay_y_offset: int = 0,
         quiz_time_remaining_ratio: float | None = None,
+        compose_mode: bool = False,
+        compose_phase: str = "intro",
+        compose_word_substep: str = "",
+        compose_timer_sec: float = 0.0,
+        compose_active_word_id: int | None = None,
+        compose_sequence_word_ids: list[int] | None = None,
+        compose_tray_word_ids: list[int] | None = None,
+        compose_component_ids_by_result: dict[int, tuple[int, int]] | None = None,
+        compose_timing: "ComposeTiming | None" = None,
+        compose_absolute_time_sec: float = 0.0,
     ) -> None:
+        if compose_mode:
+            self._compose_scene.draw(
+                surface,
+                words_by_id=words_by_id,
+                card_meaning_by_id=card_meaning_by_id,
+                component_ids_by_result=compose_component_ids_by_result or {},
+                phase=compose_phase,
+                active_word_id=compose_active_word_id,
+                word_substep=compose_word_substep,
+                timer_sec=compose_timer_sec,
+                absolute_time_sec=compose_absolute_time_sec,
+                sequence_word_ids=compose_sequence_word_ids or [],
+                tray_word_ids=compose_tray_word_ids or [],
+                timing=compose_timing,
+            )
+            return
         self.ensure_fonts()
         t_anim = (
             anim_time_sec

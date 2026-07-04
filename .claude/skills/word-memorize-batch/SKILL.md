@@ -1,6 +1,6 @@
 ---
 name: word-memorize-batch
-description: 단어 외우기(word_memorize) 콘텐츠용 단어를 표(탭 구분) 형태로 입력받아 words.xlsx에 추가하고, 이어서 resource/table/word_memorize_layouts/*.json 배치 파일까지 생성한다. 공통 한자 세트(레이저 타입, dian.json 계열)와 같은 주제 세트(토픽 타입, animal.json 계열) 둘 다 지원.
+description: 단어 외우기(word_memorize) 콘텐츠용 단어를 표(탭 구분) 형태로 입력받아 words.xlsx에 추가하고, 이어서 resource/table/word_memorize_layouts/*.json 배치 파일까지 생성한다. 공통 한자 세트(레이저 타입, dian.json 계열), 같은 주제 세트(토픽 타입, animal.json 계열), 부품 한자 조합 세트(조합형, 조합_예시1.json 계열) 세 가지 모두 지원.
 ---
 
 # 단어 외우기 배치(batch) 추가 스킬
@@ -9,9 +9,9 @@ description: 단어 외우기(word_memorize) 콘텐츠용 단어를 표(탭 구�
 바로 `word_memorize_layouts/*.json` 배치 파일까지 만들어준다. 두 단계 모두 이미 있는
 프로젝트 도구를 그대로 재사용한다 (새 JSON을 손으로 작성하지 않는다).
 
-## 0. 배치 타입 판단 (레이저 vs 토픽)
+## 0. 배치 타입 판단 (레이저 vs 토픽 vs 조합형)
 
-`resource/table/word_memorize_layouts/`의 기존 파일은 두 계열로 나뉜다:
+`resource/table/word_memorize_layouts/`의 기존 파일은 세 계열로 나뉜다:
 
 - **레이저 타입** — 공통 한자(부수/글자)를 공유하는 단어 묶음. 제목 없음,
   `selection_highlight`가 `laser_b/g/p/y`, 배경은 `mandala_*`/`mandara`.
@@ -21,9 +21,15 @@ description: 단어 외우기(word_memorize) 콘텐츠용 단어를 표(탭 구�
   `selection_highlight`가 보통 `gradient`, 배경은 주제에 맞는 비디오, 구독/좋아요 CTA
   카드가 끝에 붙기도 함.
   예: `animal.json`, `drink.json`, `emotion.json`, `family.json`, `음식.json`.
+- **조합형** — 부품 한자 2개(예: 书+店)가 합쳐져 결과 합성어(书店)가 되는 A–B1–B2–B3–A
+  루프. `combo_layout: true`, 박스는 결과 합성어 3개뿐(부품은 words.xlsx의
+  `component1_id`/`component2_id`로만 연결, 레이아웃 JSON엔 안 나옴).
+  예: `조합_예시1.json`(书店/电灯/冰水). 만드는 절차는 아래 §4 참고 — 1·2단계와
+  완전히 다른 전용 스크립트(`build_compose_layout.py`)를 쓴다.
 
 사용자 요청에서 "공통 한자"·"~店/~回류" 같은 힌트가 있으면 레이저 타입, "주제로 묶어줘"·
-"동물/음식 같은 거"면 토픽 타입으로 판단한다. 애매하면 사용자에게 물어본다.
+"동물/음식 같은 거"면 토픽 타입, "부품이 합쳐져서~"·"조합"·"~+~=~" 같은 힌트면
+조합형으로 판단한다. 애매하면 사용자에게 물어본다.
 
 ## 1. 단어 표 → `.words_add` 파일 작성
 
@@ -96,6 +102,64 @@ python -m tools.words_batch.build_layout tools/words_batch/<파일>.words_add \
 - 저장 후 `resource/table/words.csv`도 함께 갱신된다 (`--no-csv` 없을 때).
 - 생성된 layout JSON은 필요하면 테이블 편집기(`extra/table_editor`)의 word_memorize 배치
   화면에서 열어 미세 조정할 수 있다.
+
+## 4. 조합형 — 부품 한자 세트 만들기
+
+조합형은 1·2단계(레이저/토픽)와 완전히 다르게 진행한다. **결과 합성어와 부품
+한자가 전부 words.xlsx에 이미 있어야** 하고, `build_compose_layout.py`는
+"연결"과 layout 생성만 한다 (word_id 배치 X — 조합형은 박스 좌표를 안 쓴다).
+
+### 4-1. 없는 단어 먼저 추가
+
+결과 합성어(书店)와 부품 한자(书, 店)가 words.xlsx에 있는지 확인한다. 부품이
+이미 다른 단어의 구성 요소로 존재하면(예: 电은 电脑에도 쓰임) 그대로 재사용 —
+새로 안 만들어도 됨. 없는 것만 평소처럼 `.words_add` + `add_words.py`로 추가:
+
+```
+@sheet 명사
+@pos   명사
+@type  <아무 값>
+
+# meaning	en_meaning	word	pinyin
+서점	bookstore	书店	shūdiàn
+책	book	书	shū
+가게	shop	店	diàn
+```
+```bash
+python -m tools.words_batch.add_words tools/words_batch/서점_단어.words_add
+```
+
+### 4-2. `.words_compose` 파일로 연결 + layout 생성
+
+3열(탭 구분): `result  component1  component2` — 전부 한자 텍스트로 참조
+(word_id 아님, 스크립트가 words.xlsx에서 찾아 연결한다):
+
+```
+# result	component1	component2
+书店	书	店
+电灯	电	灯
+冰水	冰	水
+```
+
+```bash
+# 먼저 --dry-run으로 확인 (저장 없이 콘솔에 layout JSON 미리보기)
+python -m tools.words_batch.build_compose_layout tools/words_batch/서점세트.words_compose \
+    --like resource/table/word_memorize_layouts/조합_예시1.json --name 조합_서점세트 --dry-run
+
+# 문제없으면 실제 실행
+python -m tools.words_batch.build_compose_layout tools/words_batch/서점세트.words_compose \
+    --like resource/table/word_memorize_layouts/조합_예시1.json --name 조합_서점세트
+```
+
+한 세트는 정확히 3개 항목(B1/B2/B3). `--like`는 배경·색 등 스타일 템플릿용 —
+지금은 `조합_예시1.json` 하나뿐이라 사실상 고정값. 결과 합성어·부품 중
+words.xlsx에 없는 게 있으면 어떤 단어가 없는지 에러로 알려주니 4-1로 돌아가 추가한다.
+
+### 4-3. 완료 후
+
+- `component1_id`/`component2_id`는 결과 합성어 row에만 채워진다(부품 row 자체는 안 건드림).
+- `resource/table/words.csv`도 함께 갱신됨(`--no-csv` 없을 때).
+- 사운드·이모지 등 남은 리소스는 `조합형_need.md` 참고.
 
 ## layout JSON만 필요하고 words.xlsx 추가는 이미 끝난 경우
 

@@ -1,6 +1,7 @@
 """
 words(단어 마스터) 엑셀 → words.csv 변환.
-컬럼: id, word, pinyin, masking, pos, type, meaning, en_meaning, tip, img_path, video_path, sound_path.
+컬럼: id, word, pinyin, masking, pos, type, meaning, en_meaning, tip, img_path, video_path, sound_path,
+component1_id, component2_id.
 
 시트를 품사·용도별로 나눈 경우 `merge_all_sheets=True`로 모든 시트를 순서대로
 한 CSV에 누적할 수 있다(배치 `python -m tools.csv_gen`는 words에 대해 기본 활성).
@@ -32,6 +33,8 @@ FIELDNAMES = [
     "img_path",
     "video_path",
     "sound_path",
+    "component1_id",
+    "component2_id",
 ]
 
 
@@ -46,6 +49,17 @@ def _to_int(val: Any, default: int = 0) -> int:
         return int(float(val))
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_id(value: Any) -> str:
+    """component1_id/component2_id처럼 비어 있을 수 있는 정수 참조 컬럼 — pandas가 float으로 읽어도 정수 문자열로."""
+    raw = _normalize(value)
+    if not raw:
+        return ""
+    try:
+        return str(int(float(raw)))
+    except (TypeError, ValueError):
+        return raw
 
 
 def _rows_from_words_dataframe(df: DataFrame) -> list[dict[str, Any]]:
@@ -69,6 +83,8 @@ def _rows_from_words_dataframe(df: DataFrame) -> list[dict[str, Any]]:
             "img_path": _normalize(row.get("img_path", "")),
             "video_path": _normalize(row.get("video_path", "")),
             "sound_path": _normalize(row.get("sound_path", "")),
+            "component1_id": _normalize_id(row.get("component1_id", "")),
+            "component2_id": _normalize_id(row.get("component2_id", "")),
         })
     return rows
 

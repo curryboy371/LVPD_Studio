@@ -17,7 +17,7 @@ from core.paths import (
     STUDIO_WORD_MEMORIZE_BG_AUDIO_LINEAR_GAIN,
     get_repo_root,
 )
-from data.table_manager import load_words_table_from_csv
+from data.table_manager import get_word, load_words_table_from_csv
 from extra.table_editor.services.word_memorize_layout import (
     PICK_REVEAL_SEC,
     TRAP_REGROW_SEC,
@@ -29,6 +29,7 @@ from extra.table_editor.services.word_memorize_layout import (
     game_tile_display_px,
     is_base_slot_box,
     is_laser_selection_highlight,
+    layout_uses_compose,
     layout_uses_pick_mining,
     load_layout,
     normalize_selection_highlight,
@@ -69,12 +70,24 @@ from studio.studios.word_memorize_quiz import (
     quiz_fade_y_offset_px,
     quiz_reveal_hold_sec,
     quiz_timer_remaining_ratio,
+    quiz_tts_end_early_sec,
 )
 from studio.studios.word_memorize_laser import laser_impact_elapsed_sec
 from studio.studios.word_memorize_renderer import (
     WordMemorizeRenderer,
     load_en_meaning_by_id,
     load_ko_meaning_by_id,
+    load_word_components_by_id,
+)
+from studio.studios.word_memorize_compose import (
+    COMPOSE_B_TOTAL_SEC,
+    COMPOSE_PREVIEW_HOLD_SEC,
+    COMPOSE_REVIEW_HOLD_SEC,
+    ComposeTiming,
+    build_compose_timing,
+    compose_brush_sound_path,
+    compose_open_sound_path,
+    pick_random_compose_block_sound_path,
 )
 
 MeaningLang = Literal["ko", "en", "zh"]
@@ -87,6 +100,11 @@ END_HOLD_SEC = 0.6
 TTS_MISSING_HOLD_SEC = 1.2
 # 첫 TTS 종료 N초 전에 둘째 TTS 시작 (겹침)
 TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC = 0.8
+# 조합형 전용 — 부품 뜻(한국어) TTS가 끝난 뒤 중국어 단어 TTS 시작까지 간격(겹치지
+# 않고 쉬었다 재생). 뜻 TTS를 quiz_tts_end_early_sec로 잘라 짧아진 경우가 많아,
+# 표준 타입처럼 고정 초 전에 겹치게 하면(TTS_SECOND_LEAD_BEFORE_FIRST_END_SEC) 뜻이
+# 끝나기도 전에 단어가 시작돼 버려 텀이 거의 없어 보이는 문제가 있었다.
+COMPOSE_TTS_SECOND_GAP_SEC = 0.3
 # ko/en: 둘째=한자 — 꼬리 N초 전에 다음 단어(뜻 TTS) 시작
 TTS_NEXT_WORD_LEAD_BEFORE_SECOND_END_SEC = 0.5
 # zh: 둘째=한국어 뜻 — 다음 한자로 전환 (ko/en과 동일 0.5s)
@@ -103,12 +121,18 @@ _TILE_FALL_EFFECT_CHANNEL = 3
 _HAMER_EFFECT_CHANNEL = 2
 _LASER_EFFECT_CHANNEL = 5
 _SPARK_EFFECT_CHANNEL = 6
+_COMPOSE_BLOCK_EFFECT_CHANNEL = 0
+_COMPOSE_BRUSH_EFFECT_CHANNEL = 1
+_COMPOSE_OPEN_EFFECT_CHANNEL = 7
 _EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
     _PICK_EFFECT_CHANNEL: 0.2,
     _TILE_FALL_EFFECT_CHANNEL: 0.2,
     _HAMER_EFFECT_CHANNEL: 0.15,
     _LASER_EFFECT_CHANNEL: 0.20,
     _SPARK_EFFECT_CHANNEL: 0.58,
+    _COMPOSE_BLOCK_EFFECT_CHANNEL: 0.35,
+    _COMPOSE_BRUSH_EFFECT_CHANNEL: 0.35,
+    _COMPOSE_OPEN_EFFECT_CHANNEL: 0.4,
 }
 
 WordSubstep = Literal[
@@ -116,6 +140,7 @@ WordSubstep = Literal[
     "quiz_reveal",
     "quiz_fade_out",
     "glass_reveal_wait",
+    "compose",
     "mining",
     "trap_regrow",
     "cta_pre_regrow",
@@ -164,12 +189,21 @@ class WordMemorizeStudio(IStudio):
             self._card_meaning_by_id = load_en_meaning_by_id(csv_path)
         else:
             self._card_meaning_by_id = load_ko_meaning_by_id(csv_path)
+        self._compose_component_ids_by_result = load_word_components_by_id(csv_path)
+        self._compose_tray: list[int] = []
+        self._compose_sound_stage = 0
+        self._compose_timing = ComposeTiming()
+        self._compose_elapsed_total_sec = 0.0
         self._sequence: list[WordMemorizeBox] = []
         self._seq_index = 0
         self._phase = "intro"
         self._word_substep: WordSubstep = ""
         self._timer = 0.0
-        self._hold_sec = INTRO_HOLD_SEC
+        self._hold_sec = (
+            COMPOSE_PREVIEW_HOLD_SEC
+            if layout_uses_compose(self._layout)
+            else INTRO_HOLD_SEC
+        )
         self._active_key: str | None = None
         self._revealed_keys: set[str] = set()
         self._revealed_rows_by_key: dict[str, int] = {}
@@ -323,7 +357,13 @@ class WordMemorizeStudio(IStudio):
         self._phase = "intro"
         self._word_substep = ""
         self._timer = 0.0
-        self._hold_sec = INTRO_HOLD_SEC
+        self._hold_sec = (
+            COMPOSE_PREVIEW_HOLD_SEC
+            if layout_uses_compose(self._layout)
+            else INTRO_HOLD_SEC
+        )
+        self._compose_tray = []
+        self._compose_sound_stage = 0
         self._active_key = None
         self._revealed_keys = set()
         self._revealed_rows_by_key = {}
@@ -371,6 +411,7 @@ class WordMemorizeStudio(IStudio):
         if self._done:
             return
         dt = float(getattr(config, "dt_sec", 1.0 / 30.0) or (1.0 / 30.0))
+        self._compose_elapsed_total_sec += dt
         self._renderer.tick_mining_particles(dt)
         self._renderer.tick_background_video(dt)
         if self._phase == "word":
@@ -385,6 +426,8 @@ class WordMemorizeStudio(IStudio):
                 self._quiz_fade_elapsed_sec += dt
             elif self._word_substep == "glass_finale_close":
                 self._glass_finale_elapsed_sec += dt
+            elif self._word_substep == "compose":
+                self._sync_compose_sounds(self._timer + dt)
             elif self._word_substep not in (
                 "glass_finale_hold",
                 "quiz_reveal",
@@ -411,14 +454,20 @@ class WordMemorizeStudio(IStudio):
             ) * smooth
         if self._timer < self._hold_sec:
             return
+        if self._phase == "outro":
+            # 여기서 타이머를 0으로 리셋하지 않는다 — outro는 끝이라 이후 프레임이
+            # 없으므로, 마지막으로 그려질 프레임이 hold_sec 근처(복습 화면 페이드
+            # 아웃 완료 시점)를 그대로 유지해야 영상 시작 프레임과 이어붙였을 때
+            # 자연스럽다. 0으로 리셋하면 이 마지막 프레임만 다시 완전히 보이는
+            # 상태로 튀어 시작 프레임과 어긋나 보인다.
+            self._done = True
+            self.stop_background_audio()
+            return
         self._timer = 0.0
         if self._phase == "intro":
             self._begin_word(0)
         elif self._phase == "word":
             self._advance_word_step()
-        elif self._phase == "outro":
-            self._done = True
-            self.stop_background_audio()
 
     def _uses_revealed_keys(self) -> bool:
         """채굴·레이저 유리 모드 — 카드 노출 상태 추적."""
@@ -714,6 +763,115 @@ class WordMemorizeStudio(IStudio):
             label="타일 재생성 효과음",
         )
 
+    def _play_compose_block_sound(self) -> None:
+        """조합형 — 부품 타일 등장 (block1/block2 랜덤)."""
+        self._play_effect_sound(
+            pick_random_compose_block_sound_path(),
+            channel=_COMPOSE_BLOCK_EFFECT_CHANNEL,
+            label="조합형 부품 타일 효과음",
+        )
+
+    def _play_compose_brush_sound(self) -> None:
+        """조합형 — 획 그어짐(화살표 등장)."""
+        self._play_effect_sound(
+            compose_brush_sound_path(),
+            channel=_COMPOSE_BRUSH_EFFECT_CHANNEL,
+            label="조합형 획 효과음",
+        )
+
+    def _play_compose_open_sound(self) -> None:
+        """조합형 — 뜻 팝업."""
+        self._play_effect_sound(
+            compose_open_sound_path(),
+            channel=_COMPOSE_OPEN_EFFECT_CHANNEL,
+            label="조합형 뜻 팝업 효과음",
+        )
+
+    def _sync_compose_sounds(self, t: float) -> None:
+        """조합형 — 타이머가 각 등장 시점을 지날 때 1회씩 효과음·TTS 재생."""
+        stage = self._compose_sound_stage
+        timing = self._compose_timing
+        if stage < 1 and t >= timing.part_a_stamp:
+            self._play_compose_block_sound()
+            stage = 1
+        if stage < 2 and t >= timing.part_b_stamp:
+            self._play_compose_block_sound()
+            stage = 2
+        if stage < 3 and t >= timing.arrow_pop:
+            self._play_compose_brush_sound()
+            stage = 3
+        if stage < 4 and t >= timing.meaning_pop:
+            self._play_compose_open_sound()
+            stage = 4
+        self._compose_sound_stage = stage
+        self._sync_compose_narration(t)
+
+    def _compose_tts_pair_for_word(self, word_id: int) -> tuple[Path | None, Path | None]:
+        """(첫 TTS, 둘째 TTS) — meaning_lang 순서 그대로(ko/en→중국어, zh→한국어). CTA 없음."""
+        from audio.vocab_meaning_ko import resolve_vocab_meaning_ko_audio_path
+        from audio.word_memorize_en import resolve_word_memorize_en_audio_path
+        from audio.word_memorize_zh import resolve_word_memorize_zh_audio_path
+
+        zh_path = resolve_word_memorize_zh_audio_path(word_id)
+        ko_path = resolve_vocab_meaning_ko_audio_path(word_id)
+        en_path = resolve_word_memorize_en_audio_path(word_id)
+        if self._meaning_lang == "zh":
+            return zh_path, ko_path
+        if self._meaning_lang == "en":
+            return en_path, zh_path
+        return ko_path, zh_path
+
+    def _sync_compose_narration(self, t: float) -> None:
+        """조합형 — 부품1→부품2→결과 순서로, 각자 등장 시점부터 겹치지 않게 TTS 재생.
+
+        뜻(한국어) TTS는 quiz reveal과 동일하게 끝부분 일부를 잘라 재생한다
+        (quiz_tts_end_early_sec 재사용). 뜻 텍스트가 긴 부품(예: 电="전기, 전기의")이
+        있으면 안 잘라낼 경우 다음 부품의 내레이션이 고정 타이밍(다음 부품 등장·
+        화살표·임팩트)보다 한참 늦게 시작돼 화면과 어긋나 보인다. 단어 자체 발음
+        (중국어 TTS)은 학습 핵심이라 자르지 않고 전체 길이로 재생한다."""
+        if (
+            not self._compose_narration_second_done
+            and self._compose_narration_second_path is not None
+            and t >= self._compose_narration_second_at
+        ):
+            self._compose_narration_second_done = True
+            second_len = self._play_audio(self._compose_narration_second_path)
+            self._compose_narration_ready_at = max(
+                self._compose_narration_ready_at, t + max(0.0, second_len)
+            )
+
+        if self._compose_narration_idx >= len(self._compose_narration_queue):
+            return
+        if not self._compose_narration_second_done:
+            return
+        earliest, wid = self._compose_narration_queue[self._compose_narration_idx]
+        start_at = max(earliest, self._compose_narration_ready_at)
+        if t < start_at:
+            return
+        self._compose_narration_idx += 1
+
+        first_path, second_path = self._compose_tts_pair_for_word(wid)
+        first_len = 0.0
+        if first_path is not None:
+            first_full = self._audio_duration(first_path)
+            first_len = self._play_audio(
+                first_path,
+                volume=self._first_tts_playback_volume(),
+                max_len_sec=first_full - quiz_tts_end_early_sec(first_full),
+            )
+            if first_len <= 0:
+                first_len = first_full
+        second_len_est = self._audio_duration(second_path)
+        if second_path is not None and second_len_est > 0:
+            self._compose_narration_second_path = second_path
+            self._compose_narration_second_at = t + first_len + COMPOSE_TTS_SECOND_GAP_SEC
+            self._compose_narration_second_done = False
+            self._compose_narration_ready_at = self._compose_narration_second_at
+        else:
+            self._compose_narration_second_path = None
+            self._compose_narration_second_done = True
+            self._compose_narration_ready_at = t + first_len
+
     def _sync_trap_fall_impacts(self, prev_sec: float, curr_sec: float) -> None:
         """trap 타일 낙하 착지 프레임마다 임팩트 파티클."""
         if self._word_substep != "trap_regrow":
@@ -889,6 +1047,8 @@ class WordMemorizeStudio(IStudio):
 
     def _should_show_quiz_reveal(self, box: WordMemorizeBox) -> bool:
         """퀴즈 모드 — 단어 공개 전 두루마리 UI (ko/zh, CTA·base 슬롯 제외)."""
+        if layout_uses_compose(self._layout):
+            return False
         if not self._quiz_mode or self._meaning_lang not in ("ko", "zh"):
             return False
         if box_uses_cta_audio(box):
@@ -983,8 +1143,65 @@ class WordMemorizeStudio(IStudio):
         self._hold_sec = 0.0
         return True
 
+    def _compose_narration_total_sec(self, wid: int) -> float:
+        """부품/결과 단어 하나의 예상 내레이션 총 길이(뜻 TTS 잘라낸 길이 + 간격 +
+        단어 TTS 전체 길이) — 실제로 재생하지 않고 파일 길이만 재서 화면 등장
+        타이밍(build_compose_timing)을 미리 계산하는 데 쓴다."""
+        if not wid:
+            return 0.0
+        first_path, second_path = self._compose_tts_pair_for_word(wid)
+        first_full = self._audio_duration(first_path)
+        first_len = max(0.0, first_full - quiz_tts_end_early_sec(first_full)) if first_full > 0 else 0.0
+        second_len = self._audio_duration(second_path)
+        if second_len <= 0:
+            return first_len
+        return first_len + COMPOSE_TTS_SECOND_GAP_SEC + second_len
+
+    def _begin_compose_word(self) -> None:
+        """조합형 — 부품 2개·결과 단어 TTS(한국어 뜻→중국어 단어)는 각자 등장
+        시점부터 순서대로 재생(겹치지 않게 큐잉). 부품 타일·화살표 등장 시점은
+        고정이 기본이지만, 부품 내레이션이 그보다 길면 build_compose_timing이
+        뒤로 늦춰 화면이 오디오보다 앞서가지 않게 한다."""
+        self._word_substep = "compose"
+        self._hold_sec = COMPOSE_B_TOTAL_SEC
+        self._compose_sound_stage = 0
+
+        box = self._active_mining_box()
+        result_id: int | None = None
+        if box is not None:
+            try:
+                result_id = resolve_box_word_id(box)
+            except (TypeError, ValueError):
+                result_id = None
+        c1_id, c2_id = (
+            self._compose_component_ids_by_result.get(int(result_id), (0, 0))
+            if result_id is not None
+            else (0, 0)
+        )
+        self._compose_timing = build_compose_timing(
+            self._compose_narration_total_sec(c1_id),
+            self._compose_narration_total_sec(c2_id),
+        )
+        queue: list[tuple[float, int]] = []
+        for earliest, wid in (
+            (self._compose_timing.part_a_stamp, c1_id),
+            (self._compose_timing.part_b_stamp, c2_id),
+            (self._compose_timing.impact, result_id or 0),
+        ):
+            if wid:
+                queue.append((earliest, int(wid)))
+        self._compose_narration_queue = queue
+        self._compose_narration_idx = 0
+        self._compose_narration_ready_at = 0.0
+        self._compose_narration_second_path = None
+        self._compose_narration_second_at = 0.0
+        self._compose_narration_second_done = True
+
     def _begin_word_content(self) -> None:
-        """퀴즈 공개 후 본격 단어 진행 (채굴 또는 TTS)."""
+        """퀴즈 공개 후 본격 단어 진행 (조합형 · 채굴 · TTS)."""
+        if layout_uses_compose(self._layout):
+            self._begin_compose_word()
+            return
         box = self._active_mining_box()
         if box is None:
             return
@@ -1019,7 +1236,11 @@ class WordMemorizeStudio(IStudio):
             self._phase = "outro"
             self._active_key = None
             self._word_substep = ""
-            self._hold_sec = self._outro_hold_sec()
+            self._hold_sec = (
+                COMPOSE_REVIEW_HOLD_SEC
+                if layout_uses_compose(self._layout)
+                else self._outro_hold_sec()
+            )
             return
         box = self._sequence[index]
         self._seq_index = index
@@ -1046,6 +1267,18 @@ class WordMemorizeStudio(IStudio):
             return
         if self._word_substep == "glass_reveal_wait":
             self._begin_word_content()
+            return
+        if self._word_substep == "compose":
+            box = self._active_mining_box()
+            if box is not None:
+                try:
+                    wid = resolve_box_word_id(box)
+                except (TypeError, ValueError):
+                    wid = None
+                if wid is not None:
+                    self._compose_tray.append(int(wid))
+            self._word_substep = ""
+            self._advance_after_trap()
             return
         if self._word_substep == "mining":
             self._ensure_mining_complete()
@@ -1119,7 +1352,11 @@ class WordMemorizeStudio(IStudio):
         else:
             self._phase = "outro"
             self._active_key = None
-            self._hold_sec = self._outro_hold_sec()
+            self._hold_sec = (
+                COMPOSE_REVIEW_HOLD_SEC
+                if layout_uses_compose(self._layout)
+                else self._outro_hold_sec()
+            )
 
     def _is_recording_mode(self) -> bool:
         return getattr(self._last_config, "recording_log_event", None) is not None
@@ -1315,29 +1552,43 @@ class WordMemorizeStudio(IStudio):
                 second_len = self._audio_duration(second_path)
         return 0.0, second_path, second_len
 
-    def _play_audio(self, path: Path, *, volume: float = 1.0) -> float:
+    def _play_audio(
+        self, path: Path, *, volume: float = 1.0, max_len_sec: float | None = None
+    ) -> float:
+        """max_len_sec을 주면 그 길이에서 재생을 끊는다(quiz reveal TTS 조기 종료와 동일한
+        기법 — 끝부분을 잘라 다음 타이밍이 밀리지 않게 함). 녹화 모드에도 동일하게
+        반영되도록 로그에 남기는 길이도 잘라낸다."""
         try:
             snd = pygame.mixer.Sound(str(path))
             dur = float(snd.get_length())
+            effective = dur if max_len_sec is None else max(0.0, min(dur, max_len_sec))
             if self._is_recording_mode():
-                self._log_insert_sound(path, dur)
-                return dur
+                self._log_insert_sound(path, effective)
+                return effective
             vol = max(0.0, min(1.0, float(volume)))
             if vol < 1.0:
                 snd.set_volume(vol)
-            snd.play()
-            return dur
+            maxtime_ms = 0 if max_len_sec is None else int(effective * 1000)
+            snd.play(maxtime=maxtime_ms)
+            return effective
         except Exception as e:
             logger.debug("TTS 재생 실패 (%s): %s", path, e)
             return 0.0
 
     def _words_by_id_for_draw(self) -> dict[int, Any]:
-        """렌더용 단어 dict — CTA 타입 포함."""
+        """렌더용 단어 dict — CTA 타입 포함. 조합형은 박스에 없는 부품 단어도 포함해야 함."""
         out: dict[int, Any] = {}
         for box in self._layout.boxes:
             word = resolve_box_word(box, words_by_id=out)
             if word is not None:
                 out[int(word.id)] = word
+        if layout_uses_compose(self._layout):
+            for c1_id, c2_id in self._compose_component_ids_by_result.values():
+                for cid in (c1_id, c2_id):
+                    if cid and cid not in out:
+                        w = get_word(cid)
+                        if w is not None:
+                            out[cid] = w
         return out
 
     def draw(self, screen: Any, config: Any) -> None:
@@ -1444,7 +1695,39 @@ class WordMemorizeStudio(IStudio):
             quiz_overlay_lang=self._meaning_lang,
             quiz_time_remaining_ratio=quiz_time_ratio,
             quiz_overlay_y_offset=quiz_y_offset,
+            compose_mode=layout_uses_compose(self._layout),
+            compose_phase=self._phase,
+            compose_word_substep=self._word_substep,
+            compose_timer_sec=self._timer,
+            compose_active_word_id=self._compose_active_word_id(),
+            compose_sequence_word_ids=self._compose_sequence_word_ids(),
+            compose_tray_word_ids=list(self._compose_tray),
+            compose_component_ids_by_result=self._compose_component_ids_by_result,
+            compose_timing=self._compose_timing,
+            compose_absolute_time_sec=self._compose_elapsed_total_sec,
         )
+
+    def _compose_active_word_id(self) -> int | None:
+        if self._phase != "word":
+            return None
+        box = self._active_mining_box()
+        if box is None:
+            return None
+        try:
+            return resolve_box_word_id(box)
+        except (TypeError, ValueError):
+            return None
+
+    def _compose_sequence_word_ids(self) -> list[int]:
+        out: list[int] = []
+        for box in self._sequence:
+            try:
+                wid = resolve_box_word_id(box)
+            except (TypeError, ValueError):
+                wid = None
+            if wid is not None:
+                out.append(int(wid))
+        return out
 
     def get_recording_prefix(self) -> Optional[str]:
         topic = _word_memorize_recording_topic(self._layout_path)
