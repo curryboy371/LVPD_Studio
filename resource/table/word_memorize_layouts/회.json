@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "video",
+    "value": "mandala_b"
+  },
+  "title": "回（돌아올 회）",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#b388ff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "回（돌아올 회）",
+      "color": "#b388ff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "",
+  "subtitle_text_tile": "",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "",
+      "font": "kr_cn",
+      "text_tile": ""
+    }
+  ],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
+  "selection_highlight": "laser_p",
+  "row_highlight": "none",
+  "use_base_slot": true,
+  "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": true,
+  "bg_music_path": "resource/sound/bg_short/Velvet_Sidewalk.mp3",
+  "game_tile": "",
+  "game_tiles": [],
+  "game_tile_seed": 0,
+  "game_particle": "",
+  "game_particles": [],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
+  "game_pick": "",
+  "boxes": [
+    {
+      "word_id": "10076",
+      "order": 1,
+      "x": 400,
+      "y": 724,
+      "w": 280,
+      "h": 383,
+      "box_key": "box_1",
+      "card_type": ""
+    },
+    {
+      "word_id": "10022",
+      "order": 2,
+      "x": 10,
+      "y": 156,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_2",
+      "card_type": ""
+    },
+    {
+      "word_id": "10069",
+      "order": 3,
+      "x": 421,
+      "y": 157,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_3",
+      "card_type": ""
+    },
+    {
+      "word_id": "10070",
+      "order": 4,
+      "x": 790,
+      "y": 158,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_4",
+      "card_type": ""
+    },
+    {
+      "word_id": "10071",
+      "order": 5,
+      "x": 790,
+      "y": 731,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_6",
+      "card_type": ""
+    },
+    {
+      "word_id": "10072",
+      "order": 6,
+      "x": 790,
+      "y": 1310,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_9",
+      "card_type": ""
+    },
+    {
+      "word_id": "10073",
+      "order": 7,
+      "x": 404,
+      "y": 1318,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_8",
+      "card_type": ""
+    },
+    {
+      "word_id": "10074",
+      "order": 8,
+      "x": 10,
+      "y": 1327,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_7",
+      "card_type": ""
+    },
+    {
+      "word_id": "10075",
+      "order": 9,
+      "x": 10,
+      "y": 716,
+      "w": 280,
+      "h": 404,
+      "box_key": "box_5",
+      "card_type": ""
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.08020833333333334,
+  "margin_bottom_ratio": 0.1015625
+}

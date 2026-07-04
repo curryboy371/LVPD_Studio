@@ -953,6 +953,7 @@ class WordMemorizeRenderer:
         quiz_overlay_box: WordMemorizeBox | None = None,
         quiz_overlay_alpha: int = 0,
         quiz_overlay_lang: str = "ko",
+        quiz_overlay_y_offset: int = 0,
         quiz_time_remaining_ratio: float | None = None,
     ) -> None:
         self.ensure_fonts()
@@ -1171,6 +1172,11 @@ class WordMemorizeRenderer:
             and active_card_visible
             and not glass_finale_close
             and not (
+                laser_glass
+                and active_box_key
+                and active_box_key in revealed
+            )
+            and not (
                 trap_regrow_active
                 and trap_regrow_box_key
                 and active_box_key == trap_regrow_box_key
@@ -1238,6 +1244,7 @@ class WordMemorizeRenderer:
                     meaning_lang=quiz_overlay_lang,
                     alpha=quiz_overlay_alpha,
                     time_remaining_ratio=quiz_time_remaining_ratio,
+                    y_offset_px=quiz_overlay_y_offset,
                 )
 
     def _draw_quiz_overlay(
@@ -1249,6 +1256,7 @@ class WordMemorizeRenderer:
         meaning_lang: str,
         alpha: int,
         time_remaining_ratio: float | None = None,
+        y_offset_px: int = 0,
     ) -> None:
         from studio.studios.word_memorize_quiz import draw_quiz_reveal_overlay
 
@@ -1270,6 +1278,7 @@ class WordMemorizeRenderer:
             alpha=alpha,
             load_word_image=load_word_image,
             time_remaining_ratio=time_remaining_ratio,
+            y_offset_px=y_offset_px,
         )
 
     def _draw_cta_caption(

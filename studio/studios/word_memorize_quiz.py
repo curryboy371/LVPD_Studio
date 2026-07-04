@@ -14,9 +14,26 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_quiz_gage_path,
 )
 
-# TTS 종료 후 유지(초) → 페이드 아웃
-QUIZ_HOLD_AFTER_TTS_SEC = 1.0
-QUIZ_FADE_OUT_SEC = 0.65
+# TTS 길이의 마지막 이 비율만큼 건너뛰고 페이드 (예: 0.25 → 2.8초 TTS면 0.7초 일찍)
+QUIZ_TTS_END_EARLY_RATIO = 0.25
+QUIZ_FADE_OUT_SEC = 0.25
+
+
+def quiz_tts_end_early_sec(tts_len: float) -> float:
+    """TTS 길이에 비례한 조기 종료(초)."""
+    length = max(0.0, float(tts_len))
+    if length <= 1e-6:
+        return 0.0
+    return length * float(QUIZ_TTS_END_EARLY_RATIO)
+
+
+def quiz_reveal_hold_sec(tts_len: float) -> float:
+    """퀴즈 reveal 유지 — TTS 끝 ``quiz_tts_end_early_sec`` 만큼 일찍 페이드로 넘긴다."""
+    return max(0.0, float(tts_len) - quiz_tts_end_early_sec(tts_len))
+
+
+# 페이드 아웃 동안 퀴즈 박스가 내려가는 최대 거리(프레임 높이 비율)
+QUIZ_FADE_DROP_TRAVEL_RATIO = 0.10
 # 양피지 내부 — 이미지|단어 가로 배치 (inset은 에셋에서 자동 감지, 폴백용)
 _QUIZ_CONTENT_PAD_X = 0.06
 _QUIZ_CONTENT_PAD_Y = 0.10
@@ -63,6 +80,27 @@ def quiz_reveal_display_text(word: Word, *, meaning_lang: str) -> str:
     if lang in ("zh", "ch", "cn"):
         return (word.word or "").strip()
     return (word.meaning or "").strip()
+
+
+def quiz_fade_progress(
+    fade_elapsed_sec: float,
+    fade_duration_sec: float = QUIZ_FADE_OUT_SEC,
+) -> float:
+    """quiz_fade_out 진행률 0→1."""
+    dur = max(1e-4, float(fade_duration_sec))
+    return max(0.0, min(1.0, float(fade_elapsed_sec) / dur))
+
+
+def quiz_fade_y_offset_px(
+    frame_height: int,
+    *,
+    fade_elapsed_sec: float,
+    fade_duration_sec: float = QUIZ_FADE_OUT_SEC,
+) -> int:
+    """페이드 아웃 동안 퀴즈 박스를 아래로 이동할 픽셀."""
+    fh = max(1, int(frame_height))
+    t = quiz_fade_progress(fade_elapsed_sec, fade_duration_sec)
+    return int(round(fh * QUIZ_FADE_DROP_TRAVEL_RATIO * t))
 
 
 def quiz_fade_alpha(
@@ -672,6 +710,7 @@ def draw_quiz_reveal_overlay(
     alpha: int,
     load_word_image: Callable[[Word, int, int], pygame.Surface | None],
     time_remaining_ratio: float | None = None,
+    y_offset_px: int = 0,
 ) -> None:
     """퀴즈 프레임 — 이미지(좌)·단어(우) 가로 배치."""
     if alpha <= 0:
@@ -684,7 +723,7 @@ def draw_quiz_reveal_overlay(
     fh = max(1, int(frame_height))
     bw, bh = box.get_size()
     cx = fw // 2
-    cy = int(fh * _QUIZ_CENTER_Y_RATIO)
+    cy = int(fh * _QUIZ_CENTER_Y_RATIO) + int(y_offset_px)
     box_rect = box.get_rect(center=(cx, cy))
 
     if alpha < 255:

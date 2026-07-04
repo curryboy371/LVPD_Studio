@@ -330,6 +330,18 @@ def stamp_beam_scorch_full_path(
     )
 
 
+def laser_target_on_card_center(
+    card_rect: tuple[int, int, int, int] | pygame.Rect,
+) -> tuple[float, float]:
+    """카드 사각형의 기하학적 중심."""
+    if isinstance(card_rect, pygame.Rect):
+        rect = card_rect
+    else:
+        x, y, w, h = card_rect
+        rect = pygame.Rect(int(x), int(y), int(w), int(h))
+    return rect.x + rect.width * 0.5, rect.y + rect.height * 0.5
+
+
 def laser_target_on_card_border(
     origin: tuple[float, float],
     card_rect: tuple[int, int, int, int] | pygame.Rect,
@@ -433,8 +445,11 @@ def draw_laser_center_to_card(
     scorch_prev_length_px: float = 0.0,
     laser_variant: str = DEFAULT_LASER_VARIANT,
     beam_alpha_mult: float = 1.0,
+    aim_at_center: bool = False,
 ) -> float:
-    """프레임 정중앙(꼬리)에서 카드 사각 테두리 충돌점(머리)으로 레이저 발사.
+    """프레임 정중앙(꼬리)에서 카드(머리)로 레이저 발사.
+
+    aim_at_center=True면 카드 중심까지, False면 테두리 충돌점(+overshoot)까지.
 
     scorch_surface가 주어지면 빔 경로에 그을림을 누적하고, 갱신된 prev_length를 반환한다.
     """
@@ -445,7 +460,11 @@ def draw_laser_center_to_card(
         return scorch_prev_length_px
 
     origin = (frame_width * 0.5, frame_height * 0.5)
-    target = laser_target_on_card_border(origin, card_rect)
+    target = (
+        laser_target_on_card_center(card_rect)
+        if aim_at_center
+        else laser_target_on_card_border(origin, card_rect)
+    )
     dx = target[0] - origin[0]
     dy = target[1] - origin[1]
     distance = math.hypot(dx, dy)

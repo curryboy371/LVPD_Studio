@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from extra.table_editor.services.word_memorize_layout import WordMemorizeLayout
 
 # 레이저 적중 후 유리가 녹아 없어지는 시간(초)
-GLASS_DISSOLVE_SEC = 0.88
+GLASS_DISSOLVE_SEC = 1.05
 # 피날레 — 역디졸브 완료 후 레이저 빔 소멸 시간(초)
 LASER_FINALE_FADE_SEC = 0.42
 # 디졸브 중 spark 효과음 랜덤 반복 간격(초)
@@ -129,6 +129,24 @@ def glass_dissolve_complete(
 ) -> bool:
     """디졸브가 끝났는지."""
     return glass_dissolve_t(elapsed_sec, loop_preview=loop_preview) >= 1.0 - 1e-4
+
+
+def glass_dissolve_total_sec() -> float:
+    """레이저 발사(0)부터 디졸브 완료까지 걸리는 시간(초)."""
+    from studio.studios.word_memorize_laser import LASER_HIT_START_SEC
+
+    return LASER_HIT_START_SEC + GLASS_DISSOLVE_SEC
+
+
+def glass_dissolve_remaining_sec(
+    elapsed_sec: float,
+    *,
+    loop_preview: bool = False,
+) -> float:
+    """디졸브가 끝나기까지 남은 시간(초)."""
+    if glass_dissolve_complete(elapsed_sec, loop_preview=loop_preview):
+        return 0.0
+    return max(0.0, glass_dissolve_total_sec() - max(0.0, float(elapsed_sec)))
 
 
 def glass_dissolve_t_reverse(

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -27,8 +28,10 @@ from extra.table_editor.services.word_memorize_layout import (
     box_uses_trap,
     game_tile_display_px,
     is_base_slot_box,
+    is_laser_selection_highlight,
     layout_uses_pick_mining,
     load_layout,
+    normalize_selection_highlight,
 )
 from studio.studios.word_memorize_box_resolve import (
     active_cta_caption_for_box,
@@ -56,13 +59,15 @@ from studio.studios.word_memorize_glass import (
     GLASS_SPARK_SOUND_INTERVAL_MIN_SEC,
     glass_dissolve_complete,
     glass_dissolve_t_reverse,
+    glass_dissolve_total_sec,
     glass_finale_close_duration_sec,
     layout_uses_laser_glass,
 )
 from studio.studios.word_memorize_quiz import (
     QUIZ_FADE_OUT_SEC,
-    QUIZ_HOLD_AFTER_TTS_SEC,
     quiz_fade_alpha,
+    quiz_fade_y_offset_px,
+    quiz_reveal_hold_sec,
     quiz_timer_remaining_ratio,
 )
 from studio.studios.word_memorize_laser import laser_impact_elapsed_sec
@@ -102,7 +107,7 @@ _EFFECT_CHANNEL_VOLUMES: dict[int, float] = {
     _PICK_EFFECT_CHANNEL: 0.2,
     _TILE_FALL_EFFECT_CHANNEL: 0.2,
     _HAMER_EFFECT_CHANNEL: 0.15,
-    _LASER_EFFECT_CHANNEL: 0.60,
+    _LASER_EFFECT_CHANNEL: 0.20,
     _SPARK_EFFECT_CHANNEL: 0.58,
 }
 
@@ -110,6 +115,7 @@ WordSubstep = Literal[
     "",
     "quiz_reveal",
     "quiz_fade_out",
+    "glass_reveal_wait",
     "mining",
     "trap_regrow",
     "cta_pre_regrow",
@@ -130,13 +136,11 @@ def _normalize_meaning_lang(raw: str) -> MeaningLang:
     return "ko"
 
 
-def _recording_lang_tag(meaning_lang: MeaningLang) -> str:
-    """녹화 파일명용 언어 코드 (ko / en / ch)."""
-    if meaning_lang == "en":
-        return "en"
-    if meaning_lang == "zh":
-        return "ch"
-    return "ko"
+def _word_memorize_recording_topic(layout_path: Path) -> str:
+    """녹화 파일명용 주제 — 배치 JSON stem."""
+    raw = (layout_path.stem or "").strip()
+    cleaned = re.sub(r'[<>:"/\\|?*]', "_", raw)
+    return cleaned.strip() or "untitled"
 
 
 class WordMemorizeStudio(IStudio):
@@ -191,6 +195,7 @@ class WordMemorizeStudio(IStudio):
         self._quiz_fade_elapsed_sec = 0.0
         self._quiz_consumed_first_tts = False
         self._quiz_gage_display_ratio = 1.0
+        self._quiz_tts_channel: Any = None
 
     def _uses_pick_mining(self) -> bool:
         """퀴즈 모드 — 곡괭이·타일 파괴 채굴."""
@@ -199,6 +204,13 @@ class WordMemorizeStudio(IStudio):
     def _uses_laser_glass(self) -> bool:
         """퀴즈 모드 — 레이저 유리 흐림·디졸브."""
         return self._quiz_mode and layout_uses_laser_glass(self._layout)
+
+    def _uses_laser_highlight(self) -> bool:
+        """배치 selection_highlight가 레이저 빔 (퀴즈·일반 공통)."""
+        kind = normalize_selection_highlight(
+            getattr(self._layout, "selection_highlight", "")
+        )
+        return is_laser_selection_highlight(kind)
 
     def _needs_final_tile_regrow(self) -> bool:
         """퀴즈 타일 모드 — 마지막 단어 후 trap 카드 없어도 타일 복구."""
@@ -332,6 +344,7 @@ class WordMemorizeStudio(IStudio):
         self._quiz_fade_elapsed_sec = 0.0
         self._quiz_consumed_first_tts = False
         self._quiz_gage_display_ratio = 1.0
+        self._quiz_tts_channel: Any = None
         self._reset_laser_glass_sound_state()
 
     def get_title(self) -> str:
@@ -379,11 +392,11 @@ class WordMemorizeStudio(IStudio):
             ):
                 self._active_word_elapsed_sec += dt
                 self._sync_laser_glass_revealed()
-            if self._uses_laser_glass() and self._word_substep not in (
+            if self._uses_laser_highlight() and self._word_substep not in (
                 "quiz_reveal",
                 "quiz_fade_out",
             ):
-                self._sync_laser_glass_sounds(dt)
+                self._sync_laser_sounds(dt)
             if self._word_substep == "mining":
                 self._sync_pick_revealed_keys()
         self._timer += dt
@@ -438,6 +451,20 @@ class WordMemorizeStudio(IStudio):
             GLASS_SPARK_SOUND_INTERVAL_MAX_SEC,
         )
 
+    def _finish_quiz_fade_to_word(self) -> None:
+        """퀴즈 페이드 종료 → (레이저 유리) 디졸브 후 한자 TTS."""
+        self._quiz_fade_elapsed_sec = 0.0
+        if self._uses_laser_glass():
+            self._word_substep = "glass_reveal_wait"
+            self._reset_laser_glass_sound_state()
+            self._active_word_elapsed_sec = 0.0
+            box = self._active_mining_box()
+            if box is not None:
+                self._active_word_duration_sec = self._word_play_duration_sec(box)
+            self._hold_sec = glass_dissolve_total_sec()
+            return
+        self._begin_word_content()
+
     def _play_laser_sound(self) -> None:
         """레이저 발사 효과음 — 1회."""
         self._play_effect_sound(
@@ -473,11 +500,13 @@ class WordMemorizeStudio(IStudio):
         )
         self._play_random_spark_sound()
 
-    def _sync_laser_glass_sounds(self, dt: float) -> None:
-        """레이저 유리 — 발사 1회·디졸브 spark 반복."""
+    def _sync_laser_sounds(self, dt: float) -> None:
+        """레이저 — 발사 1회(퀴즈·일반). 퀴즈 유리 모드만 디졸브 spark 반복."""
         if self._word_substep == "glass_finale_hold":
             return
         if self._word_substep == "glass_finale_close":
+            if not self._uses_laser_glass():
+                return
             elapsed = self._glass_finale_elapsed_sec
             if not self._laser_effect_played:
                 self._play_laser_sound()
@@ -493,10 +522,19 @@ class WordMemorizeStudio(IStudio):
         box = self._active_mining_box()
         if box is None or is_base_slot_box(box, self._layout):
             return
+        if (
+            self._uses_laser_glass()
+            and self._active_key in self._revealed_keys
+            and self._word_substep in ("first", "second", "")
+        ):
+            self._glass_spark_timer = 0.0
+            return
         elapsed = self._active_word_elapsed_sec
         if not self._laser_effect_played:
             self._play_laser_sound()
             self._laser_effect_played = True
+        if not self._uses_laser_glass():
+            return
         impact_t = laser_impact_elapsed_sec(elapsed)
         if impact_t > 0.0 and not glass_dissolve_complete(elapsed):
             self._sync_glass_dissolve_spark_sounds(dt, impact_t=impact_t)
@@ -883,7 +921,7 @@ class WordMemorizeStudio(IStudio):
         path = self._quiz_reveal_tts_path(box)
         tts_len = 0.0
         if path is not None and path.is_file():
-            tts_len = self._play_audio(path)
+            tts_len = self._play_quiz_reveal_tts(path)
             if tts_len <= 0:
                 tts_len = self._audio_duration(path)
             self._quiz_consumed_first_tts = True
@@ -898,7 +936,32 @@ class WordMemorizeStudio(IStudio):
                 wid,
                 label,
             )
-        self._hold_sec = tts_len + float(QUIZ_HOLD_AFTER_TTS_SEC)
+        self._hold_sec = quiz_reveal_hold_sec(tts_len)
+
+    def _stop_quiz_tts(self) -> None:
+        """퀴즈 reveal TTS 조기 종료 — 페이드 시작 시 호출."""
+        ch = self._quiz_tts_channel
+        if ch is not None:
+            try:
+                ch.stop()
+            except Exception:
+                pass
+        self._quiz_tts_channel = None
+
+    def _play_quiz_reveal_tts(self, path: Path) -> float:
+        """퀴즈 두루마리 TTS 재생. 재생 채널을 보관해 조기 종료에 사용."""
+        self._stop_quiz_tts()
+        try:
+            snd = pygame.mixer.Sound(str(path))
+            dur = float(snd.get_length())
+            if self._is_recording_mode():
+                self._log_insert_sound(path, dur)
+                return dur
+            self._quiz_tts_channel = snd.play()
+            return dur
+        except Exception as e:
+            logger.debug("퀴즈 TTS 재생 실패 (%s): %s", path, e)
+            return 0.0
 
     def _apply_word_audio_after_quiz_first(self, box: WordMemorizeBox) -> bool:
         """퀴즈에서 첫 TTS를 이미 재생했으면 둘째부터 시작. 처리했으면 True."""
@@ -928,7 +991,7 @@ class WordMemorizeStudio(IStudio):
         self._active_word_elapsed_sec = 0.0
         self._pick_mining_elapsed_sec = 0.0
         self._pick_mining_last_swing_index = -1
-        if self._uses_laser_glass() and not is_base_slot_box(box, self._layout):
+        if self._uses_laser_highlight() and not is_base_slot_box(box, self._layout):
             self._reset_laser_glass_sound_state()
         self._active_word_duration_sec = self._word_play_duration_sec(box)
         self._queued_second_path = None
@@ -965,6 +1028,7 @@ class WordMemorizeStudio(IStudio):
         self._quiz_fade_elapsed_sec = 0.0
         self._quiz_consumed_first_tts = False
         self._quiz_gage_display_ratio = 1.0
+        self._quiz_tts_channel: Any = None
         if self._should_show_quiz_reveal(box):
             self._begin_quiz_reveal(box)
             return
@@ -972,12 +1036,15 @@ class WordMemorizeStudio(IStudio):
 
     def _advance_word_step(self) -> None:
         if self._word_substep == "quiz_reveal":
+            self._stop_quiz_tts()
             self._word_substep = "quiz_fade_out"
             self._quiz_fade_elapsed_sec = 0.0
             self._hold_sec = float(QUIZ_FADE_OUT_SEC)
             return
         if self._word_substep == "quiz_fade_out":
-            self._quiz_fade_elapsed_sec = 0.0
+            self._finish_quiz_fade_to_word()
+            return
+        if self._word_substep == "glass_reveal_wait":
             self._begin_word_content()
             return
         if self._word_substep == "mining":
@@ -1286,6 +1353,12 @@ class WordMemorizeStudio(IStudio):
         active_box_key: str | None = self._active_key if highlight else None
         quiz_overlay = self._word_substep in ("quiz_reveal", "quiz_fade_out")
         quiz_box = self._active_mining_box() if quiz_overlay else None
+        quiz_y_offset = 0
+        if self._word_substep == "quiz_fade_out":
+            quiz_y_offset = quiz_fade_y_offset_px(
+                int(self._layout.frame_height),
+                fade_elapsed_sec=self._quiz_fade_elapsed_sec,
+            )
         quiz_alpha = (
             quiz_fade_alpha(
                 self._word_substep,
@@ -1370,14 +1443,14 @@ class WordMemorizeStudio(IStudio):
             quiz_overlay_alpha=quiz_alpha,
             quiz_overlay_lang=self._meaning_lang,
             quiz_time_remaining_ratio=quiz_time_ratio,
+            quiz_overlay_y_offset=quiz_y_offset,
         )
 
     def get_recording_prefix(self) -> Optional[str]:
-        stem = self._layout_path.stem.replace(" ", "_")
-        lang = _recording_lang_tag(self._meaning_lang)
+        topic = _word_memorize_recording_topic(self._layout_path)
         if self._quiz_mode:
-            return f"여포판다_단어외우기_퀴즈_{stem}_{lang}"
-        return f"여포판다_단어외우기_{stem}_{lang}"
+            return f"[중국어 단어 퀴즈] {topic}"
+        return f"[중국어 단어] {topic}"
 
     def should_stop_recording(self) -> bool:
         return self._done

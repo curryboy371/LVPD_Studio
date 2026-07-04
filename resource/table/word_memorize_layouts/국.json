@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "video",
+    "value": "blue"
+  },
+  "title": "국가 이름을 외우자!",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#ffffff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "국가 이름을 외우자!",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "국가 이름을\n외워보자",
+  "subtitle_text_tile": "green",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [
+    {
+      "text": "국가 이름을",
+      "font": "kr_cn",
+      "text_tile": "white"
+    },
+    {
+      "text": "외워보자",
+      "font": "kr_cn",
+      "text_tile": "black"
+    }
+  ],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
+  "selection_highlight": "gradient",
+  "row_highlight": "none",
+  "use_base_slot": false,
+  "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": true,
+  "bg_music_path": "resource/sound/bg_short/쇼츠-왈츠.mp3",
+  "game_tile": "tile_000_002",
+  "game_tiles": [
+    "tile_000_002",
+    "tile_001_001"
+  ],
+  "game_tile_seed": 791271932,
+  "game_particle": "particle_000",
+  "game_particles": [
+    "particle_000",
+    "particle_001"
+  ],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
+  "game_pick": "pick1",
+  "boxes": [
+    {
+      "word_id": "20234",
+      "order": 1,
+      "x": 26,
+      "y": 250,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_1",
+      "card_type": ""
+    },
+    {
+      "word_id": "20236",
+      "order": 2,
+      "x": 287,
+      "y": 250,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_3",
+      "card_type": ""
+    },
+    {
+      "word_id": "20239",
+      "order": 3,
+      "x": 548,
+      "y": 250,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_6",
+      "card_type": ""
+    },
+    {
+      "word_id": "20249",
+      "order": 4,
+      "x": 809,
+      "y": 250,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_16",
+      "card_type": ""
+    },
+    {
+      "word_id": "20248",
+      "order": 5,
+      "x": 26,
+      "y": 585,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_15",
+      "card_type": ""
+    },
+    {
+      "word_id": "20250",
+      "order": 6,
+      "x": 287,
+      "y": 585,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_17",
+      "card_type": ""
+    },
+    {
+      "word_id": "20243",
+      "order": 7,
+      "x": 548,
+      "y": 585,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_10",
+      "card_type": ""
+    },
+    {
+      "word_id": "20240",
+      "order": 8,
+      "x": 809,
+      "y": 585,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_7",
+      "card_type": ""
+    },
+    {
+      "word_id": "20241",
+      "order": 9,
+      "x": 26,
+      "y": 920,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_8",
+      "card_type": ""
+    },
+    {
+      "word_id": "20242",
+      "order": 10,
+      "x": 287,
+      "y": 920,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_9",
+      "card_type": ""
+    },
+    {
+      "word_id": "20246",
+      "order": 11,
+      "x": 548,
+      "y": 920,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_13",
+      "card_type": ""
+    },
+    {
+      "word_id": "20247",
+      "order": 12,
+      "x": 809,
+      "y": 920,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_14",
+      "card_type": ""
+    },
+    {
+      "word_id": "20238",
+      "order": 13,
+      "x": 26,
+      "y": 1255,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_5",
+      "card_type": ""
+    },
+    {
+      "word_id": "20244",
+      "order": 14,
+      "x": 287,
+      "y": 1255,
+      "w": 245,
+      "h": 319,
+      "box_key": "box_11",
+      "card_type": ""
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.121875,
+  "margin_bottom_ratio": 0.17083333333333334
+}
