@@ -115,7 +115,11 @@ from studio.studios.word_memorize_laser import (
     laser_impact_elapsed_sec,
     laser_impact_hanzi_scale,
 )
-from studio.studios.word_memorize_compose import ComposeSceneRenderer, ComposeTiming
+from studio.studios.word_memorize_compose import (
+    ComposeSceneRenderer,
+    ComposeSentenceInfo,
+    ComposeTiming,
+)
 from utils.pinyin_masking import (
     get_masked_pinyin_marks,
     normalize_word_masking,
@@ -603,9 +607,10 @@ def load_ko_meaning_by_id(csv_path: Path) -> dict[int, str]:
     return out
 
 
-def load_word_components_by_id(csv_path: Path) -> dict[int, tuple[int, int]]:
-    """words.csv component1_id/component2_id — 조합형 결과 단어 → 부품 한자 word_id 2개."""
-    out: dict[int, tuple[int, int]] = {}
+def load_word_components_by_id(csv_path: Path) -> dict[int, tuple[int, ...]]:
+    """words.csv component1_id/component2_id(+선택: component3_id) — 조합형 결과
+    단어 → 부품 한자 word_id 2개 또는 3개(长颈鹿=长+颈+鹿 같은 3부품 조합)."""
+    out: dict[int, tuple[int, ...]] = {}
     if not csv_path.is_file():
         return out
     with open(csv_path, encoding="utf-8-sig", newline="") as f:
@@ -619,7 +624,33 @@ def load_word_components_by_id(csv_path: Path) -> dict[int, tuple[int, int]]:
                 c2 = int(float(row.get("component2_id") or ""))
             except (TypeError, ValueError):
                 continue
-            out[wid] = (c1, c2)
+            ids = [c1, c2]
+            try:
+                c3 = int(float(row.get("component3_id") or ""))
+            except (TypeError, ValueError):
+                c3 = 0
+            if c3:
+                ids.append(c3)
+            out[wid] = tuple(ids)
+    return out
+
+
+def load_word_example_sentences_by_id(csv_path: Path) -> dict[int, tuple[str, str]]:
+    """words.csv example_sentence/example_translation — 조합형 결과 단어 활용 문장(중국어)·번역(한국어)."""
+    out: dict[int, tuple[str, str]] = {}
+    if not csv_path.is_file():
+        return out
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                wid = int(float(row.get("id", 0)))
+            except (TypeError, ValueError):
+                continue
+            sentence = (row.get("example_sentence") or "").strip()
+            if not sentence:
+                continue
+            translation = (row.get("example_translation") or "").strip()
+            out[wid] = (sentence, translation)
     return out
 
 
@@ -984,11 +1015,23 @@ class WordMemorizeRenderer:
         compose_active_word_id: int | None = None,
         compose_sequence_word_ids: list[int] | None = None,
         compose_tray_word_ids: list[int] | None = None,
-        compose_component_ids_by_result: dict[int, tuple[int, int]] | None = None,
+        compose_component_ids_by_result: dict[int, tuple[int, ...]] | None = None,
         compose_timing: "ComposeTiming | None" = None,
         compose_absolute_time_sec: float = 0.0,
+        compose_sentence: "ComposeSentenceInfo | None" = None,
+        compose_topic: str = "",
     ) -> None:
         if compose_mode:
+            self.ensure_fonts()
+            self._draw_background(
+                surface,
+                layout,
+                layout.frame_width,
+                layout.frame_height,
+                use_video=use_video_background,
+                meaning_lang=meaning_lang,
+                quiz_mode=quiz_mode,
+            )
             self._compose_scene.draw(
                 surface,
                 words_by_id=words_by_id,
@@ -1002,6 +1045,8 @@ class WordMemorizeRenderer:
                 sequence_word_ids=compose_sequence_word_ids or [],
                 tray_word_ids=compose_tray_word_ids or [],
                 timing=compose_timing,
+                sentence=compose_sentence,
+                topic=compose_topic,
             )
             return
         self.ensure_fonts()

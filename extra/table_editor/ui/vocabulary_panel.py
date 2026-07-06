@@ -319,6 +319,41 @@ class VocabularyPanel(ttk.Frame):
 
         IdPickerDialog(self, matches, on_pick)
 
+    def open_word_editor_by_id(self, word_id: str) -> bool:
+        """word_id가 어느 시트에 있든 그 시트로 전환하고 '단어 편집' 창을 연다.
+
+        조합 세트 만들기 화면 등 다른 곳에서 특정 단어의 이미지 경로를 넣으러
+        바로 이동할 때 쓴다. 찾았으면 True, 없으면 False.
+        """
+        target = (word_id or "").strip()
+        if not target:
+            return False
+        target_sheet = self._current_sheet
+        if find_row_by_id(self._all_rows, target) is None:
+            target_sheet = None
+            for name in self._store.sheet_names:
+                if name == self._current_sheet:
+                    continue
+                if find_row_by_id(self._store.get_sheet_rows(name), target) is not None:
+                    target_sheet = name
+                    break
+            if target_sheet is None:
+                return False
+        if target_sheet != self._current_sheet:
+            self._flush_current_sheet()
+            self._current_sheet = target_sheet
+            self._sheet_var.set(target_sheet)
+            self._reload_sheet()
+        self._pos_var.set(POS_FILTER_ALL)
+        self._type_var.set(POS_FILTER_ALL)
+        self._apply_filter()
+        row = find_row_by_id(self._all_rows, target)
+        if row is None:
+            return False
+        self._table.select_row_by_id(target)
+        self._edit_row(row)
+        return True
+
     def _all_sheet_rows_snapshot(self) -> dict[str, list[dict[str, str]]]:
         """시트별 행(현재 편집 중인 시트는 메모리 반영)."""
         snapshot: dict[str, list[dict[str, str]]] = {}

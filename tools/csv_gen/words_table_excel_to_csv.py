@@ -1,7 +1,7 @@
 """
 words(단어 마스터) 엑셀 → words.csv 변환.
 컬럼: id, word, pinyin, masking, pos, type, meaning, en_meaning, tip, img_path, video_path, sound_path,
-component1_id, component2_id.
+component1_id, component2_id, component3_id, example_sentence, example_translation.
 
 시트를 품사·용도별로 나눈 경우 `merge_all_sheets=True`로 모든 시트를 순서대로
 한 CSV에 누적할 수 있다(배치 `python -m tools.csv_gen`는 words에 대해 기본 활성).
@@ -35,6 +35,9 @@ FIELDNAMES = [
     "sound_path",
     "component1_id",
     "component2_id",
+    "component3_id",
+    "example_sentence",
+    "example_translation",
 ]
 
 
@@ -85,6 +88,9 @@ def _rows_from_words_dataframe(df: DataFrame) -> list[dict[str, Any]]:
             "sound_path": _normalize(row.get("sound_path", "")),
             "component1_id": _normalize_id(row.get("component1_id", "")),
             "component2_id": _normalize_id(row.get("component2_id", "")),
+            "component3_id": _normalize_id(row.get("component3_id", "")),
+            "example_sentence": _normalize(row.get("example_sentence", "")),
+            "example_translation": _normalize(row.get("example_translation", "")),
         })
     return rows
 

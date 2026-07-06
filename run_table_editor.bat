@@ -19,7 +19,7 @@ echo.
 set "TE_ERR=%ERRORLEVEL%"
 if not "%TE_ERR%"=="0" (
   echo.
-  echo [ERROR] Failed to start (exit %TE_ERR%).
+  echo [ERROR] Failed to start ^(exit %TE_ERR%^).
   echo   %_PY% -m pip install -r extra\table_editor\requirements.txt
   pause
   exit /b %TE_ERR%

@@ -268,6 +268,19 @@ class MainWindow(tk.Tk):
 
         open_word_memorize_layout_editor(self)
 
+    def open_vocabulary_word_editor(self, word_id: str) -> None:
+        """조합 세트 화면 등에서 특정 단어의 '단어장 - 단어편집' 창으로 바로 이동."""
+        self._mode.set("vocabulary")
+        self._switch_mode("vocabulary")
+        self._ensure_panel_defaults("vocabulary")
+        panel = self._ensure_vocab()
+        self.lift()
+        self.focus_force()
+        if not panel.open_word_editor_by_id(word_id):
+            messagebox.showinfo(
+                "단어 편집", f"id {word_id} 를 단어장(words.xlsx)에서 찾을 수 없습니다.", parent=self
+            )
+
     def _active_panel(
         self,
     ) -> (

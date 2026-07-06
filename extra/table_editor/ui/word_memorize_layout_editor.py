@@ -124,6 +124,9 @@ from extra.table_editor.services.word_memorize_layout import (
     word_memorize_game_tile_path,
     word_memorize_game_text_tile_path,
 )
+from extra.table_editor.ui.word_memorize_compose_set_dialog import (
+    WordMemorizeComposeSetDialog,
+)
 from extra.table_editor.ui.word_memorize_vocab_import_dialog import (
     WordMemorizeVocabImportDialog,
 )
@@ -393,6 +396,12 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         ttk.Button(toolbar, text="다른 이름으로 저장…", command=self._save_as).pack(
             side=tk.LEFT, padx=4
         )
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, fill=tk.Y, padx=6, pady=2
+        )
+        ttk.Button(
+            toolbar, text="조합 세트 만들기…", command=self._open_compose_set_dialog
+        ).pack(side=tk.LEFT, padx=4)
         self.bind("<Control-o>", lambda _e: self._open())
         self.bind("<Control-s>", lambda _e: self._save())
         self.bind("<Control-Shift-S>", lambda _e: self._save_as())
@@ -588,6 +597,27 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         )
         subtitle_y_spin.bind(
             "<<Decrement>>", self._on_subtitle_y_offset_changed, add="+"
+        )
+
+        compose_topic_frame = ttk.LabelFrame(left_inner, text="조합형 주제")
+        compose_topic_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        compose_topic_in = ttk.Frame(compose_topic_frame)
+        compose_topic_in.pack(fill=tk.X, padx=6, pady=6)
+        ttk.Label(
+            compose_topic_in,
+            text='미리보기·복습 화면에 "오늘의 조합 단어" 아래 부제로 표시됩니다.',
+            foreground="#555",
+            wraplength=LEFT_PANEL_WIDTH - 28,
+        ).pack(anchor="w", pady=(0, 4))
+        self._compose_topic_var = tk.StringVar(
+            value=str(getattr(self._layout, "compose_topic", "") or "")
+        )
+        compose_topic_entry = ttk.Entry(
+            compose_topic_in, textvariable=self._compose_topic_var
+        )
+        compose_topic_entry.pack(fill=tk.X)
+        compose_topic_entry.bind(
+            "<KeyRelease>", self._on_compose_topic_changed, add="+"
         )
 
         bg_music_frame = ttk.LabelFrame(left_inner, text="쇼츠 배경음")
@@ -1408,6 +1438,9 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             on_import=self._import_word_ids_to_holding,
         )
 
+    def _open_compose_set_dialog(self) -> None:
+        WordMemorizeComposeSetDialog(self)
+
     def _import_word_ids_to_holding(self, word_ids: list[str]) -> None:
         added = 0
         for wid in word_ids:
@@ -1688,6 +1721,7 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
             self._bg_music_var.set(label)
         elif choices:
             self._bg_music_var.set(choices[0])
+        self._compose_topic_var.set(str(getattr(self._layout, "compose_topic", "") or ""))
 
     def _on_box_card_type_changed(self, _event: tk.Event | None = None) -> None:
         box = self._selected_box()
@@ -2297,6 +2331,10 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         self._layout.bg_music_path = normalize_vocab_bg_path(
             bg_path_from_combo(self._bg_music_var.get())
         )
+        self._mark_dirty()
+
+    def _on_compose_topic_changed(self, _event: tk.Event | None = None) -> None:
+        self._layout.compose_topic = self._compose_topic_var.get().strip()
         self._mark_dirty()
 
     def _toggle_tile_canvas_preview(self) -> None:

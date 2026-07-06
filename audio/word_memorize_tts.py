@@ -96,13 +96,51 @@ def batch_build_word_memorize_tts_for_layout(
     layout_path: str | Path,
     **kwargs,
 ) -> tuple[int, int, int]:
-    """배치 JSON 경로 → word_id 수집 후 TTS."""
+    """배치 JSON 경로 → word_id 수집 후 TTS.
+
+    조합형(combo_layout) 배치면 boxes에 있는 결과 단어뿐 아니라 부품(재료)
+    word_id도 함께 모으고, 활용 문장(예문) TTS까지 같이 만든다 — 결과 단어만
+    만들고 부품·문장을 빠뜨리는 일이 없도록.
+    """
+    from extra.table_editor.services.word_memorize_layout import (
+        layout_uses_compose,
+        load_layout,
+    )
     from extra.table_editor.services.word_memorize_layouts import word_ids_from_layout
 
     path = Path(layout_path)
-    word_ids = word_ids_from_layout(path)
-    return batch_build_word_memorize_tts_for_word_ids(
+    result_ids = word_ids_from_layout(path)
+    word_ids = list(result_ids)
+
+    is_combo = layout_uses_compose(load_layout(path))
+    if is_combo:
+        from core.paths import DEFAULT_WORDS_TABLE_CSV
+        from studio.studios.word_memorize_renderer import load_word_components_by_id
+
+        components_by_id = load_word_components_by_id(DEFAULT_WORDS_TABLE_CSV)
+        seen = set(word_ids)
+        for result_id in result_ids:
+            for cid in components_by_id.get(result_id, ()):
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    word_ids.append(cid)
+
+    ok, skip, fail = batch_build_word_memorize_tts_for_word_ids(
         word_ids,
         layout_label=path.stem,
         **kwargs,
     )
+
+    if is_combo:
+        from audio.word_memorize_compose_sentence import (
+            batch_build_compose_sentence_tts_for_word_ids,
+        )
+
+        s_ok, s_skip, s_fail = batch_build_compose_sentence_tts_for_word_ids(
+            result_ids, force_tts=bool(kwargs.get("force_tts", False))
+        )
+        ok += s_ok
+        skip += s_skip
+        fail += s_fail
+
+    return ok, skip, fail

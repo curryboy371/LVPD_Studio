@@ -64,7 +64,7 @@ def _ensure_mixer_ready(pygame, *, context: str = "스튜디오") -> None:
     try:
         if pygame.mixer.get_init() is None:
             pygame.mixer.init(STUDIO_AUDIO_SAMPLE_RATE, -16, 2, 4096)
-        pygame.mixer.set_num_channels(8)
+        pygame.mixer.set_num_channels(9)
     except Exception as e:
         raise RuntimeError(
             f"{context} 오디오 초기화 실패: pygame.mixer를 사용할 수 없습니다. "

@@ -34,10 +34,11 @@
   "row_highlight": "none",
   "use_base_slot": false,
   "combo_layout": true,
+  "compose_topic": "동물",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,
-  "bg_music_path": "",
+  "bg_music_path": "resource/sound/bg_short/쇼츠-밝음.mp3",
   "game_tile": "",
   "game_tiles": [],
   "game_tile_seed": 0,
@@ -48,7 +49,7 @@
   "game_pick": "",
   "boxes": [
     {
-      "word_id": "20161",
+      "word_id": "20056",
       "order": 1,
       "x": 400,
       "y": 724,
@@ -58,7 +59,7 @@
       "card_type": ""
     },
     {
-      "word_id": "20094",
+      "word_id": "20543",
       "order": 2,
       "x": 400,
       "y": 724,
@@ -68,7 +69,7 @@
       "card_type": ""
     },
     {
-      "word_id": "20122",
+      "word_id": "20545",
       "order": 3,
       "x": 400,
       "y": 724,
