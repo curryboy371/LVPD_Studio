@@ -4,8 +4,26 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
+from extra.table_editor.services.word_memorize_layout import (
+    layout_uses_compose,
+    load_layout,
+)
 from extra.table_editor.services.word_memorize_layouts import normalize_layout_filename
 from extra.table_editor.ui.window_placement import center_toplevel_on_parent
+
+_WORD_KIND_LABELS: dict[str, str] = {
+    "normal": "일반 단어",
+    "combo": "조합 단어",
+}
+_WORD_KIND_BY_LABEL = {v: k for k, v in _WORD_KIND_LABELS.items()}
+
+
+def _layout_is_combo(path: Path) -> bool:
+    try:
+        return layout_uses_compose(load_layout(path))
+    except Exception:
+        return False
+
 
 _WORD_MEMORIZE_RUN_MODES: tuple[tuple[str, str], ...] = (
     ("debug", "미리보기 (F5 debug)"),
@@ -48,28 +66,39 @@ class WordMemorizeRunDialog(tk.Toplevel):
             wraplength=400,
         ).pack(padx=16, pady=(14, 8), anchor="w")
 
+        self._layout_paths = {name: path for name, path in layouts}
+        self._names_by_kind: dict[str, list[str]] = {"normal": [], "combo": []}
+        for name, path in layouts:
+            kind = "combo" if _layout_is_combo(path) else "normal"
+            self._names_by_kind[kind].append(name)
+
+        initial = normalize_layout_filename(initial_layout)
+        initial_kind = "combo" if initial in self._names_by_kind["combo"] else "normal"
+
+        kind_frame = ttk.LabelFrame(self, text="단어 종류")
+        kind_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        self._kind_var = tk.StringVar(value=_WORD_KIND_LABELS[initial_kind])
+        for key in ("combo", "normal"):
+            ttk.Radiobutton(
+                kind_frame,
+                text=_WORD_KIND_LABELS[key],
+                variable=self._kind_var,
+                value=_WORD_KIND_LABELS[key],
+                command=self._on_kind_changed,
+            ).pack(side=tk.LEFT, padx=12, pady=6)
+
         layout_row = ttk.Frame(self)
         layout_row.pack(fill=tk.X, padx=16, pady=(0, 8))
         ttk.Label(layout_row, text="파일명:", width=8).pack(side=tk.LEFT)
         self._layout_var = tk.StringVar()
-        labels = [name for name, _ in layouts]
-        if not labels:
-            labels = [""]
-        combo = ttk.Combobox(
+        self._layout_combo = ttk.Combobox(
             layout_row,
             textvariable=self._layout_var,
-            values=labels,
-            state="readonly" if layouts else "disabled",
+            state="readonly",
             width=34,
         )
-        combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        initial = normalize_layout_filename(initial_layout)
-        if initial in labels:
-            combo.set(initial)
-        elif labels and labels[0]:
-            combo.set(labels[0])
-
-        self._layout_paths = {name: path for name, path in layouts}
+        self._layout_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._refresh_layout_combo(preferred=initial)
 
         lang_frame = ttk.LabelFrame(self, text="언어 (카드 뜻 · TTS 순서)")
         lang_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
@@ -113,6 +142,25 @@ class WordMemorizeRunDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._cancel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.after_idle(lambda: center_toplevel_on_parent(self, parent))
+
+    def _selected_kind(self) -> str:
+        return _WORD_KIND_BY_LABEL.get(self._kind_var.get(), "normal")
+
+    def _on_kind_changed(self) -> None:
+        self._refresh_layout_combo()
+
+    def _refresh_layout_combo(self, *, preferred: str = "") -> None:
+        names = self._names_by_kind[self._selected_kind()]
+        values = names if names else [""]
+        self._layout_combo.configure(
+            values=values, state="readonly" if names else "disabled"
+        )
+        if preferred in names:
+            self._layout_var.set(preferred)
+        elif names:
+            self._layout_var.set(names[0])
+        else:
+            self._layout_var.set("")
 
     def _confirm(self) -> None:
         name = (self._layout_var.get() or "").strip()

@@ -261,12 +261,25 @@ class MainWindow(tk.Tk):
             command=self._open_word_memorize_layout_editor,
         ).pack(side=tk.LEFT, padx=12, pady=4)
 
+        ttk.Button(
+            row4,
+            text="조합 단어 만들기…",
+            command=self._open_word_memorize_compose_set_dialog,
+        ).pack(side=tk.LEFT, padx=12, pady=4)
+
     def _open_word_memorize_layout_editor(self) -> None:
         from extra.table_editor.ui.word_memorize_layout_editor import (
             open_word_memorize_layout_editor,
         )
 
         open_word_memorize_layout_editor(self)
+
+    def _open_word_memorize_compose_set_dialog(self) -> None:
+        from extra.table_editor.ui.word_memorize_compose_set_dialog import (
+            WordMemorizeComposeSetDialog,
+        )
+
+        WordMemorizeComposeSetDialog(self)
 
     def open_vocabulary_word_editor(self, word_id: str) -> None:
         """조합 세트 화면 등에서 특정 단어의 '단어장 - 단어편집' 창으로 바로 이동."""

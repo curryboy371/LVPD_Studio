@@ -10,8 +10,15 @@ from extra.table_editor.services.word_lookup import lookup_word_details_for_box
 from extra.table_editor.services.word_memorize_layout import (
     WordMemorizeLayout,
     _is_zh_meaning_lang,
+    layout_uses_compose,
     load_layout,
 )
+
+_HASHTAGS_LINE = (
+    "#중국어 #중국어회화 #중국어단어 #중국어기초 #중국어독학 "
+    "#쇼츠 #shorts #여포판다 #shorts_중국어"
+)
+_DIVIDER = "━" * 32
 
 
 def format_word_pinyin(details: dict[str, str]) -> str:
@@ -56,6 +63,10 @@ def resolve_summary_topic(
         topic = (layout.title_zh or layout.title or "").strip()
     else:
         topic = (layout.title or layout.title_zh or "").strip()
+    if not topic and layout_uses_compose(layout):
+        # 조합형은 별도 제목 타일이 없고, "조합 단어 만들기" 화면에서 입력한
+        # 주제(compose_topic)를 화면 자막으로 쓰므로 이걸 그대로 재사용한다.
+        topic = str(getattr(layout, "compose_topic", "") or "").strip()
     if not topic:
         return "—"
     return " ".join(ln.strip() for ln in topic.splitlines() if ln.strip())
@@ -77,16 +88,25 @@ def build_word_memorize_summary_text(
     *,
     meaning_lang: str = "ko",
 ) -> str:
-    """배치 단어를 정리 텍스트로 변환."""
+    """배치 단어를 정리 텍스트로 변환 — 맨 위 제목 줄, 단어 요약, 해시태그 순."""
     topic = resolve_summary_topic(layout, meaning_lang=meaning_lang)
-    lines: list[str] = [f"주제 : {topic}", ""]
+    title_prefix = "[중국어 단어 조합]" if layout_uses_compose(layout) else "[중국어 단어]"
+    title_line = f"🐼 {title_prefix} {topic}"
+
+    lines: list[str] = []
     for box in layout.sorted_boxes():
         row = format_summary_word_line(lookup_word_details_for_box(box))
         if row:
             lines.append(row)
-    if len(lines) <= 2:
+    if not lines:
         lines.append("(등록된 단어가 없습니다)")
-    return "\n".join(lines).rstrip() + "\n"
+    body = "\n".join(lines).rstrip()
+
+    return (
+        f"{title_line}\n{_DIVIDER}\n\n"
+        f"{body}\n\n"
+        f"{_DIVIDER}\n{_HASHTAGS_LINE}\n"
+    )
 
 
 def build_word_memorize_summary_from_path(

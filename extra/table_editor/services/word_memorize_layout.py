@@ -1763,6 +1763,10 @@ class WordMemorizeLayout:
     combo_layout: bool = False
     # 조합형 미리보기/복습 화면 — "오늘의 조합 단어" 아래 부제("주제")로 표시
     compose_topic: str = ""
+    # 조합형 색 테마 — studio.studios.word_memorize_compose.COMPOSE_THEMES 키
+    compose_theme: str = "ivory"
+    # 조합형 미리보기/복습 화면 — 주제 배지 아래 짧은 설명 문구로 표시
+    compose_desc: str = ""
     # True: 일반 word 카드 배경·테두리 (False면 글자·이미지만)
     use_card_background: bool = True
     # use_card_background=True 일 때 카드 채우기 색 (#RRGGBB 또는 팔레트 라벨)
@@ -1839,6 +1843,8 @@ class WordMemorizeLayout:
             "use_base_slot": bool(self.use_base_slot),
             "combo_layout": bool(self.combo_layout),
             "compose_topic": (self.compose_topic or "").strip(),
+            "compose_theme": (self.compose_theme or "ivory").strip(),
+            "compose_desc": (self.compose_desc or "").strip(),
             "use_card_background": bool(self.use_card_background),
             "card_background_color": normalize_card_background_color(
                 self.card_background_color
@@ -1974,6 +1980,8 @@ class WordMemorizeLayout:
         layout.use_base_slot = bool(data.get("use_base_slot", False))
         layout.combo_layout = bool(data.get("combo_layout", False))
         layout.compose_topic = str(data.get("compose_topic", "") or "").strip()
+        layout.compose_theme = str(data.get("compose_theme", "") or "ivory").strip() or "ivory"
+        layout.compose_desc = str(data.get("compose_desc", "") or "").strip()
         layout.use_card_background = bool(data.get("use_card_background", True))
         layout.card_background_color = normalize_card_background_color(
             str(

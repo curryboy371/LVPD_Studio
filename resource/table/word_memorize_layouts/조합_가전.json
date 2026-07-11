@@ -34,6 +34,8 @@
   "row_highlight": "none",
   "use_base_slot": false,
   "combo_layout": true,
+  "compose_topic": "가전",
+  "compose_theme": "white",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,

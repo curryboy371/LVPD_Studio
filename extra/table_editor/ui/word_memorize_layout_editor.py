@@ -151,6 +151,15 @@ PREVIEW_WIDTH = 504
 PREVIEW_HEIGHT = 896
 SCALE = PREVIEW_WIDTH / float(SHORTS_WIDTH)
 
+# 라벨은 studio.studios.word_memorize_compose.COMPOSE_THEMES와 맞춰 동기화 —
+# table_editor는 pygame 의존 렌더러 모듈을 끌어들이지 않도록 여기서 직접 나열한다.
+_COMPOSE_THEME_CHOICES: list[tuple[str, str]] = [
+    ("보라_주황", "ivory"),
+    ("보라_파랑", "bright"),
+    ("화이트_녹색", "white"),
+    ("화이트_레드", "white_red"),
+]
+
 SIDEBAR_WIDTH = 300
 LEFT_PANEL_WIDTH = 300
 RIGHT_PANEL_WIDTH = 300
@@ -618,6 +627,44 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         compose_topic_entry.pack(fill=tk.X)
         compose_topic_entry.bind(
             "<KeyRelease>", self._on_compose_topic_changed, add="+"
+        )
+
+        ttk.Label(
+            compose_topic_in, text="색 테마", foreground="#555"
+        ).pack(anchor="w", pady=(8, 2))
+        self._compose_theme_label_to_key = dict(_COMPOSE_THEME_CHOICES)
+        self._compose_theme_key_to_label = {
+            key: label for label, key in _COMPOSE_THEME_CHOICES
+        }
+        self._compose_theme_var = tk.StringVar(
+            value=self._compose_theme_key_to_label.get(
+                str(getattr(self._layout, "compose_theme", "") or "ivory"),
+                next(iter(self._compose_theme_label_to_key)),
+            )
+        )
+        compose_theme_combo = ttk.Combobox(
+            compose_topic_in,
+            textvariable=self._compose_theme_var,
+            values=list(self._compose_theme_label_to_key),
+            state="readonly",
+        )
+        compose_theme_combo.pack(fill=tk.X)
+        compose_theme_combo.bind(
+            "<<ComboboxSelected>>", self._on_compose_theme_changed, add="+"
+        )
+
+        ttk.Label(
+            compose_topic_in, text="설명", foreground="#555"
+        ).pack(anchor="w", pady=(8, 2))
+        self._compose_desc_var = tk.StringVar(
+            value=str(getattr(self._layout, "compose_desc", "") or "")
+        )
+        compose_desc_entry = ttk.Entry(
+            compose_topic_in, textvariable=self._compose_desc_var
+        )
+        compose_desc_entry.pack(fill=tk.X)
+        compose_desc_entry.bind(
+            "<KeyRelease>", self._on_compose_desc_changed, add="+"
         )
 
         bg_music_frame = ttk.LabelFrame(left_inner, text="쇼츠 배경음")
@@ -1722,6 +1769,11 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
         elif choices:
             self._bg_music_var.set(choices[0])
         self._compose_topic_var.set(str(getattr(self._layout, "compose_topic", "") or ""))
+        theme_key = str(getattr(self._layout, "compose_theme", "") or "ivory")
+        self._compose_theme_var.set(
+            self._compose_theme_key_to_label.get(theme_key, _COMPOSE_THEME_CHOICES[0][0])
+        )
+        self._compose_desc_var.set(str(getattr(self._layout, "compose_desc", "") or ""))
 
     def _on_box_card_type_changed(self, _event: tk.Event | None = None) -> None:
         box = self._selected_box()
@@ -2335,6 +2387,16 @@ class WordMemorizeLayoutEditorWindow(tk.Toplevel):
 
     def _on_compose_topic_changed(self, _event: tk.Event | None = None) -> None:
         self._layout.compose_topic = self._compose_topic_var.get().strip()
+        self._mark_dirty()
+
+    def _on_compose_theme_changed(self, _event: tk.Event | None = None) -> None:
+        key = self._compose_theme_label_to_key.get(self._compose_theme_var.get())
+        if key:
+            self._layout.compose_theme = key
+            self._mark_dirty()
+
+    def _on_compose_desc_changed(self, _event: tk.Event | None = None) -> None:
+        self._layout.compose_desc = self._compose_desc_var.get().strip()
         self._mark_dirty()
 
     def _toggle_tile_canvas_preview(self) -> None:

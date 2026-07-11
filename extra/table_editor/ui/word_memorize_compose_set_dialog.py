@@ -38,6 +38,15 @@ from extra.table_editor.ui.word_memorize_word_pick_dialog import WordMemorizeWor
 
 _NEW_SET_LABEL = "+ 새 조합 세트로 만들기…"
 
+# 라벨은 studio.studios.word_memorize_compose.COMPOSE_THEMES와 맞춰 동기화 —
+# table_editor는 pygame 의존 렌더러 모듈을 끌어들이지 않도록 여기서 직접 나열한다.
+_COMPOSE_THEME_CHOICES: list[tuple[str, str]] = [
+    ("보라_주황", "ivory"),
+    ("보라_파랑", "bright"),
+    ("화이트_녹색", "white"),
+    ("화이트_레드", "white_red"),
+]
+
 
 def _find_main_window(widget: tk.Misc):
     """widget 조상 중 MainWindow(단어장 등 모드를 가진 루트 창)를 찾는다."""
@@ -338,6 +347,38 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
         self._bgm_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_bgm_changed())
         attach_bg_path_preview(bgm_row, self._bgm_combo).pack(side=tk.LEFT)
 
+        topic_row = ttk.Frame(target_box)
+        topic_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        ttk.Label(topic_row, text="주제:", width=12).pack(side=tk.LEFT)
+        self._topic_var = tk.StringVar()
+        topic_entry = ttk.Entry(topic_row, textvariable=self._topic_var)
+        topic_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        topic_entry.bind("<KeyRelease>", lambda _e: self._on_topic_changed())
+
+        theme_row = ttk.Frame(target_box)
+        theme_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        ttk.Label(theme_row, text="색 테마:", width=12).pack(side=tk.LEFT)
+        self._theme_label_to_key = dict(_COMPOSE_THEME_CHOICES)
+        self._theme_key_to_label = {key: label for label, key in _COMPOSE_THEME_CHOICES}
+        self._theme_var = tk.StringVar(value=_COMPOSE_THEME_CHOICES[0][0])
+        theme_combo = ttk.Combobox(
+            theme_row,
+            textvariable=self._theme_var,
+            values=[label for label, _ in _COMPOSE_THEME_CHOICES],
+            state="readonly",
+            width=26,
+        )
+        theme_combo.pack(side=tk.LEFT)
+        theme_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_theme_changed())
+
+        desc_row = ttk.Frame(target_box)
+        desc_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        ttk.Label(desc_row, text="설명:", width=12).pack(side=tk.LEFT)
+        self._desc_var = tk.StringVar()
+        desc_entry = ttk.Entry(desc_row, textvariable=self._desc_var)
+        desc_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        desc_entry.bind("<KeyRelease>", lambda _e: self._on_desc_changed())
+
         entries_box = ttk.LabelFrame(frame, text="포함된 단어")
         entries_box.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         tree_wrap = ttk.Frame(entries_box)
@@ -410,6 +451,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
             self._current_target_path = path
             self._reload_entries()
         self._sync_bgm_from_target()
+        self._sync_topic_theme_from_target()
 
     def _sync_bgm_from_target(self) -> None:
         if self._current_target_path is not None and self._current_target_path.is_file():
@@ -430,6 +472,56 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
             save_layout(self._current_target_path, layout)
         except (ValueError, OSError) as ex:
             messagebox.showerror("배경음 저장 실패", str(ex), parent=self)
+
+    def _sync_topic_theme_from_target(self) -> None:
+        if self._current_target_path is not None and self._current_target_path.is_file():
+            try:
+                layout = load_layout(self._current_target_path)
+                self._topic_var.set(str(getattr(layout, "compose_topic", "") or ""))
+                theme_key = str(getattr(layout, "compose_theme", "") or "ivory")
+                self._theme_var.set(
+                    self._theme_key_to_label.get(theme_key, _COMPOSE_THEME_CHOICES[0][0])
+                )
+                self._desc_var.set(str(getattr(layout, "compose_desc", "") or ""))
+                return
+            except (ValueError, OSError):
+                pass
+        self._topic_var.set("")
+        self._theme_var.set(_COMPOSE_THEME_CHOICES[0][0])
+        self._desc_var.set("")
+
+    def _on_topic_changed(self) -> None:
+        if self._current_target_path is None or not self._current_target_path.is_file():
+            return  # 새 세트는 파일이 만들어진 뒤(첫 + 추가 시) 적용된다.
+        try:
+            layout = load_layout(self._current_target_path)
+            layout.compose_topic = self._topic_var.get().strip()
+            save_layout(self._current_target_path, layout)
+        except (ValueError, OSError) as ex:
+            messagebox.showerror("주제 저장 실패", str(ex), parent=self)
+
+    def _on_theme_changed(self) -> None:
+        if self._current_target_path is None or not self._current_target_path.is_file():
+            return  # 새 세트는 파일이 만들어진 뒤(첫 + 추가 시) 적용된다.
+        key = self._theme_label_to_key.get(self._theme_var.get())
+        if not key:
+            return
+        try:
+            layout = load_layout(self._current_target_path)
+            layout.compose_theme = key
+            save_layout(self._current_target_path, layout)
+        except (ValueError, OSError) as ex:
+            messagebox.showerror("색 테마 저장 실패", str(ex), parent=self)
+
+    def _on_desc_changed(self) -> None:
+        if self._current_target_path is None or not self._current_target_path.is_file():
+            return  # 새 세트는 파일이 만들어진 뒤(첫 + 추가 시) 적용된다.
+        try:
+            layout = load_layout(self._current_target_path)
+            layout.compose_desc = self._desc_var.get().strip()
+            save_layout(self._current_target_path, layout)
+        except (ValueError, OSError) as ex:
+            messagebox.showerror("설명 저장 실패", str(ex), parent=self)
 
     def _path_for_choice(self, choice: str) -> Path | None:
         for fname, fpath in self._combo_files:
@@ -546,6 +638,11 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
                 )
                 new_layout = load_layout(target_path)
                 new_layout.bg_music_path = bg_path_from_combo(self._bgm_var.get())
+                new_layout.compose_topic = self._topic_var.get().strip()
+                theme_key = self._theme_label_to_key.get(self._theme_var.get())
+                if theme_key:
+                    new_layout.compose_theme = theme_key
+                new_layout.compose_desc = self._desc_var.get().strip()
                 save_layout(target_path, new_layout)
             except (ValueError, OSError) as ex:
                 messagebox.showerror("추가 실패", str(ex), parent=self)

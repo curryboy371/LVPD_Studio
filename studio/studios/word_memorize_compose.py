@@ -212,9 +212,6 @@ SENTENCE_KARAOKE_INACTIVE_ALPHA = 100
 SENTENCE_HANZI_ACTIVE_COLOR = (0x00, 0x00, 0x00)
 SENTENCE_PINYIN_COLOR = (0xC6, 0x28, 0x28)
 SENTENCE_TRANSLATION_COLOR = (0x5A, 0x5A, 0x5A)
-# 결과 카드(붉은 도장) 위 병음 — 카드 배경 자체가 빨강 계열이라 병음도 빨간색이면
-# 묻혀서, 여기만 금색으로 대비를 확보한다(문장 카드는 하늘색 배경이라 빨강 유지).
-RESULT_PINYIN_COLOR = (0xFF, 0xC1, 0x07)
 
 # 상단 질문 카피 — 스크롤 중에도 시선을 붙잡아야 하는 훅이라 화면 폭의 70~80%를
 # 채우도록 자동으로 폰트 크기를 키운다(_get_fitted_header_fonts).
@@ -224,17 +221,103 @@ HEADER_FONT_MAX_SIZE = 160
 HEADER_FONT_STEP = 4
 
 # ---------------------------------------------------------------------------
-# 색 — shorts_plan.md §6
+# 색 테마 — 컴포넌트 타일/결과 카드/강조색 묶음. 배치 편집기에서 layout.compose_theme로
+# 선택(UI: "조합형 주제" 옆 "조합형 색 테마"). 문장 카드·글로우 테두리·부품 테두리색은
+# 테마와 무관하게 고정(shorts_plan.md §6 기준).
 # ---------------------------------------------------------------------------
-TILE_BG_COLOR = (0xF6, 0xF0, 0xE3)
-TILE_TEXT_COLOR = (0x2A, 0x22, 0x1C)
-SEAL_COLOR = (0xE0, 0x50, 0x3A)
-HIGHLIGHT_COLOR = (0xF6, 0xD3, 0x4B)
-HEADER_COLOR = (0xF0, 0xEA, 0xDD)
-MEANING_COLOR = (0xFF, 0xFF, 0xFF)
-# 흰 글자가 배경(영상/이미지)에 상관없이 항상 보이도록 충분히 짙은 배경.
-TRAY_CHIP_BG = (0xE0, 0x50, 0x3A, 210)
-TRAY_CHIP_BORDER = (0xE0, 0x50, 0x3A)
+_LEGACY_HEADER_COLOR = (0xF0, 0xEA, 0xDD)
+
+
+@dataclass(frozen=True)
+class ComposeColorTheme:
+    label: str
+    tile_bg: tuple[int, int, int]
+    tile_text: tuple[int, int, int]
+    accent: tuple[int, int, int]
+    highlight: tuple[int, int, int]
+    card_text: tuple[int, int, int]
+    result_pinyin: tuple[int, int, int]
+    # 헤더("왜 OO = OO?"·"오늘의 조합 단어") 글자색 — 카드 없이 장면 배경 위에
+    # 바로 그려지므로, scene_bg가 밝은 테마에서는 어두운 색으로 바꿔야 한다.
+    header_text: tuple[int, int, int] = _LEGACY_HEADER_COLOR
+    # None이면 배치의 "배경 설정"(영상/이미지)을 그대로 쓴다. 색을 주면 조합형
+    # 화면 전체를 그 단색으로 덮어써 배경 선택과 무관하게 항상 그 색이 된다.
+    scene_bg: tuple[int, int, int] | None = None
+    # 미리보기/복습 목록 카드 배경(RGBA)·그 위 한자·뜻 글자색 — scene_bg가 밝은
+    # 테마는 카드도 밝게, 글자는 어둡게 바꿔야 어울린다(기본은 짙은 유리질 카드).
+    preview_card_bg: tuple[int, int, int, int] = (0x0A, 0x0E, 0x1C, 195)
+    preview_text: tuple[int, int, int] = (0xFF, 0xFF, 0xFF)
+    # 미리보기 카드 테두리 광채 — 참고 이미지("Generate" 버튼)의 파란 광채가
+    # 기본값. 카드 배경을 밝게 바꾼 테마는 자체 강조색으로 바꿔도 된다.
+    preview_glow: tuple[int, int, int] = (0x5B, 0x9C, 0xFF)
+    # 미리보기/복습 화면 하단 캐릭터 로고 — resource/image/game/character/
+    # {character_key}.png. 테마 색감과 어울리는 캐릭터를 고정으로 매칭한다.
+    character_key: str = "black"
+
+
+DEFAULT_COMPOSE_THEME = "ivory"
+COMPOSE_THEMES: dict[str, ComposeColorTheme] = {
+    "ivory": ComposeColorTheme(
+        label="보라_주황",
+        tile_bg=(0xF6, 0xF0, 0xE3),
+        tile_text=(0x2A, 0x22, 0x1C),
+        accent=(0xE0, 0x50, 0x3A),
+        highlight=(0xF6, 0xD3, 0x4B),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xC1, 0x07),
+        character_key="black",
+    ),
+    "bright": ComposeColorTheme(
+        label="보라_파랑",
+        tile_bg=(0xFF, 0xFF, 0xFF),
+        tile_text=(0x1F, 0x2A, 0x44),
+        accent=(0x3B, 0x82, 0xF6),
+        highlight=(0xFF, 0x9F, 0x1C),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xE9, 0x8A),
+        character_key="black",
+    ),
+    "white": ComposeColorTheme(
+        label="화이트_녹색",
+        # 타일 배경도 흰 장면과 살짝 구분되게 아주 옅은 회백색 — 실제 구분은
+        # 부품 테두리색(초록/주황/남색)이 담당(사용자 요청).
+        tile_bg=(0xF5, 0xF6, 0xF8),
+        tile_text=(0x1F, 0x2A, 0x44),
+        accent=(0x10, 0xA3, 0x7C),
+        highlight=(0xE0, 0x7A, 0x00),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xE9, 0x8A),
+        header_text=(0x22, 0x28, 0x3A),
+        scene_bg=(0xFF, 0xFF, 0xFF),
+        preview_card_bg=(0xEC, 0xF6, 0xF2, 235),
+        preview_text=(0x1F, 0x2A, 0x44),
+        preview_glow=(0x10, 0xA3, 0x7C),
+        character_key="green",
+    ),
+    "white_red": ComposeColorTheme(
+        label="화이트_레드",
+        # "white" 테마와 같은 흰 장면이지만 강조색을 레드 계열로 바꾼 버전 —
+        # 타일 배경도 아주 옅은 웜톤 오프화이트로 살짝 구분.
+        tile_bg=(0xFA, 0xF3, 0xF1),
+        tile_text=(0x2A, 0x1C, 0x1C),
+        accent=(0xD9, 0x2B, 0x2B),
+        highlight=(0xF6, 0xC3, 0x4B),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xE9, 0x8A),
+        header_text=(0x2A, 0x1C, 0x1C),
+        scene_bg=(0xFF, 0xFF, 0xFF),
+        preview_card_bg=(0xFB, 0xEC, 0xEC, 235),
+        preview_text=(0x2A, 0x1C, 0x1C),
+        preview_glow=(0xD9, 0x2B, 0x2B),
+        character_key="red",
+    ),
+}
+
+
+def resolve_compose_theme(key: str) -> ComposeColorTheme:
+    return COMPOSE_THEMES.get((key or "").strip(), COMPOSE_THEMES[DEFAULT_COMPOSE_THEME])
+
+
 TRAY_CHIP_H = 64
 TRAY_CHIP_GAP = 16
 TRAY_SLIDE_ANIM_SEC = 0.5
@@ -307,7 +390,7 @@ def draw_impact_ring(
     *,
     duration: float = IMPACT_RING_DURATION_SEC,
     max_radius: float = 190.0,
-    color: tuple[int, int, int] = SEAL_COLOR,
+    color: tuple[int, int, int] = COMPOSE_THEMES[DEFAULT_COMPOSE_THEME].accent,
 ) -> None:
     if elapsed_since_impact < 0.0 or elapsed_since_impact > duration:
         return
@@ -328,7 +411,7 @@ def draw_seal_glow(
     *,
     radius: int = 170,
     alpha: int = 90,
-    color: tuple[int, int, int] = SEAL_COLOR,
+    color: tuple[int, int, int] = COMPOSE_THEMES[DEFAULT_COMPOSE_THEME].accent,
 ) -> None:
     if radius <= 0 or alpha <= 0:
         return
@@ -478,22 +561,23 @@ def _fade_scale_alpha(t: float, *, in_sec: float = 0.3) -> tuple[float, int]:
     return _ease_out_quad(ratio), int(255 * ratio)
 
 
-_CARD_GLOW_COLOR = (0x5B, 0x9C, 0xFF)
-
-
-def _draw_card_glow(band: pygame.Surface, card_rect: pygame.Rect, *, radius: int = 18) -> None:
-    """카드 테두리에 은은하게 번지는 파란 광채 — 참고 이미지("Generate" 버튼)
-    스타일. 카드 바깥으로 살짝씩 부풀린 테두리를 여러 겹(바깥일수록 흐리게)
-    그려서 유리질 네온 테두리처럼 보이게 한다."""
-    for step, glow_alpha in ((12, 8), (8, 14), (5, 22), (3, 36)):
+def _draw_card_glow(
+    band: pygame.Surface,
+    card_rect: pygame.Rect,
+    *,
+    color: tuple[int, int, int],
+    radius: int = 18,
+) -> None:
+    """카드 테두리에 은은하게 번지는 광채(테마 강조색) — 참고 이미지("Generate"
+    버튼) 스타일. 카드 바깥으로 살짝씩 부풀린 테두리를 여러 겹(바깥일수록
+    흐리게) 그려서 유리질 네온 테두리처럼 보이게 한다."""
+    for step, glow_alpha in ((8, 14), (5, 22), (3, 36)):
         r = card_rect.inflate(step * 2, step * 2)
         pygame.draw.rect(
-            band, (*_CARD_GLOW_COLOR, glow_alpha), r,
+            band, (*color, glow_alpha), r,
             width=max(2, step), border_radius=radius + step,
         )
-    pygame.draw.rect(
-        band, (*_CARD_GLOW_COLOR, 190), card_rect, width=2, border_radius=radius
-    )
+    pygame.draw.rect(band, (*color, 190), card_rect, width=2, border_radius=radius)
 
 
 def _scaled_surface(surf: pygame.Surface, scale: float) -> pygame.Surface:
@@ -540,14 +624,10 @@ def _load_scaled_image(path: "Path", max_w: int, max_h: int) -> "pygame.Surface 
 _CHARACTER_LOGO_DIR = get_repo_root() / "resource" / "image" / "game" / "character"
 
 
-def _pick_random_character_logo() -> "Path | None":
-    """미리보기/복습 화면 하단에 로고처럼 띄울 캐릭터 이미지 — 영상 1개당 무작위 1개."""
-    if not _CHARACTER_LOGO_DIR.is_dir():
-        return None
-    candidates = sorted(p for p in _CHARACTER_LOGO_DIR.glob("*.png") if p.is_file())
-    if not candidates:
-        return None
-    return random.choice(candidates)
+def _character_logo_path_for_key(character_key: str) -> "Path | None":
+    """미리보기/복습 화면 하단에 띄울 캐릭터 이미지 — 색 테마(character_key)에 맞춰 고정 매칭."""
+    path = _CHARACTER_LOGO_DIR / f"{character_key}.png"
+    return path if path.is_file() else None
 
 
 class ComposeSceneRenderer:
@@ -582,33 +662,34 @@ class ComposeSceneRenderer:
         self._font_preview_meaning: "pygame.font.Font | None" = None
         self._font_preview_header: "pygame.font.Font | None" = None
         self._font_preview_topic: "pygame.font.Font | None" = None
+        self._font_preview_desc: "pygame.font.Font | None" = None
         self._image_cache: dict[tuple[int, int, int], "pygame.Surface | None"] = {}
         self._header_font_cache: dict[int, tuple[str, "pygame.font.Font | None", "pygame.font.Font | None"]] = {}
         self._active_scene_key: tuple[str, int | None] | None = None
         self._prev_scene_frame: "pygame.Surface | None" = None
         self._latest_current_frame: "pygame.Surface | None" = None
         self._scene_changed_at: float | None = None
-        # 미리보기/복습 화면 하단 캐릭터 로고 — 영상 1개당 무작위로 1개 골라 고정.
-        self._character_logo_path = _pick_random_character_logo()
-        self._character_logo_loaded = False
+        # 미리보기/복습 화면 하단 캐릭터 로고 — 테마(character_key)에 맞춰 고정.
+        self._character_logo_loaded_key: str | None = None
         self._character_logo_cache: "pygame.Surface | None" = None
+        self._theme: ComposeColorTheme = COMPOSE_THEMES[DEFAULT_COMPOSE_THEME]
 
     def ensure_fonts(self) -> None:
         if self._fonts_ready:
             return
         self._fonts_ready = True
         self._font_header = load_font(size=42, weight="bold", lang_hint="kr")
-        self._font_header_cn = load_font_noto_sans_cjk_sc(42, HEADER_COLOR, weight="bold")
-        self._font_component_hanzi = load_font_noto_sans_cjk_sc(72, TILE_TEXT_COLOR)
-        self._font_component_pinyin = load_font_noto_sans_cjk_sc(38, TILE_TEXT_COLOR)
+        self._font_header_cn = load_font_noto_sans_cjk_sc(42, self._theme.header_text, weight="bold")
+        self._font_component_hanzi = load_font_noto_sans_cjk_sc(72, self._theme.tile_text)
+        self._font_component_pinyin = load_font_noto_sans_cjk_sc(38, self._theme.tile_text)
         self._font_component_meaning = load_font(size=32, weight="regular", lang_hint="kr")
-        self._font_component_hanzi_small = load_font_noto_sans_cjk_sc(54, TILE_TEXT_COLOR)
-        self._font_component_pinyin_small = load_font_noto_sans_cjk_sc(30, TILE_TEXT_COLOR)
+        self._font_component_hanzi_small = load_font_noto_sans_cjk_sc(54, self._theme.tile_text)
+        self._font_component_pinyin_small = load_font_noto_sans_cjk_sc(30, self._theme.tile_text)
         self._font_component_meaning_small = load_font(size=24, weight="regular", lang_hint="kr")
         self._font_plus = load_font(size=52, weight="bold", lang_hint="kr")
         self._font_arrow = load_font(size=46, weight="bold", lang_hint="kr")
-        self._font_result_hanzi = load_font_noto_sans_cjk_sc(120, MEANING_COLOR)
-        self._font_result_pinyin = load_font_noto_sans_cjk_sc(46, RESULT_PINYIN_COLOR)
+        self._font_result_hanzi = load_font_noto_sans_cjk_sc(120, self._theme.card_text)
+        self._font_result_pinyin = load_font_noto_sans_cjk_sc(46, self._theme.result_pinyin)
         self._font_result_meaning = load_font(size=44, weight="bold", lang_hint="kr")
         self._font_sentence_pinyin = load_font_noto_sans_cjk_sc(
             SENTENCE_PINYIN_FONT_SIZE, SENTENCE_HANZI_ACTIVE_COLOR, weight="bold"
@@ -619,12 +700,13 @@ class ComposeSceneRenderer:
         self._font_sentence_translation = load_font(
             size=SENTENCE_TRANSLATION_FONT_SIZE, weight="bold", lang_hint="kr"
         )
-        self._font_tray = load_font_noto_sans_cjk_sc(26, MEANING_COLOR)
-        self._font_preview_word = load_font_noto_sans_cjk_sc(68, MEANING_COLOR)
-        self._font_preview_pinyin = load_font_noto_sans_cjk_sc(33, SEAL_COLOR, weight="bold")
+        self._font_tray = load_font_noto_sans_cjk_sc(26, self._theme.card_text)
+        self._font_preview_word = load_font_noto_sans_cjk_sc(68, self._theme.preview_text)
+        self._font_preview_pinyin = load_font_noto_sans_cjk_sc(33, self._theme.accent, weight="bold")
         self._font_preview_meaning = load_font(size=41, weight="regular", lang_hint="kr")
         self._font_preview_header = load_font(size=64, weight="bold", lang_hint="kr")
         self._font_preview_topic = load_font(size=50, weight="bold", lang_hint="kr")
+        self._font_preview_desc = load_font(size=32, weight="regular", lang_hint="kr")
 
     def _get_fitted_header_fonts(
         self, result_id: int, header_text: str, target_w: int
@@ -640,12 +722,12 @@ class ComposeSceneRenderer:
             return cached[1], cached[2]
         size = HEADER_FONT_MIN_SIZE
         font_kr = load_font(size=size, weight="bold", lang_hint="kr")
-        font_cn = load_font_noto_sans_cjk_sc(size, HEADER_COLOR, weight="bold")
+        font_cn = load_font_noto_sans_cjk_sc(size, self._theme.header_text, weight="bold")
         size += HEADER_FONT_STEP
         while size <= HEADER_FONT_MAX_SIZE:
             cand_kr = load_font(size=size, weight="bold", lang_hint="kr")
-            cand_cn = load_font_noto_sans_cjk_sc(size, HEADER_COLOR, weight="bold")
-            surf = render_mixed_script(cand_kr, cand_cn, header_text, HEADER_COLOR)
+            cand_cn = load_font_noto_sans_cjk_sc(size, self._theme.header_text, weight="bold")
+            surf = render_mixed_script(cand_kr, cand_cn, header_text, self._theme.header_text)
             if surf.get_width() > target_w:
                 break
             font_kr, font_cn = cand_kr, cand_cn
@@ -664,12 +746,13 @@ class ComposeSceneRenderer:
         return self._image_cache[key]
 
     def _get_character_logo(self, max_h: int) -> "pygame.Surface | None":
-        if not self._character_logo_loaded:
-            self._character_logo_loaded = True
-            if self._character_logo_path is not None:
-                self._character_logo_cache = _load_scaled_image(
-                    self._character_logo_path, 10_000, max_h
-                )
+        character_key = self._theme.character_key
+        if self._character_logo_loaded_key != character_key:
+            self._character_logo_loaded_key = character_key
+            path = _character_logo_path_for_key(character_key)
+            self._character_logo_cache = (
+                _load_scaled_image(path, 10_000, max_h) if path is not None else None
+            )
         return self._character_logo_cache
 
     # -- 공개 진입점 ---------------------------------------------------
@@ -690,11 +773,19 @@ class ComposeSceneRenderer:
         absolute_time_sec: float = 0.0,
         sentence: "ComposeSentenceInfo | None" = None,
         topic: str = "",
+        theme: str = DEFAULT_COMPOSE_THEME,
+        desc: str = "",
     ) -> None:
+        self._theme = resolve_compose_theme(theme)
         self.ensure_fonts()
         scene_key = (phase, active_word_id if phase == "word" else None)
 
         current = surface.copy()
+        if self._theme.scene_bg is not None:
+            # 배치의 "배경 설정"(영상/이미지)과 무관하게 이 테마는 항상 단색
+            # 배경을 쓴다 — 부품/결과 카드는 자체 테두리·배경으로 구분되므로
+            # 흰 배경에서도 구분이 된다.
+            current.fill(self._theme.scene_bg)
         if phase != "word" or word_substep != "compose" or active_word_id is None:
             self._draw_preview(
                 current,
@@ -704,6 +795,7 @@ class ComposeSceneRenderer:
                 phase=phase,
                 timer_sec=timer_sec,
                 topic=topic,
+                desc=desc,
             )
         else:
             self._draw_word_scene(
@@ -764,17 +856,50 @@ class ComposeSceneRenderer:
         phase: str,
         timer_sec: float,
         topic: str = "",
+        desc: str = "",
     ) -> None:
         w, h = surface.get_size()
+
+        if phase == "outro":
+            # 복습 화면에서는 단어 목록을 아예 보여주지 않는다(페이드 애니메이션도
+            # 없이 처음부터 숨김) — 루프 재생 시 인트로의 자연스러운 페이드인으로
+            # 바로 이어지도록. 타이틀·주제·로고는 인트로에서도 항상 고정으로
+            # 떠 있으므로 여기서도 그대로 유지한다.
+            outro_scale, outro_alpha = 1.0, 0
+        else:
+            outro_scale, outro_alpha = 1.0, 255
+
         title_y = int(h * 0.13)
         if self._font_preview_header is not None:
-            header = self._font_preview_header.render("오늘의 조합 단어", True, HEADER_COLOR)
+            header = self._font_preview_header.render(
+                "오늘의 조합 단어", True, self._theme.header_text
+            )
             surface.blit(header, (w // 2 - header.get_width() // 2, title_y))
             title_y += header.get_height()
         topic_text = (topic or "").strip()
         if topic_text and self._font_preview_topic is not None:
-            subtitle = self._font_preview_topic.render(f'"{topic_text}"', True, SEAL_COLOR)
-            surface.blit(subtitle, (w // 2 - subtitle.get_width() // 2, title_y + 12))
+            # 따옴표로 감싼 밋밋한 글자 대신, 트레이 칩(_build_tray_chip)과
+            # 같은 스타일의 알약형 배지로 주제를 강조한다.
+            label = self._font_preview_topic.render(topic_text, True, self._theme.card_text)
+            pad_x, pad_y = 36, 14
+            pill_w, pill_h = label.get_width() + pad_x * 2, label.get_height() + pad_y * 2
+            pill = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+            pygame.draw.rect(
+                pill, (*self._theme.accent, 210), pill.get_rect(), border_radius=pill_h // 2
+            )
+            pygame.draw.rect(
+                pill, self._theme.accent, pill.get_rect(), width=2, border_radius=pill_h // 2
+            )
+            pill.blit(label, (pad_x, pad_y))
+            surface.blit(pill, (w // 2 - pill_w // 2, title_y + 12))
+            title_y += 12 + pill_h
+
+        desc_text = (desc or "").strip()
+        if desc_text and self._font_preview_desc is not None:
+            desc_surf = self._font_preview_desc.render(
+                desc_text, True, self._theme.header_text
+            )
+            surface.blit(desc_surf, (w // 2 - desc_surf.get_width() // 2, title_y + 22))
 
         row_h = 260  # 조합 세트는 최대 3개라 줄 하나에 넓게 쓸 수 있다.
         top = int(h * 0.32)
@@ -782,9 +907,11 @@ class ComposeSceneRenderer:
             word = words_by_id.get(wid)
             if word is None:
                 continue
-            reveal_at = i * PREVIEW_STAMP_INTERVAL_SEC
-            t = timer_sec - reveal_at if phase == "intro" else 999.0
-            scale, alpha = _fade_scale_alpha(t)
+            if phase == "intro":
+                reveal_at = i * PREVIEW_STAMP_INTERVAL_SEC
+                scale, alpha = _fade_scale_alpha(timer_sec - reveal_at)
+            else:
+                scale, alpha = outro_scale, outro_alpha
             if alpha <= 0:
                 continue
             row_y = top + i * row_h
@@ -813,19 +940,19 @@ class ComposeSceneRenderer:
     ) -> None:
         w = surface.get_width()
         card_w = int(w * 0.78)
-        card_h = row_h - 20
+        card_h = row_h - 50  # 카드 사이 간격을 넉넉히 둬 서로 붙어 보이지 않게 한다.
         margin = 26  # 카드 바깥으로 번지는 광채가 잘리지 않도록 여유 공간
         band_w, band_h = card_w + margin * 2, card_h + margin * 2
         band = pygame.Surface((band_w, band_h), pygame.SRCALPHA)
         card_rect = pygame.Rect(margin, margin, card_w, card_h)
 
-        # 참고 이미지("Generate" 버튼) 스타일 — 유리질 어두운 카드 + 테두리에
-        # 은은하게 번지는 파란 광채. 배경(영상/이미지)이 밝아도 흰 글자가 항상
-        # 보이도록 카드 내부는 짙게 채운다.
-        _draw_card_glow(band, card_rect)
-        pygame.draw.rect(band, (0x0A, 0x0E, 0x1C, 195), card_rect, border_radius=18)
+        # 참고 이미지("Generate" 버튼) 스타일 — 카드 + 테두리에 테마 강조색으로
+        # 은은하게 번지는 광채. 카드 배경·글자색은 테마별로(밝은 테마는 밝은
+        # 카드+어두운 글자, 그 외는 짙은 유리질 카드+흰 글자) 항상 대비를 확보한다.
+        _draw_card_glow(band, card_rect, color=self._theme.preview_glow)
+        pygame.draw.rect(band, self._theme.preview_card_bg, card_rect, border_radius=18)
 
-        # 왼쪽: 사진 / 가운데: 병음(위, 붉은색)·한자(아래, 흰색) / 오른쪽: 한국어 뜻.
+        # 왼쪽: 사진 / 가운데: 병음(위, 강조색)·한자(아래) / 오른쪽: 한국어 뜻.
         pad = 28
         img_slot = card_h - pad * 2
         img = self._get_word_image(word, img_slot, img_slot)
@@ -834,11 +961,13 @@ class ComposeSceneRenderer:
 
         hz = None
         if self._font_preview_word is not None:
-            hz = self._font_preview_word.render(str(getattr(word, "word", "")), True, MEANING_COLOR)
+            hz = self._font_preview_word.render(
+                str(getattr(word, "word", "")), True, self._theme.preview_text
+            )
         pinyin_text = _resolve_pinyin_display(word)
         pinyin_surf = None
         if self._font_preview_pinyin is not None and pinyin_text:
-            pinyin_surf = self._font_preview_pinyin.render(pinyin_text, True, SEAL_COLOR)
+            pinyin_surf = self._font_preview_pinyin.render(pinyin_text, True, self._theme.accent)
 
         stack_gap = 6
         stack_h = (hz.get_height() if hz is not None else 0) + (
@@ -857,7 +986,7 @@ class ComposeSceneRenderer:
             band.blit(hz, (cx - hz.get_width() // 2, y))
 
         if self._font_preview_meaning is not None and meaning:
-            mn = self._font_preview_meaning.render(meaning, True, MEANING_COLOR)
+            mn = self._font_preview_meaning.render(meaning, True, self._theme.preview_text)
             mn_x = min(margin + card_w - pad - mn.get_width(), cx + stack_w // 2 + 100)
             band.blit(mn, (mn_x, margin + card_h // 2 - mn.get_height() // 2))
 
@@ -896,7 +1025,7 @@ class ComposeSceneRenderer:
         header_text = f"왜 {getattr(result_word, 'word', '')} = {card_meaning_by_id.get(result_id, '')}?"
         font_kr, font_cn = self._get_fitted_header_fonts(result_id, header_text, int(w * HEADER_TARGET_WIDTH_RATIO))
         if font_kr is not None or font_cn is not None:
-            header = render_mixed_script(font_kr, font_cn, header_text, HEADER_COLOR)
+            header = render_mixed_script(font_kr, font_cn, header_text, self._theme.header_text)
             surface.blit(
                 header,
                 (w // 2 - header.get_width() // 2 + shake[0], int(h * 0.08) + shake[1]),
@@ -967,7 +1096,7 @@ class ComposeSceneRenderer:
 
         if timer_sec >= timing.arrow_pop and self._font_arrow is not None:
             _, alpha = _fade_scale_alpha(timer_sec - timing.arrow_pop, in_sec=0.2)
-            arrow = self._font_arrow.render("▼", True, SEAL_COLOR)
+            arrow = self._font_arrow.render("▼", True, self._theme.accent)
             arrow.set_alpha(alpha)
             surface.blit(
                 arrow,
@@ -1027,7 +1156,7 @@ class ComposeSceneRenderer:
         if reveal_t < 0.0 or self._font_plus is None:
             return
         _, alpha = _fade_scale_alpha(reveal_t, in_sec=0.25)
-        plus = self._font_plus.render("＋", True, HIGHLIGHT_COLOR)
+        plus = self._font_plus.render("＋", True, self._theme.highlight)
         plus.set_alpha(alpha)
         surface.blit(
             plus,
@@ -1060,7 +1189,7 @@ class ComposeSceneRenderer:
         scale, alpha = _fade_scale_alpha(reveal_t, in_sec=0.3)
         tw, th = size
         tile = pygame.Surface((tw, th), pygame.SRCALPHA)
-        pygame.draw.rect(tile, TILE_BG_COLOR, tile.get_rect(), border_radius=16)
+        pygame.draw.rect(tile, self._theme.tile_bg, tile.get_rect(), border_radius=16)
         if accent_color is not None:
             pygame.draw.rect(
                 tile, accent_color, tile.get_rect(), width=COMPONENT_TILE_BORDER_WIDTH, border_radius=16
@@ -1073,13 +1202,13 @@ class ComposeSceneRenderer:
         lines: list[pygame.Surface] = []
         if hanzi_font is not None:
             lines.append(
-                hanzi_font.render(str(getattr(word, "word", "")), True, TILE_TEXT_COLOR)
+                hanzi_font.render(str(getattr(word, "word", "")), True, self._theme.tile_text)
             )
         pinyin = _resolve_pinyin_display(word)
         if pinyin_font is not None and pinyin:
-            lines.append(pinyin_font.render(pinyin, True, SEAL_COLOR))
+            lines.append(pinyin_font.render(pinyin, True, self._theme.accent))
         if meaning_font is not None and meaning:
-            lines.append(meaning_font.render(meaning, True, TILE_TEXT_COLOR))
+            lines.append(meaning_font.render(meaning, True, self._theme.tile_text))
 
         if stacked:
             pad = 14
@@ -1237,8 +1366,10 @@ class ComposeSceneRenderer:
         문제가 있었음 — 카드 크기는 임팩트 시점부터 끝까지 고정).
         """
         settle_alpha = int(60 * min(1.0, max(0.0, 1.0 - elapsed_since_impact / 1.5)) + 40)
-        draw_seal_glow(surface, center, radius=240, alpha=settle_alpha)
-        draw_impact_ring(surface, center, elapsed_since_impact, max_radius=230.0)
+        draw_seal_glow(surface, center, radius=240, alpha=settle_alpha, color=self._theme.accent)
+        draw_impact_ring(
+            surface, center, elapsed_since_impact, max_radius=230.0, color=self._theme.accent
+        )
         particles = _spawn_particles(int(getattr(word, "id", 0) or 0))
         draw_particle_burst(surface, center, particles, elapsed_since_impact)
 
@@ -1251,7 +1382,7 @@ class ComposeSceneRenderer:
 
         pad = RESULT_CARD_PAD
         img = self._get_word_image(word, RESULT_IMAGE_SIZE, RESULT_IMAGE_SIZE)
-        hz = self._font_result_hanzi.render(str(getattr(word, "word", "")), True, MEANING_COLOR)
+        hz = self._font_result_hanzi.render(str(getattr(word, "word", "")), True, self._theme.card_text)
 
         photo_w = RESULT_IMAGE_SIZE if img is not None else 0
         gap = RESULT_CARD_GAP if img is not None else 0
@@ -1262,13 +1393,13 @@ class ComposeSceneRenderer:
         pinyin_surf: pygame.Surface | None = None
         if pinyin_text and self._font_result_pinyin is not None:
             pinyin_surf = self._font_result_pinyin.render(
-                pinyin_text, True, RESULT_PINYIN_COLOR
+                pinyin_text, True, self._theme.result_pinyin
             )
             pinyin_surf.set_alpha(pinyin_alpha)
 
         meaning_surf: pygame.Surface | None = None
         if meaning and self._font_result_meaning is not None:
-            meaning_surf = self._font_result_meaning.render(meaning, True, MEANING_COLOR)
+            meaning_surf = self._font_result_meaning.render(meaning, True, self._theme.card_text)
             meaning_surf.set_alpha(meaning_alpha)
 
         bottom_h = 0
@@ -1282,7 +1413,7 @@ class ComposeSceneRenderer:
         card_h = pad * 2 + top_row_h + bottom_inset + bottom_h
 
         card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
-        pygame.draw.rect(card, (*SEAL_COLOR, 235), card.get_rect(), border_radius=26)
+        pygame.draw.rect(card, (*self._theme.accent, 235), card.get_rect(), border_radius=26)
 
         if bottom_h:
             band_pad = 14
@@ -1302,7 +1433,7 @@ class ComposeSceneRenderer:
             frame = pygame.Surface(
                 (img.get_width() + frame_pad * 2, img.get_height() + frame_pad * 2), pygame.SRCALPHA
             )
-            pygame.draw.rect(frame, TILE_BG_COLOR, frame.get_rect(), border_radius=18)
+            pygame.draw.rect(frame, self._theme.tile_bg, frame.get_rect(), border_radius=18)
             frame.blit(img, (frame_pad, frame_pad))
             card.blit(frame, (x, pad + (top_row_h - frame.get_height()) // 2))
             x += photo_w + gap
@@ -1325,11 +1456,14 @@ class ComposeSceneRenderer:
     def _build_tray_chip(self, word: Any) -> pygame.Surface | None:
         if word is None or self._font_tray is None:
             return None
-        text = self._font_tray.render(str(getattr(word, "word", "")), True, MEANING_COLOR)
+        text = self._font_tray.render(str(getattr(word, "word", "")), True, self._theme.card_text)
         chip = pygame.Surface((text.get_width() + 40, TRAY_CHIP_H), pygame.SRCALPHA)
-        pygame.draw.rect(chip, TRAY_CHIP_BG, chip.get_rect(), border_radius=TRAY_CHIP_H // 2)
+        # 흰 글자가 배경(영상/이미지)에 상관없이 항상 보이도록 충분히 짙은 배경.
         pygame.draw.rect(
-            chip, TRAY_CHIP_BORDER, chip.get_rect(), width=2, border_radius=TRAY_CHIP_H // 2
+            chip, (*self._theme.accent, 210), chip.get_rect(), border_radius=TRAY_CHIP_H // 2
+        )
+        pygame.draw.rect(
+            chip, self._theme.accent, chip.get_rect(), width=2, border_radius=TRAY_CHIP_H // 2
         )
         chip.blit(text, (20, TRAY_CHIP_H // 2 - text.get_height() // 2))
         return chip

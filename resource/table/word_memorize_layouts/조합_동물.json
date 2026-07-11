@@ -35,6 +35,7 @@
   "use_base_slot": false,
   "combo_layout": true,
   "compose_topic": "동물",
+  "compose_theme": "ivory",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,

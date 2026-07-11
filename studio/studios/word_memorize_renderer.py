@@ -1020,6 +1020,8 @@ class WordMemorizeRenderer:
         compose_absolute_time_sec: float = 0.0,
         compose_sentence: "ComposeSentenceInfo | None" = None,
         compose_topic: str = "",
+        compose_theme: str = "ivory",
+        compose_desc: str = "",
     ) -> None:
         if compose_mode:
             self.ensure_fonts()
@@ -1047,6 +1049,8 @@ class WordMemorizeRenderer:
                 timing=compose_timing,
                 sentence=compose_sentence,
                 topic=compose_topic,
+                theme=compose_theme,
+                desc=compose_desc,
             )
             return
         self.ensure_fonts()

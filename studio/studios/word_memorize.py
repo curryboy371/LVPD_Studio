@@ -1826,6 +1826,8 @@ class WordMemorizeStudio(IStudio):
             compose_absolute_time_sec=self._compose_elapsed_total_sec,
             compose_sentence=self._compose_sentence,
             compose_topic=self._layout.compose_topic,
+            compose_theme=self._layout.compose_theme,
+            compose_desc=self._layout.compose_desc,
         )
 
     def _compose_active_word_id(self) -> int | None:
