@@ -206,6 +206,13 @@ class WordMemorizeStudio(IStudio):
             self._card_meaning_by_id = load_ko_meaning_by_id(csv_path)
         self._compose_component_ids_by_result = load_word_components_by_id(csv_path)
         self._compose_example_sentences_by_id = load_word_example_sentences_by_id(csv_path)
+        # 조합형 — "왜 이 조합인지" 설명은 words.xlsx가 아니라 이 배치 JSON의
+        # box.compose_desc에만 속하므로 layout에서 직접 모은다.
+        self._compose_word_desc_by_id: dict[int, str] = {
+            int(b.word_id): b.compose_desc
+            for b in self._layout.boxes
+            if (b.word_id or "").strip().isdigit() and (b.compose_desc or "").strip()
+        }
         self._compose_tray: list[int] = []
         self._compose_sound_stage = 0
         self._compose_timing = ComposeTiming()
@@ -1828,6 +1835,7 @@ class WordMemorizeStudio(IStudio):
             compose_topic=self._layout.compose_topic,
             compose_theme=self._layout.compose_theme,
             compose_desc=self._layout.compose_desc,
+            compose_word_desc_by_id=self._compose_word_desc_by_id,
         )
 
     def _compose_active_word_id(self) -> int | None:

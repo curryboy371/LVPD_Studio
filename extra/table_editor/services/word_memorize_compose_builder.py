@@ -104,6 +104,7 @@ class ComposeEntry:
     component3_hanzi: str
     sentence_zh: str
     sentence_ko: str
+    word_desc: str = ""
 
 
 def _find_row_by_id(
@@ -242,10 +243,26 @@ def list_compose_entries(layout_path: Path) -> list[ComposeEntry]:
                 component3_hanzi=c3_hanzi,
                 sentence_zh=sentence_zh,
                 sentence_ko=sentence_ko,
+                word_desc=(box.compose_desc or "").strip(),
             )
         )
     entries.sort(key=lambda e: e.order)
     return entries
+
+
+def set_compose_entry_desc(result_id: int, desc: str, *, target_path: Path) -> bool:
+    """layout 내 결과 단어 box의 compose_desc(왜 이 조합인지 설명)를 갱신.
+
+    Returns 실제로 해당 word_id의 box를 찾아 갱신했으면 True.
+    """
+    layout = load_layout(target_path)
+    wid = str(int(result_id))
+    for box in layout.boxes:
+        if box.word_id == wid:
+            box.compose_desc = (desc or "").strip()
+            save_layout(target_path, layout)
+            return True
+    return False
 
 
 def remove_compose_entry_from_layout(result_id: int, *, target_path: Path) -> bool:

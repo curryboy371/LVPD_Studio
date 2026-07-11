@@ -1022,6 +1022,7 @@ class WordMemorizeRenderer:
         compose_topic: str = "",
         compose_theme: str = "ivory",
         compose_desc: str = "",
+        compose_word_desc_by_id: dict[int, str] | None = None,
     ) -> None:
         if compose_mode:
             self.ensure_fonts()
@@ -1051,6 +1052,7 @@ class WordMemorizeRenderer:
                 topic=compose_topic,
                 theme=compose_theme,
                 desc=compose_desc,
+                word_desc_by_id=compose_word_desc_by_id or {},
             )
             return
         self.ensure_fonts()

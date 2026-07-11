@@ -663,6 +663,9 @@ class ComposeSceneRenderer:
         self._font_preview_header: "pygame.font.Font | None" = None
         self._font_preview_topic: "pygame.font.Font | None" = None
         self._font_preview_desc: "pygame.font.Font | None" = None
+        self._font_preview_desc_cn: "pygame.font.Font | None" = None
+        self._font_word_desc: "pygame.font.Font | None" = None
+        self._font_word_desc_cn: "pygame.font.Font | None" = None
         self._image_cache: dict[tuple[int, int, int], "pygame.Surface | None"] = {}
         self._header_font_cache: dict[int, tuple[str, "pygame.font.Font | None", "pygame.font.Font | None"]] = {}
         self._active_scene_key: tuple[str, int | None] | None = None
@@ -707,6 +710,9 @@ class ComposeSceneRenderer:
         self._font_preview_header = load_font(size=64, weight="bold", lang_hint="kr")
         self._font_preview_topic = load_font(size=50, weight="bold", lang_hint="kr")
         self._font_preview_desc = load_font(size=32, weight="regular", lang_hint="kr")
+        self._font_preview_desc_cn = load_font_noto_sans_cjk_sc(32, self._theme.header_text)
+        self._font_word_desc = load_font(size=30, weight="regular", lang_hint="kr")
+        self._font_word_desc_cn = load_font_noto_sans_cjk_sc(30, self._theme.header_text)
 
     def _get_fitted_header_fonts(
         self, result_id: int, header_text: str, target_w: int
@@ -775,6 +781,7 @@ class ComposeSceneRenderer:
         topic: str = "",
         theme: str = DEFAULT_COMPOSE_THEME,
         desc: str = "",
+        word_desc_by_id: dict[int, str] | None = None,
     ) -> None:
         self._theme = resolve_compose_theme(theme)
         self.ensure_fonts()
@@ -808,6 +815,7 @@ class ComposeSceneRenderer:
                 tray_word_ids=tray_word_ids,
                 timing=timing or ComposeTiming(),
                 sentence=sentence or ComposeSentenceInfo(),
+                word_desc=(word_desc_by_id or {}).get(active_word_id, ""),
             )
 
         if self._active_scene_key is None:
@@ -895,9 +903,9 @@ class ComposeSceneRenderer:
             title_y += 12 + pill_h
 
         desc_text = (desc or "").strip()
-        if desc_text and self._font_preview_desc is not None:
-            desc_surf = self._font_preview_desc.render(
-                desc_text, True, self._theme.header_text
+        if desc_text and (self._font_preview_desc is not None or self._font_preview_desc_cn is not None):
+            desc_surf = render_mixed_script(
+                self._font_preview_desc, self._font_preview_desc_cn, desc_text, self._theme.header_text
             )
             surface.blit(desc_surf, (w // 2 - desc_surf.get_width() // 2, title_y + 22))
 
@@ -1007,6 +1015,7 @@ class ComposeSceneRenderer:
         tray_word_ids: list[int],
         timing: ComposeTiming,
         sentence: ComposeSentenceInfo,
+        word_desc: str = "",
     ) -> None:
         w, h = surface.get_size()
         result_word = words_by_id.get(result_id)
@@ -1124,6 +1133,21 @@ class ComposeSceneRenderer:
                 pinyin_alpha=pinyin_alpha,
                 meaning_alpha=meaning_alpha,
             )
+            desc_text = (word_desc or "").strip()
+            if desc_text and meaning_alpha and (
+                self._font_word_desc is not None or self._font_word_desc_cn is not None
+            ):
+                desc_surf = render_mixed_script(
+                    self._font_word_desc, self._font_word_desc_cn, desc_text, self._theme.header_text
+                )
+                desc_surf.set_alpha(meaning_alpha)
+                surface.blit(
+                    desc_surf,
+                    (
+                        cx - desc_surf.get_width() // 2 + shake[0],
+                        int(h * 0.685) + shake[1],
+                    ),
+                )
 
         if sentence.sentence_zh:
             self._draw_sentence_card(

@@ -26,6 +26,7 @@ from extra.table_editor.services.word_memorize_compose_builder import (
     list_combo_layout_files,
     list_compose_entries,
     remove_compose_entry_from_layout,
+    set_compose_entry_desc,
 )
 from extra.table_editor.services.word_memorize_layout import (
     DEFAULT_LAYOUTS_DIR,
@@ -101,7 +102,7 @@ class _ComposeEntryDialog(tk.Toplevel):
         mode: str,
         entry: ComposeEntry | None = None,
         exclude_result_ids: set[str] | None = None,
-        on_submit: Callable[[str, str, str, str, str, str, bool], bool],
+        on_submit: Callable[[str, str, str, str, str, str, str, bool], bool],
     ) -> None:
         super().__init__(parent)
         self.title("조합 세트 추가" if mode == "add" else "조합 세트 수정")
@@ -165,6 +166,13 @@ class _ComposeEntryDialog(tk.Toplevel):
         )
         s_in.columnconfigure(1, weight=1)
 
+        desc_box = ttk.LabelFrame(frame, text='설명(선택 — "왜 이 조합인지" 화면에 표시)')
+        desc_box.pack(fill=tk.X, pady=(0, 10))
+        d_in = ttk.Frame(desc_box)
+        d_in.pack(fill=tk.X, padx=8, pady=8)
+        self._word_desc_var = tk.StringVar(value=entry.word_desc if entry else "")
+        ttk.Entry(d_in, textvariable=self._word_desc_var).pack(fill=tk.X)
+
         self._tts_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             frame, text="지금 TTS도 생성(네트워크 필요, 몇 초~수십 초 소요)", variable=self._tts_var
@@ -184,7 +192,7 @@ class _ComposeEntryDialog(tk.Toplevel):
         ttk.Button(btn_row, text="취소", command=self.destroy).pack(side=tk.LEFT)
 
         self.bind("<Escape>", lambda _e: self.destroy())
-        schedule_center_toplevel_on_parent(self, parent, width=520, height=460)
+        schedule_center_toplevel_on_parent(self, parent, width=520, height=530)
 
     def _add_pick_row(
         self,
@@ -273,6 +281,7 @@ class _ComposeEntryDialog(tk.Toplevel):
             self._c3_id,
             (self._sentence_zh_var.get() or "").strip(),
             (self._sentence_ko_var.get() or "").strip(),
+            (self._word_desc_var.get() or "").strip(),
             self._tts_var.get(),
         )
         if ok:
@@ -383,7 +392,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
         entries_box.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         tree_wrap = ttk.Frame(entries_box)
         tree_wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        columns = ("order", "result", "c1", "c2", "c3", "sentence")
+        columns = ("order", "result", "c1", "c2", "c3", "sentence", "word_desc")
         self._tree = ttk.Treeview(
             tree_wrap, columns=columns, show="headings", height=8, selectmode="browse"
         )
@@ -394,6 +403,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
             "c2": ("부품2", 90),
             "c3": ("부품3", 90),
             "sentence": ("문장", 160),
+            "word_desc": ("설명", 160),
         }
         for col, (text, width) in headings.items():
             self._tree.heading(col, text=text)
@@ -568,6 +578,9 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
             sentence = entry.sentence_zh
             if len(sentence) > 24:
                 sentence = sentence[:24] + "…"
+            word_desc = entry.word_desc
+            if len(word_desc) > 24:
+                word_desc = word_desc[:24] + "…"
             self._tree.insert(
                 "",
                 tk.END,
@@ -579,6 +592,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
                     entry.component2_hanzi or "?",
                     entry.component3_hanzi or "-",
                     sentence,
+                    word_desc,
                 ),
             )
 
@@ -625,7 +639,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
 
         def _submit(
             result_id: str, c1_id: str, c2_id: str, c3_id: str,
-            sentence_zh: str, sentence_ko: str, do_tts: bool,
+            sentence_zh: str, sentence_ko: str, word_desc: str, do_tts: bool,
         ) -> bool:
             c3_int = int(c3_id) if c3_id else None
             try:
@@ -636,6 +650,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
                 add_result_to_layout(
                     int(result_id), target_path=target_path, template_path=template_path
                 )
+                set_compose_entry_desc(int(result_id), word_desc, target_path=target_path)
                 new_layout = load_layout(target_path)
                 new_layout.bg_music_path = bg_path_from_combo(self._bgm_var.get())
                 new_layout.compose_topic = self._topic_var.get().strip()
@@ -681,7 +696,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
 
         def _submit(
             result_id: str, c1_id: str, c2_id: str, c3_id: str,
-            sentence_zh: str, sentence_ko: str, do_tts: bool,
+            sentence_zh: str, sentence_ko: str, word_desc: str, do_tts: bool,
         ) -> bool:
             c3_int = int(c3_id) if c3_id else None
             try:
@@ -689,6 +704,7 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
                     int(result_id), int(c1_id), int(c2_id), c3_int,
                     sentence_zh=sentence_zh, sentence_ko=sentence_ko,
                 )
+                set_compose_entry_desc(int(result_id), word_desc, target_path=target_path)
             except (ValueError, OSError) as ex:
                 messagebox.showerror("수정 실패", str(ex), parent=self)
                 return False

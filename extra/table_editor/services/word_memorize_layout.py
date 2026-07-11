@@ -1632,6 +1632,9 @@ class WordMemorizeBox:
     # 구 필드 — 로드 시 card_type으로만 이전
     mining_mask: str = ""
     game_trap: str = ""
+    # 조합형 전용 — 이 결과 단어가 "왜 이 조합인지" 짧게 설명하는 문구
+    # (words.xlsx가 아니라 이 배치에만 속한 문구라 layout JSON에 둔다)
+    compose_desc: str = ""
 
     def clamp_to_frame(
         self,
@@ -1871,6 +1874,7 @@ class WordMemorizeLayout:
                     "h": b.h,
                     "box_key": b.box_key,
                     "card_type": box_card_type(b),
+                    "compose_desc": (b.compose_desc or "").strip(),
                 }
                 for b in self.sorted_boxes()
             ],
@@ -2015,6 +2019,7 @@ class WordMemorizeLayout:
                 game_trap=normalize_word_memorize_game_trap(
                     str(raw.get("game_trap", "") or "")
                 ),
+                compose_desc=str(raw.get("compose_desc", "") or "").strip(),
             )
             if not box.card_type:
                 legacy = _legacy_card_type_from_mining_mask(box.mining_mask)
