@@ -103,6 +103,7 @@ class _ComposeEntryDialog(tk.Toplevel):
         entry: ComposeEntry | None = None,
         exclude_result_ids: set[str] | None = None,
         on_submit: Callable[[str, str, str, str, str, str, str, bool], bool],
+        on_desc_changed: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.title("조합 세트 추가" if mode == "add" else "조합 세트 수정")
@@ -110,6 +111,7 @@ class _ComposeEntryDialog(tk.Toplevel):
         self.grab_set()
         self._mode = mode
         self._on_submit = on_submit
+        self._on_desc_changed = on_desc_changed
         self._exclude_result_ids = exclude_result_ids or set()
 
         self._result_id = str(entry.word_id) if entry else ""
@@ -171,7 +173,15 @@ class _ComposeEntryDialog(tk.Toplevel):
         d_in = ttk.Frame(desc_box)
         d_in.pack(fill=tk.X, padx=8, pady=8)
         self._word_desc_var = tk.StringVar(value=entry.word_desc if entry else "")
-        ttk.Entry(d_in, textvariable=self._word_desc_var).pack(fill=tk.X)
+        word_desc_entry = ttk.Entry(d_in, textvariable=self._word_desc_var)
+        word_desc_entry.pack(fill=tk.X)
+        if self._on_desc_changed is not None:
+            # 저장/취소와 무관하게 곧바로 반영 — 닫기만 눌러도 방금 적은 설명이
+            # 사라지지 않도록(다른 항목처럼 [저장]을 눌러야만 남는 방식이 아님).
+            word_desc_entry.bind(
+                "<KeyRelease>",
+                lambda _e: self._on_desc_changed(self._word_desc_var.get().strip()),
+            )
 
         self._tts_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -719,7 +729,16 @@ class WordMemorizeComposeSetDialog(tk.Toplevel):
                 messagebox.showinfo("TTS 생성 결과", tts_summary, parent=self)
             return True
 
-        _ComposeEntryDialog(self, mode="edit", entry=entry, on_submit=_submit)
+        def _desc_changed(word_desc: str) -> None:
+            try:
+                set_compose_entry_desc(int(entry.word_id), word_desc, target_path=target_path)
+            except (ValueError, OSError):
+                return  # 타이핑 중 일시적 오류는 무시 — [저장] 시 다시 한번 반영된다.
+            self._reload_entries()
+
+        _ComposeEntryDialog(
+            self, mode="edit", entry=entry, on_submit=_submit, on_desc_changed=_desc_changed
+        )
 
     def _on_delete(self) -> None:
         entry = self._selected_entry()

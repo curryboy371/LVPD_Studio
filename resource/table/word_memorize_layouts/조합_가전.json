@@ -36,6 +36,7 @@
   "combo_layout": true,
   "compose_topic": "가전",
   "compose_theme": "white",
+  "compose_desc": "메인 테스트",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,
@@ -57,7 +58,8 @@
       "w": 280,
       "h": 383,
       "box_key": "box_1",
-      "card_type": ""
+      "card_type": "",
+      "compose_desc": "ㅋ컴퓨터 테스트zz"
     },
     {
       "word_id": "20097",
@@ -67,7 +69,8 @@
       "w": 280,
       "h": 383,
       "box_key": "box_2",
-      "card_type": ""
+      "card_type": "",
+      "compose_desc": "twvwvwvwvwv"
     },
     {
       "word_id": "20201",
@@ -77,7 +80,8 @@
       "w": 280,
       "h": 383,
       "box_key": "box_3",
-      "card_type": ""
+      "card_type": "",
+      "compose_desc": "zxcvzxcvxcv"
     }
   ],
   "holding_word_ids": [],
