@@ -423,11 +423,21 @@ def _build_audio_from_events(
             resolved = _resolve_insert_sound_path(ev.path)
             if os.path.exists(resolved) and ev.duration_sec > 0:
                 role = _insert_sound_mux_role(resolved)
+                dur = ev.duration_sec
+                if role in ("bg_insert", "bg_insert_shorts"):
+                    # bg는 실제 길이를 모른 채 넉넉한 힌트값(수십 분~record_max_sec)으로
+                    # 기록되므로, 그 값 그대로 쓰면 페이드아웃 시작 시점(dur*0.55 지점)이
+                    # 실제 영상 끝보다 훨씬 뒤가 돼 apad로 잘려 페이드가 전혀 들리지
+                    # 않는다. 녹화 끝까지 남은 실제 길이로 clamp해야 페이드가 영상
+                    # 끝에 맞춰 들린다.
+                    remaining = duration_sec - ev.timeline_sec
+                    if remaining > 0:
+                        dur = min(dur, remaining)
                 segments_to_mix.append(
                     (
                         resolved,
                         ev.timeline_sec,
-                        ev.duration_sec,
+                        dur,
                         0.0,
                         role,
                         ev.linear_gain,
