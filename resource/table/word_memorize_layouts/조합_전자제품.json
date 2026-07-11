@@ -34,9 +34,9 @@
   "row_highlight": "none",
   "use_base_slot": false,
   "combo_layout": true,
-  "compose_topic": "전자제품",
-  "compose_theme": "ivory",
-  "compose_desc": "중국어에서 '电(전기)'이 들어가는 단어들",
+  "compose_topic": "전기",
+  "compose_theme": "white",
+  "compose_desc": "",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,
@@ -59,7 +59,7 @@
       "h": 383,
       "box_key": "box_1",
       "card_type": "",
-      "compose_desc": "전기로 움직이는 그림자"
+      "compose_desc": "초창기 영화는 전기로 필름을 돌리고 빛을 쏘아 그림자를 만들어냄"
     },
     {
       "word_id": "20158",

@@ -311,6 +311,24 @@ COMPOSE_THEMES: dict[str, ComposeColorTheme] = {
         preview_glow=(0xD9, 0x2B, 0x2B),
         character_key="red",
     ),
+    "white_yellow": ComposeColorTheme(
+        label="화이트_노랑",
+        # "white" 테마와 같은 흰 장면이지만 강조색을 골드/옐로우 계열로 바꾼 버전 —
+        # 타일 배경도 아주 옅은 웜톤 크림색으로 살짝 구분.
+        tile_bg=(0xFD, 0xF7, 0xE3),
+        tile_text=(0x2A, 0x22, 0x14),
+        accent=(0xD4, 0x9C, 0x00),
+        # 강조색 자체가 골드라 "+" 기호는 보색 계열(청록)로 둬 묻히지 않게 한다.
+        highlight=(0x2C, 0x6F, 0x8A),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xE9, 0x8A),
+        header_text=(0x2A, 0x22, 0x14),
+        scene_bg=(0xFF, 0xFF, 0xFF),
+        preview_card_bg=(0xFD, 0xF6, 0xDF, 235),
+        preview_text=(0x2A, 0x22, 0x14),
+        preview_glow=(0xD4, 0x9C, 0x00),
+        character_key="gold",
+    ),
 }
 
 
@@ -1390,9 +1408,15 @@ class ComposeSceneRenderer:
         문제가 있었음 — 카드 크기는 임팩트 시점부터 끝까지 고정).
         """
         settle_alpha = int(60 * min(1.0, max(0.0, 1.0 - elapsed_since_impact / 1.5)) + 40)
-        draw_seal_glow(surface, center, radius=240, alpha=settle_alpha, color=self._theme.accent)
+        draw_seal_glow(surface, center, radius=420, alpha=settle_alpha, color=self._theme.accent)
+        # 카드 자체가 가로 600px 안팎이라 반지름이 카드 절반보다 작으면 카드에
+        # 완전히 가려져 안 보인다 — 카드 밖으로 확실히 번져 보이도록 크게 키우고,
+        # 살짝 지연된 두 번째 링을 더해 물결처럼 겹쳐 퍼지는 느낌을 준다.
         draw_impact_ring(
-            surface, center, elapsed_since_impact, max_radius=230.0, color=self._theme.accent
+            surface, center, elapsed_since_impact, max_radius=420.0, color=self._theme.accent
+        )
+        draw_impact_ring(
+            surface, center, elapsed_since_impact - 0.12, max_radius=520.0, color=self._theme.accent
         )
         particles = _spawn_particles(int(getattr(word, "id", 0) or 0))
         draw_particle_burst(surface, center, particles, elapsed_since_impact)

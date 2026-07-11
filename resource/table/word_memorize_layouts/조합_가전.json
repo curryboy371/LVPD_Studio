@@ -36,7 +36,7 @@
   "combo_layout": true,
   "compose_topic": "가전",
   "compose_theme": "white",
-  "compose_desc": "메인 테스트",
+  "compose_desc": "",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,
@@ -59,7 +59,7 @@
       "h": 383,
       "box_key": "box_1",
       "card_type": "",
-      "compose_desc": "ㅋ컴퓨터 테스트zz"
+      "compose_desc": "전기로 작동하는 뇌"
     },
     {
       "word_id": "20097",
@@ -70,7 +70,7 @@
       "h": 383,
       "box_key": "box_2",
       "card_type": "",
-      "compose_desc": "twvwvwvwvwv"
+      "compose_desc": "전기로 보는 것"
     },
     {
       "word_id": "20201",
@@ -81,7 +81,7 @@
       "h": 383,
       "box_key": "box_3",
       "card_type": "",
-      "compose_desc": "zxcvzxcvxcv"
+      "compose_desc": "얼음을 담는 상자"
     }
   ],
   "holding_word_ids": [],

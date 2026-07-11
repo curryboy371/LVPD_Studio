@@ -36,7 +36,7 @@
   "combo_layout": true,
   "compose_topic": "불",
   "compose_theme": "white_red",
-  "compose_desc": "'火(불)'는 에너지가 넘치거나 뜨거운 상태를 나타낼 때 자주 쓰입니다",
+  "compose_desc": "",
   "use_card_background": false,
   "card_background_color": "#ffffff",
   "show_images": false,
@@ -59,7 +59,7 @@
       "h": 383,
       "box_key": "box_1",
       "card_type": "",
-      "compose_desc": "과거 증기기관차의 이미지"
+      "compose_desc": "과거 기차는 석탄을 태워 증기로 달림"
     },
     {
       "word_id": "20563",
