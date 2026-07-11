@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "frame_width": 1080,
+  "frame_height": 1920,
+  "background": {
+    "type": "image",
+    "value": "combo_indigo"
+  },
+  "title": "",
+  "title_x": 540,
+  "title_y": 0,
+  "title_y_offset_px": 0,
+  "title_color": "#ffffff",
+  "title_font": "kr_cn",
+  "title_font_pt": 68,
+  "title_lines": [
+    {
+      "text": "",
+      "color": "#ffffff",
+      "font": "kr_cn",
+      "font_pt": 68
+    }
+  ],
+  "title_zh": "",
+  "title_lines_zh": [],
+  "subtitle": "",
+  "subtitle_text_tile": "",
+  "subtitle_font": "kr_cn",
+  "subtitle_y_offset_px": 0,
+  "subtitle_lines": [],
+  "subtitle_zh": "",
+  "subtitle_lines_zh": [],
+  "selection_highlight": "gradient",
+  "row_highlight": "none",
+  "use_base_slot": false,
+  "combo_layout": true,
+  "compose_topic": "마음",
+  "compose_theme": "bright",
+  "compose_desc": "'心(마음)'이 들어가는 단어들은 감정이나 태도와 관련이 깊습니다",
+  "use_card_background": false,
+  "card_background_color": "#ffffff",
+  "show_images": false,
+  "bg_music_path": "resource/sound/bg_short/Velvet_Sidewalk.mp3",
+  "game_tile": "",
+  "game_tiles": [],
+  "game_tile_seed": 0,
+  "game_particle": "",
+  "game_particles": [],
+  "dissolve_effect": "",
+  "dissolve_effects": [],
+  "game_pick": "",
+  "boxes": [
+    {
+      "word_id": "20568",
+      "order": 1,
+      "x": 400,
+      "y": 724,
+      "w": 280,
+      "h": 383,
+      "box_key": "box_1",
+      "card_type": "",
+      "compose_desc": "마음의 상태"
+    },
+    {
+      "word_id": "20569",
+      "order": 2,
+      "x": 400,
+      "y": 724,
+      "w": 280,
+      "h": 383,
+      "box_key": "box_2",
+      "card_type": "",
+      "compose_desc": "마음으로 얻은 것"
+    },
+    {
+      "word_id": "20570",
+      "order": 3,
+      "x": 400,
+      "y": 724,
+      "w": 280,
+      "h": 383,
+      "box_key": "box_3",
+      "card_type": "",
+      "compose_desc": "마음이 움직임"
+    }
+  ],
+  "holding_word_ids": [],
+  "margin_top_ratio": 0.1125,
+  "margin_bottom_ratio": 0.13177083333333334
+}
