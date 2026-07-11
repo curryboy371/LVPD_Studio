@@ -329,6 +329,24 @@ COMPOSE_THEMES: dict[str, ComposeColorTheme] = {
         preview_glow=(0xD4, 0x9C, 0x00),
         character_key="gold",
     ),
+    "white_blue": ComposeColorTheme(
+        label="화이트_블루",
+        # "white" 테마와 같은 흰 장면이지만 강조색을 블루 계열로 바꾼 버전 —
+        # 타일 배경도 아주 옅은 쿨톤 하늘색으로 살짝 구분.
+        tile_bg=(0xEF, 0xF4, 0xFB),
+        tile_text=(0x1A, 0x24, 0x38),
+        accent=(0x1E, 0x6F, 0xD1),
+        # 강조색 자체가 블루라 "+" 기호는 보색 계열(주황)로 둬 묻히지 않게 한다.
+        highlight=(0xE8, 0x7A, 0x1E),
+        card_text=(0xFF, 0xFF, 0xFF),
+        result_pinyin=(0xFF, 0xE9, 0x8A),
+        header_text=(0x1A, 0x24, 0x38),
+        scene_bg=(0xFF, 0xFF, 0xFF),
+        preview_card_bg=(0xEA, 0xF2, 0xFC, 235),
+        preview_text=(0x1A, 0x24, 0x38),
+        preview_glow=(0x1E, 0x6F, 0xD1),
+        character_key="blue",
+    ),
 }
 
 

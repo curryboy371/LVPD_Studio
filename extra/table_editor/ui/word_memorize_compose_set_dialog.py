@@ -47,6 +47,7 @@ _COMPOSE_THEME_CHOICES: list[tuple[str, str]] = [
     ("화이트_녹색", "white"),
     ("화이트_레드", "white_red"),
     ("화이트_노랑", "white_yellow"),
+    ("화이트_블루", "white_blue"),
 ]
 
 
